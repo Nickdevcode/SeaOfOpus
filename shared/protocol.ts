@@ -40,8 +40,14 @@
  * duelo, e agora ele não é mais só telemetria: é ele que diz ao cliente quando a
  * predição de posto foi confirmada. Um `ack` que volta ao zero no meio da
  * partida travaria o jogador fora do timão até o fim dela.
+ *
+ * **3** — o instantâneo passou a dizer quantos passos o host ficou **sem
+ * comando** desde o anterior. O cliente decidia isso olhando a profundidade da
+ * fila, e os dois casos que ele precisava distinguir têm a mesma aparência ali:
+ * fila vazia é tanto "o comando chegou tarde" quanto "o comando chegou na hora
+ * exata". O avanço subia em cima do segundo e nunca mais descia.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Casas do código de sala. */
 export const CODE_LENGTH = 4;

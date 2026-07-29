@@ -90,6 +90,8 @@ export interface SkyState {
 export interface WorldState {
   tick: number;
   bufferDepth: number;
+  /** Passos sem comando no host desde o instantâneo anterior. Ver o codec. */
+  starved: number;
   /**
    * Último tick de entrada que o host consumiu.
    *
@@ -162,6 +164,7 @@ export function createWorldState(): WorldState {
   return {
     tick: 0,
     bufferDepth: 0,
+    starved: 0,
     ackTick: 0,
     over: false,
     winner: 0,
@@ -331,6 +334,7 @@ export function decodeSnapshot(buffer: ArrayBuffer, target: WorldState): Snapsho
   const flags = r.u8();
   target.tick = r.u32();
   target.bufferDepth = r.u8();
+  target.starved = r.u8();
   target.ackTick = r.u32();
   target.winner = (r.u8() === 1 ? 1 : 0) as 0 | 1;
   target.over = (flags & SNAPSHOT_FLAG.Over) !== 0;
@@ -364,6 +368,7 @@ export function decodeSnapshot(buffer: ArrayBuffer, target: WorldState): Snapsho
   return {
     tick: target.tick,
     bufferDepth: target.bufferDepth,
+    starved: target.starved,
     ackTick: target.ackTick,
     over: target.over,
     winner: target.winner,

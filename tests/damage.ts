@@ -165,6 +165,41 @@ export function runDamageTests(): TestReport {
   const abissal = breachInflow(AREA, 12);
   check('vazão · a veia satura com a profundidade', abissal / fundo, 1, 0.001, '×');
 
+  // --- 2b. o rombo acima da linha d'água ---------------------------------------
+  //
+  // A faixa de costado que abre rombo vai até o convés, em `y = 1,3`, e a linha
+  // d'água passa perto de `y = 0,05`. São 1,25 m de casco seco contra 85 cm de
+  // casco molhado — e o jogador mira no que enxerga, que é a parte seca. Sem
+  // embarque por onda, quatro rombos entre dois navios rendiam `inflow 0` nos
+  // dois painéis e um porão parado em 2% depois de um combate inteiro.
+  //
+  // O que se prende aqui são as três propriedades que fazem isso ser física de
+  // jogo e não um número inventado: em mar liso o buraco alto continua seco; o
+  // mar grosso molha mais que o manso; e nada disso mexe no regime submerso, que
+  // é o modelo de verdade.
+  const ACIMA = -0.5;
+  const liso = breachInflow(AREA, ACIMA, 0);
+  const manso = breachInflow(AREA, ACIMA, 0.25);
+  const grosso = breachInflow(AREA, ACIMA, 0.9);
+
+  check('onda · mar liso não molha rombo alto', liso, 0, 1e-9, 'm³/s');
+  check(
+    'onda · mar grosso molha mais que mar manso',
+    grosso > manso && manso > 0 ? 1 : 0,
+    1,
+    0.001,
+    'sim/não',
+  );
+  // O rombo submerso não pode ganhar nem perder vazão por causa da onda: ali
+  // quem manda é a coluna d'água, e somar o embarque seria contar duas vezes.
+  check(
+    'onda · não interfere no rombo submerso',
+    breachInflow(AREA, 0.6, 0.9) / breachInflow(AREA, 0.6, 0),
+    1,
+    0.001,
+    '×',
+  );
+
   // --- 3. mirar bem não pode custar caro --------------------------------------
   // O teste de ponta a ponta da propriedade do topo. Doze acertos, duas formas de
   // distribuí-los, e a área de entrada de água que sai de cada uma. Agrupado

@@ -171,6 +171,19 @@ const MAX_PATCHES = 24;
 const MAX_BREACH_SCALE = 3.2;
 
 /**
+ * Velocidade efetiva da água que embarca por um rombo acima da linha, em m/s.
+ *
+ * Não sai de Torricelli — não há coluna d'água para converter em velocidade.
+ * Sai da ordem de grandeza do que uma crista carrega ao varrer o costado, e foi
+ * calibrada pelo relógio do combate: com ela, três rombos altos num mar de meio
+ * metro de desvio enchem o porão em cerca de dez minutos, e os mesmos três com
+ * o navio já adernado (que é o que acontece quando a água entra) em bem menos.
+ * Alta demais, e um único acerto de raspão afunda uma chalupa; baixa demais, e
+ * volta-se ao que havia — furos que não significam nada.
+ */
+const SPRAY_SPEED = 1.6;
+
+/**
  * Fração do porão cheia que conta como perdido.
  *
  * Não é 1: com o porão em 92% a água já está passando por cima do vau e o navio
@@ -217,14 +230,49 @@ const SWAMP_MASS = 45000;
  * rombo do dobro do tamanho bebe o dobro, inclusive depois de a veia saturar — é
  * isso que faz dois acertos no mesmo palmo de costado valerem dois acertos.
  *
+ * ## E o rombo que fica **acima** da linha d'água
+ *
+ * Ele também bebe, e o motivo de isso ter virado regra é geométrico. Um acerto
+ * abre rombo em qualquer ponto abaixo do convés, que fica em `y = 1,3`; a linha
+ * d'água em repouso passa perto de `y = 0,05`. São **1,25 m de costado seco**
+ * contra 85 cm de costado molhado — e o jogador mira no que enxerga, que é
+ * justamente a parte seca. O resultado media-se no painel do F3: quatro rombos
+ * somados entre os dois navios e `inflow 0 L/s` nos dois, com o porão parado em
+ * 2% depois de um combate inteiro. Acertar deixava de ter consequência, que é o
+ * contrário do que o modelo de avaria existe para fazer.
+ *
+ * A saída não é fingir que o buraco alto está submerso: é reconhecer que **o mar
+ * sobe até ele**. Um costado furado a meio metro da água embarca a cada
+ * cavado, e quanto mais grosso o mar, mais vezes. A conta usa o desvio-padrão da
+ * elevação do próprio campo de ondas como escala — o mesmo número que o HUD
+ * mostra como `sigma` —, então a coisa fica ligada ao tempo de graça: em
+ * calmaria um rombo alto quase não bebe, e numa tempestade ele bebe quase como
+ * se estivesse submerso. Vira mais uma razão para fugir do mar grosso com o
+ * casco furado, que é exatamente a decisão que este jogo quer que exista.
+ *
  * @param area área efetiva de entrada, em m².
- * @param depth coluna d'água sobre o rombo, em metros. Zero ou menos não bebe.
+ * @param depth coluna d'água sobre o rombo, em metros. Negativo é altura acima.
+ * @param waveSigma desvio-padrão da elevação do mar, em metros. Zero desliga o
+ *   embarque por onda e devolve o modelo submerso puro — que é o que os testes
+ *   de vazão querem medir.
  */
-export function breachInflow(area: number, depth: number): number {
-  if (depth <= 0) return 0;
-  // Torricelli, até onde o caminho pelo cavername deixa. Ver `MAX_JET_SPEED`.
-  const speed = Math.min(Math.sqrt(2 * GRAVITY * depth), MAX_JET_SPEED);
-  return DISCHARGE_COEFFICIENT * area * speed;
+export function breachInflow(area: number, depth: number, waveSigma = 0): number {
+  if (depth > 0) {
+    // Torricelli, até onde o caminho pelo cavername deixa. Ver `MAX_JET_SPEED`.
+    const speed = Math.min(Math.sqrt(2 * GRAVITY * depth), MAX_JET_SPEED);
+    return DISCHARGE_COEFFICIENT * area * speed;
+  }
+
+  if (waveSigma <= 1e-3) return 0;
+
+  // Fração do tempo em que a crista alcança o rombo. É a cauda de uma normal de
+  // desvio `waveSigma`, aproximada pela própria gaussiana: a meio sigma acima da
+  // linha ela dá 88%, a um sigma 61%, a dois sigma 14%, e some. A aproximação
+  // exagera um pouco no meio da faixa e erra para o lado generoso, que é o lado
+  // certo quando a alternativa é o combate não ter consequência.
+  const above = -depth / waveSigma;
+  const wetness = Math.exp(-0.5 * above * above);
+  return DISCHARGE_COEFFICIENT * area * SPRAY_SPEED * wetness;
 }
 
 export interface Breach {
@@ -520,14 +568,19 @@ export class ShipDamage {
     // continuaria pesando o valor do passo anterior para sempre.
     body.floodedMass = 0;
 
+    // O quanto o mar sobe e desce agora. É a escala do embarque por onda nos
+    // rombos que estão acima da linha d'água — ver `breachInflow`.
+    const sigma = waves.getElevationSigma();
+
     let inflow = 0;
     for (const breach of this.breaches) {
       body.localToWorld(breach.local, _worldPoint);
       const depth = waves.sampleHeight(_worldPoint.x, _worldPoint.z) - _worldPoint.y;
 
-      // Rombo fora d'água não bebe nada — é por isso que adernar para o bordo são
-      // é manobra, e não estética. `breachInflow` cobre esse caso.
-      breach.inflow = breachInflow(breach.area, depth);
+      // Rombo submerso bebe por Torricelli; rombo acima da linha bebe o que a
+      // crista lhe joga dentro. Adernar para o bordo são continua sendo manobra,
+      // e não estética: ela tira o buraco da água nos dois regimes.
+      breach.inflow = breachInflow(breach.area, depth, sigma);
       inflow += breach.inflow;
     }
 

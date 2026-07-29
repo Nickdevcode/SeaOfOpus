@@ -1230,7 +1230,37 @@ não podia revelar, porque três deles **foram introduzidos ou expostos por ela*
 | Entrar no timão e voltar sozinho | Predição de posto sem reconciliação. Ver a tabela acima |
 | **Interagir simplesmente não funcionar** | O olhar viajava só como **delta**. Um pacote perdido leva embora aquele pedaço de giro, e o ângulo dos dois lados nunca mais se encontra. O que quebra não é a cabeça do adversário — é o **foco de interação** dele: o jogador aponta para o canhão e aperta o botão, e do lado que decide o marujo está olhando três metros ao lado, sem foco nenhum. Medido em duelo: yaw 1,571 aqui e −0,420 lá, com a posição batendo na segunda casa |
 
-O último é o mais instrutivo dos nove. Ele não é um erro de cálculo nem de
+### E a terceira, que não era de rede
+
+A rodada seguinte trouxe três coisas, e só uma delas era netcode:
+
+- 🕳️ **O casco furava e não entrava água.** Um acerto abre rombo em qualquer
+  ponto abaixo do convés (`y = 1,3`), e a linha d'água passa perto de `y = 0,05`:
+  são **1,25 m de costado seco** contra 85 cm de molhado — e o jogador mira no
+  que enxerga, que é justamente a parte seca. Medido nos dois painéis ao mesmo
+  tempo: quatro rombos somados e `inflow 0 L/s` nos dois, com o porão parado em
+  2% depois de um combate inteiro. Como afundar exige encher 92% de 84,7 m³, a
+  partida não terminava nunca. Hoje o rombo acima da linha **embarca o que a
+  crista lhe joga dentro**, numa fração que sai do desvio-padrão do próprio mar —
+  em calmaria ele quase não bebe, em temporal bebe quase como se estivesse
+  submerso. Fugir do mar grosso com o casco furado virou decisão.
+- 🎮 **O convidado não conseguia comandar o navio**, com o painel do host
+  mostrando `queue 21 frames` e `starves 1340` **ao mesmo tempo** — fila cheia e
+  fome, que parece contradição e não é. Um salto no relógio do cliente (a janela
+  de quem simula congelou e voltou) abre um **buraco na numeração**: os ticks
+  pulados nunca foram enviados e nunca serão, o host encontra buraco em todos
+  eles e passa a repetir o último comando conhecido, ignorando tudo que o jogador
+  faz — enquanto a fila engorda com quadros de um futuro distante. Agora, com a
+  fila visivelmente gorda, o host aceita o quadro mais antigo disponível em vez
+  de esperar um que não vem.
+- 🔎 **A partida rápida não pareava.** A vaga na fila valia **sessenta
+  segundos**. Dois amigos combinando por voz não clicam em partida rápida dentro
+  de um minuto um do outro: o primeiro abria a sala `X`, a vaga vencia, e o
+  segundo **abria a sala `Y`** — os dois esperando, em salas diferentes, para
+  sempre. O prazo foi para dez minutos e deixou de ser a defesa principal: hoje a
+  sala devolve a vaga à fila no instante em que esvazia.
+
+O do olhar é o mais instrutivo dos onze. Ele não é um erro de cálculo nem de
 formato: é a diferença entre transmitir **o que mudou** e transmitir **o que é**,
 e ela só cobra quando um pacote se perde. Hoje o olhar vai absoluto ao lado do
 delta — quatro bytes a mais por quadro de entrada, e o ângulo passa a ser o mesmo

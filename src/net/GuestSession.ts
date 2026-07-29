@@ -33,6 +33,7 @@ import { copyInputFrame, createInputFrame, type InputFrame } from '../core/Input
 import type { Match } from '../game/Match';
 import type { Ship } from '../ship/Ship';
 import { BALL_MASS, BALL_RADIUS, MUZZLE_SPEED } from '../ship/Cannon';
+import { breachInflow } from '../ship/ShipDamage';
 import { INPUT_BATCH } from '../../shared/protocol';
 import { encodeInput } from './snapshotCodec';
 import { advanceHostEstimate, correctHostEstimate, interpolationFactor } from './renderClock';
@@ -220,6 +221,8 @@ export class GuestSession {
    * cortar, ainda que o instantâneo em que se olhou mostrasse quatro.
    */
   private minDepthSinceAdjust = Number.POSITIVE_INFINITY;
+  /** Passos que o host passou sem comando desde o último ajuste do avanço. */
+  private starvedSinceAdjust = 0;
 
   /** Passo em que o posto mudou por predição local, à espera do recibo do host. */
   private stationPredictedAt = -1;
@@ -255,6 +258,7 @@ export class GuestSession {
     this.hostEstimate = 0;
     this.clockStarted = false;
     this.minDepthSinceAdjust = Number.POSITIVE_INFINITY;
+    this.starvedSinceAdjust = 0;
     this.stationPredictedAt = -1;
     this.lead = 4;
     this.visualOffset.set(0, 0, 0);
@@ -288,6 +292,7 @@ export class GuestSession {
     this.hostTick = this.to.tick;
     this.depth = this.to.bufferDepth;
     if (this.depth < this.minDepthSinceAdjust) this.minDepthSinceAdjust = this.depth;
+    if (this.to.starved > 0) this.starvedSinceAdjust += this.to.starved;
     this.stalled = false;
 
     // Primeiro instantâneo: o avanço nasce medido, e os dois relógios já nascem
@@ -554,6 +559,9 @@ export class GuestSession {
     ship.damage.floodVolume = to.floodFraction * ship.damage.holdVolume;
     ship.damage.sinkTime = to.sinkTime;
     if (to.breaches) this.applyBreaches(ship, to.breaches);
+    // Mesmo quando a lista não mudou, o esguicho muda: a onda andou e o casco
+    // adernou. Ver `refreshBreachInflow`.
+    else if (ship.damage.breaches.length > 0) this.refreshBreachInflow(ship);
   }
 
   private applyBreaches(ship: Ship, incoming: WorldState['ships'][0]['breaches']): void {
@@ -567,8 +575,32 @@ export class GuestSession {
         normal: source.normal.clone(),
         area: source.area,
         repair: source.repair,
+        // A vazão **não** vem no fio, e não precisa vir: ela é uma função da
+        // pose do casco e do mar, e o guest tem os dois. Calcular aqui custa uma
+        // raiz por rombo e é o que faz o esguicho existir do lado de cá — antes
+        // este campo entrava zerado e o porão do guest ficava seco de água
+        // visível enquanto enchia de verdade, o que fazia o rombo parecer
+        // decorativo justamente para quem precisava correr para tapá-lo.
         inflow: 0,
       });
+    }
+    this.refreshBreachInflow(ship);
+  }
+
+  /**
+   * Recalcula o esguicho de cada rombo com a pose e o mar deste instante.
+   *
+   * Roda a cada passo, e não só quando a lista muda: a vazão depende de onde a
+   * onda está agora e de quanto o casco está adernado, e os dois mudam sessenta
+   * vezes por segundo enquanto a lista de rombos passa minutos igual.
+   */
+  private refreshBreachInflow(ship: Ship): void {
+    const waves = this.match.environment.waveField;
+    const sigma = waves.getElevationSigma();
+    for (const breach of ship.damage.breaches) {
+      ship.body.localToWorld(breach.local, _position);
+      const depth = waves.sampleHeight(_position.x, _position.z) - _position.y;
+      breach.inflow = breachInflow(breach.area, depth, sigma);
     }
   }
 
@@ -802,11 +834,18 @@ export class GuestSession {
     this.leadTimer = 0;
 
     const floor = this.minDepthSinceAdjust;
+    const starved = this.starvedSinceAdjust;
     this.minDepthSinceAdjust = Number.POSITIVE_INFINITY;
+    this.starvedSinceAdjust = 0;
     // Nenhum instantâneo na janela: não há o que medir, e chutar seria pior.
     if (!Number.isFinite(floor)) return;
 
-    if (floor === 0) this.lead = Math.min(this.lead + 2, LEAD_MAX);
+    // Subir é resposta a **fome de verdade**, relatada pelo host, e não a uma
+    // fila vazia. Os dois pareciam a mesma coisa e não são: a fila fica em zero
+    // também quando o comando chega exatamente na hora, que é o alvo. Guiar por
+    // ela fazia o avanço subir justamente quando ele estava certo, e nunca mais
+    // descer.
+    if (starved > 0) this.lead = Math.min(this.lead + 2, LEAD_MAX);
     else if (floor > DEPTH_TARGET) this.lead = Math.max(this.lead - 1, LEAD_MIN);
   }
 }

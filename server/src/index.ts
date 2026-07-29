@@ -68,8 +68,12 @@ export default {
       // Uma subrequisição interna ao objeto único da fila. Ver `Matchmaker`.
       const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'));
       const response = await matchmaker.fetch('https://matchmaker/claim');
-      const { code } = (await response.json()) as { code: string };
-      return toRoom(request, env, code);
+      const { code, waited } = (await response.json()) as { code: string; waited: boolean };
+      // Quem **abriu** a vaga precisa que a sala saiba disso: é ela que vai
+      // avisar a fila quando esvaziar. Ver `DuelRoom.releaseQueueSlot`.
+      const forwarded = new URL(request.url);
+      if (!waited) forwarded.searchParams.set('queued', '1');
+      return toRoom(new Request(forwarded, request), env, code);
     }
 
     const match = /^\/room\/([A-Za-z0-9]+)$/.exec(url.pathname);

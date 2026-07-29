@@ -90,6 +90,9 @@ export class HostSession {
     this.client.sendFrame(
       encodeSnapshot(this.match, {
         bufferDepth: this.buffer.depth,
+        // Zerado ao ser lido: o que vai no fio é sempre "desde o último
+        // instantâneo", que é a janela que o cliente sabe interpretar.
+        starved: this.buffer.takeStarvedSinceReport(),
         ackTick: this.buffer.lastConsumedTick,
         includeBreaches,
         over,

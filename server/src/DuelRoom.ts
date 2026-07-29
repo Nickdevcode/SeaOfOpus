@@ -58,6 +58,14 @@ interface RoomData {
   code: string;
   phase: 'waiting' | 'playing' | 'over';
   seed: number;
+  /**
+   * `true` quando esta sala foi aberta por alguém entrando na **fila**.
+   *
+   * Só essas salas têm uma vaga reservada no `Matchmaker`, e só elas precisam
+   * devolvê-la quando esvaziam. Uma sala aberta por código nunca esteve na fila
+   * e não tem o que liberar.
+   */
+  queued?: boolean;
 }
 
 /**
@@ -101,7 +109,14 @@ export class DuelRoom implements DurableObject {
    */
   private readonly rates = new WeakMap<WebSocket, { since: number; count: number }>();
 
-  constructor(private readonly state: DurableObjectState) {}
+  /**
+   * O `env` entra aqui porque a sala precisa **falar com a fila** quando
+   * esvazia. Ver `releaseQueueSlot`.
+   */
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: Env,
+  ) {}
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -112,7 +127,7 @@ export class DuelRoom implements DurableObject {
     const code = url.searchParams.get('code');
     if (!code) return new Response('Missing room code.', { status: 400 });
 
-    const room = await this.room(code);
+    const room = await this.room(code, url.searchParams.get('queued') === '1');
 
     // Duas pessoas por sala, e ponto. Um terceiro socket não vira espectador
     // por acidente: ele receberia os quadros dos dois e ninguém saberia por quê.
@@ -197,6 +212,7 @@ export class DuelRoom implements DurableObject {
       await this.state.storage.setAlarm(Date.now() + ABANDONED_MS);
       return;
     }
+    await this.releaseQueueSlot(await this.room());
     for (const ws of sockets) this.close(ws, 1000, 'Room expired.');
     await this.state.storage.deleteAll();
   }
@@ -349,13 +365,18 @@ export class DuelRoom implements DurableObject {
     // Ainda esperando: quem sobrou volta a ser o único, e o papel dele volta a
     // ser indefinido — senão a próxima pessoa a entrar seria pareada contra um
     // papel decidido numa comparação que já não vale.
+    let remaining = 0;
     for (const socket of this.state.getWebSockets()) {
       if (socket === ws) continue;
+      remaining++;
       const peer = this.peerData(socket);
       peer.role = null;
       peer.ready = false;
       this.setPeerData(socket, peer);
     }
+
+    // Saiu o último: a vaga desta sala não serve mais a ninguém.
+    if (remaining === 0) await this.releaseQueueSlot(room);
   }
 
   // -- encanamento ---------------------------------------------------------------
@@ -419,7 +440,7 @@ export class DuelRoom implements DurableObject {
    * que faz o mar, o vento e o clima serem os mesmos dos dois lados, e um número
    * que sai de um dos jogadores é um número que aquele jogador escolhe.
    */
-  private async room(code?: string): Promise<RoomData> {
+  private async room(code?: string, queued = false): Promise<RoomData> {
     const stored = await this.state.storage.get<RoomData>('room');
     if (stored) return stored;
 
@@ -427,9 +448,30 @@ export class DuelRoom implements DurableObject {
       code: code ?? '????',
       phase: 'waiting',
       seed: (crypto.getRandomValues(new Uint32Array(1))[0] ?? 1337) >>> 0,
+      queued,
     };
     await this.state.storage.put('room', created);
     return created;
+  }
+
+  /**
+   * Devolve à fila a vaga desta sala, quando ela fica sem ninguém.
+   *
+   * Sem isto, quem entra na fila e desiste deixa para trás uma vaga apontando
+   * para uma sala vazia — e o próximo a entrar na fila é mandado para lá, senta
+   * sozinho e espera um adversário que já foi embora. O prazo de validade da
+   * vaga cobriria isso eventualmente; "eventualmente" são dez minutos de alguém
+   * olhando para uma tela de procura que não vai encontrar nada.
+   */
+  private async releaseQueueSlot(room: RoomData): Promise<void> {
+    if (!room.queued) return;
+    const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'));
+    try {
+      await matchmaker.fetch(`https://matchmaker/release?code=${encodeURIComponent(room.code)}`);
+    } catch {
+      // A fila que não recebeu o aviso cai no prazo de validade. Uma vaga a mais
+      // por alguns minutos é muito melhor que uma sala derrubada por causa dela.
+    }
   }
 
   /** Janela deslizante de um segundo. Ver `MAX_MESSAGES_PER_SECOND`. */

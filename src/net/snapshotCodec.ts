@@ -244,6 +244,16 @@ export interface SnapshotHeader {
   tick: number;
   /** Quadros de entrada que o host tem em fila. O guest ajusta o avanço por isto. */
   bufferDepth: number;
+  /**
+   * Passos sem comando desde o instantâneo anterior.
+   *
+   * É o sinal que manda o avanço subir, e ele existe porque a profundidade da
+   * fila **não** distingue os dois casos que importam: ela fica em zero tanto
+   * quando o comando chega tarde demais quanto quando ele chega na hora exata.
+   * Guiar o avanço só pela fila fazia ele subir em cima do segundo caso e nunca
+   * mais descer — 22 passos de atraso numa conexão que pedia 12.
+   */
+  starved: number;
   /** Último tick de entrada que o host consumiu — mede a ida e volta de graça. */
   ackTick: number;
   over: boolean;
@@ -252,6 +262,7 @@ export interface SnapshotHeader {
 
 export interface EncodeOptions {
   bufferDepth: number;
+  starved: number;
   ackTick: number;
   /** `true` quando a lista de rombos mudou desde o último instantâneo. */
   includeBreaches: boolean;
@@ -330,6 +341,7 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   w.u8(flags);
   w.u32(match.tick);
   w.u8(Math.min(options.bufferDepth, 255));
+  w.u8(Math.min(options.starved, 255));
   // Quatro bytes, e não dois: ver a nota da versão 2 em `PROTOCOL_VERSION`.
   w.u32(options.ackTick >>> 0);
   w.u8(options.winner);
@@ -484,6 +496,7 @@ export function peekSnapshotHeader(buffer: ArrayBuffer): SnapshotHeader | null {
   return {
     tick: r.u32(),
     bufferDepth: r.u8(),
+    starved: r.u8(),
     ackTick: r.u32(),
     over: (flags & SNAPSHOT_FLAG.Over) !== 0,
     winner: (r.u8() === 1 ? 1 : 0) as 0 | 1,
