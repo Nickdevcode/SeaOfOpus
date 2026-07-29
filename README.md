@@ -538,8 +538,9 @@ esvaziar o paiol de 160 fazendo isso, que é o ponto da afinação daquele núme
 
 O jogador tem corpo, e **enxerga o próprio corpo**: olhar para baixo mostra os
 ombros, o casaco e os pés se revezando no convés; a escada mostra as mãos caindo
-nas barras. Ele também é o que o outro jogador vai ver quando houver multiplayer,
-e é aí que o defeito clássico aparece, o pé patinando no convés.
+nas barras. E é o mesmo corpo que o adversário veste do outro lado do fio — ver
+[O adversário tem corpo](#-o-adversário-tem-corpo), onde o defeito clássico
+aparece: o pé patinando no convés.
 
 Oito clipes, todos gerados por script no Blender e medidos, não afinados no olho:
 
@@ -863,6 +864,59 @@ O que ele tem de próprio é o resto:
 > têm lado. O sintoma foi um aviso no console e um reparo sem madeira, com todo o
 > resto funcionando.
 
+### 👥 O adversário tem corpo
+
+Até agora o outro jogador era um casco. As duas chalupas trocavam tiro, o rombo
+aparecia no costado dele, a tábua nascia pregada sozinha — e o convés do outro
+lado estava sempre vazio. Isso custava mais do que parece, porque **metade da
+leitura de um duelo é ver o que o outro está fazendo**: quem desceu ao porão
+parou de atirar, quem assumiu o timão vai virar, e quem está com a madeira na mão
+está tapando um rombo — é agora que se atira nele.
+
+Agora ele está lá, com os mesmos oito clipes, o mesmo esqueleto e as mesmas
+regras. É a **mesma classe**, instanciada duas vezes; o que muda é só de onde vem
+o controlador que a alimenta:
+
+| Papel | Como o corpo do adversário se move |
+|---|---|
+| **Host** | É simulado aqui, com a entrada que chega pela rede — `Crewman.fixedUpdate` é o mesmo código dos dois lados, então não houve nada a escrever |
+| **Convidado** | A pose chega pronta no instantâneo, e `PlayerController.applyRemoteStep` a converte nos relógios de animação |
+| **Contra a máquina** | Escondido. O `ShipAI` comanda o casco sem mover marujo nenhum, e um pirata plantado no convés sem nunca dar um passo é pior que nenhum pirata |
+
+**O caso difícil é o do convidado**, e o que falta ali não é a posição — é a
+**velocidade**. Um personagem só anda direito se a fase da passada avançar pela
+distância percorrida (o teorema do começo desta seção), e o instantâneo não
+carrega velocidade nenhuma: ele carrega onde o marujo *está*. Então ela é
+**derivada** da diferença entre dois passos — e derivar é melhor que transmitir,
+porque a posição já chega interpolada entre dois instantâneos: a diferença é
+exatamente o quanto o corpo andou **na tela**. O pé fica parado na madeira mesmo
+quando a rede engasga.
+
+Três coisas que essa dedução erraria sozinha, e as três sem nenhum erro no
+console:
+
+| Caso | O que aconteceria | O que se faz |
+|---|---|---|
+| Ele assume o timão | `takeHelm` teleporta os pés dois metros num passo — 120 m/s de velocidade deduzida, o pirata em disparada e um pouso disparado quando o "voo" terminasse | Teleporte zera a velocidade e **assenta** o relógio do pulo em vez de alimentá-lo |
+| A pose chega a 15 Hz | O corpo andando aos trancos em cima de um convés que anda a 144 | Interpolado com o **mesmo** relógio do casco: corpo e piso desenhados no mesmo instante, ou o marujo desliza sobre o próprio chão |
+| Ele prega uma tábua | Reparo não é predição de ninguém — o outro lado não tem como deduzir que a mão está ocupada | Um bit no instantâneo (protocolo **6**), e é ele que põe a madeira nas mãos dele |
+
+E um detalhe barato que paga caro: **a cabeça segue o olhar dele**. O `pitch`
+viaja no fio desde a segunda versão do protocolo — é ele que decide o foco de
+interação do outro lado — e ninguém o desenhava. Agora o pescoço e o crânio o
+dividem, com a rotação conjugada para o espaço do osso: um `rotateX` cru
+inclinaria a cabeça em torno de um eixo torto, porque o rig nasceu Z-up e a
+conversão do glTF já girou os eixos de repouso.
+
+> [!note] Um download, dois corpos
+> O GLB tem 2,4 MB e cinco texturas dentro. Carregá-lo duas vezes seria pagar
+> tudo duas vezes — e clonar com `Object3D.clone()` daria dois piratas lendo o
+> **mesmo** esqueleto, um deles vestindo a pose do outro. O arquivo é baixado uma
+> vez e clonado com `SkeletonUtils`: malha e textura compartilhadas, esqueleto e
+> material privados. O material precisa ser privado porque é nele que mora o
+> recorte de cabeça da primeira pessoa; compartilhado, você decapitaria o
+> adversário toda vez que olhasse pelos próprios olhos.
+
 ## 🌊 O que é simulado de verdade
 
 | Sistema | O que tem dentro |
@@ -939,7 +993,7 @@ src/
 ├── ship/       casco, flutuação, leme, vela, âncora, canhão, avaria
 ├── combat/     balística, projéteis, detecção de acerto, contato, efeitos
 ├── ai/         dificuldade, timoneiro, artilheiro, tripulação, capitão
-├── player/     controlador a bordo, câmera, interação, corpo e sua torção
+├── player/     controlador a bordo, câmera, interação, corpo (o seu e o do rival)
 ├── game/       máquina de estados de partida
 ├── ui/         menu, HUD, prompts contextuais
 ├── audio/      síntese de todo o som
@@ -1059,9 +1113,17 @@ agrupado e fogo varrido contra um piso. Hoje ela dá 84%; com o modelo antigo, 2
 **Locomoção** prova a igualdade de que o corpo inteiro depende: uma passada cobre
 exatamente a distância do ciclo, em qualquer velocidade e em qualquer ponto da
 mistura entre andar e correr. Se isso deixar de valer, o pé patina — e patinar é
-a primeira coisa que o outro jogador vai notar quando houver multiplayer. Os
-outros casos prendem a fase da curva vertical, que é onde um cosseno com o sinal
-trocado faria a câmera **subir** quando o pé bate.
+a primeira coisa que o outro jogador nota. Os outros casos prendem a fase da
+curva vertical, que é onde um cosseno com o sinal trocado faria a câmera **subir**
+quando o pé bate.
+
+Os do **corpo do adversário** medem a mesma igualdade pelo caminho oposto: lá a
+velocidade é conhecida e a distância sai dela; aqui só chegam posições, e é a
+velocidade que é deduzida delas. Um fator errado na dedução não dá erro nenhum —
+dá um pé deslizando pelo convés do outro navio, que é o defeito clássico de
+personagem em rede. Junto vão os dois casos que a dedução sozinha erraria:
+assumir o leme não pode virar disparada (nem pouso atrás da roda), e o salto dele
+tem de estar na metade do clipe de ar exatamente no ápice.
 
 Os casos do **pulo** simulam a queda inteira com a mesma ordem de operações do
 `PlayerController` (gravidade → integração → chão → relógio) e conferem o clipe
@@ -1137,7 +1199,10 @@ visível em primeira pessoa — pés, ombros, mãos na escada e mãos nos punhos
 roda** · vela e bandeira simuladas lendo o mesmo vento · **marca de tiro no costado
 com furo, lascas e fuligem, e a tábua do reparo saindo das mãos para ficar pregada
 onde estava o buraco** · **duelo 1v1 em rede, com sala por código, fila de
-pareamento e servidor próprio na Cloudflare**.
+pareamento e servidor próprio na Cloudflare** · **o adversário com corpo no convés
+dele, animado pelos mesmos clipes — andando, correndo, pulando, subindo a escada,
+de mãos na roda, tapando rombo, e com a cabeça acompanhando para onde ele
+olha**.
 
 **O que falta, em ordem de impacto:**
 
@@ -1183,6 +1248,12 @@ sem nunca abrir um quadro de simulação. O motivo é a conta do plano gratuito:
 laço de 60 Hz dentro de um Durable Object custaria ~36.000 requests por partida
 (três duelos por dia); retransmitindo, o mesmo duelo custa ~685 — **cerca de 145
 duelos por dia, de graça**.
+
+> [!tip] E o adversário tem corpo
+> O convés do outro navio não está mais vazio: o marujo de lá anda, corre, pula,
+> sobe a escada, governa e prega tábua com os mesmos clipes do seu. Como isso
+> funciona em cada papel — e por que o problema difícil é a **velocidade**, e não
+> a posição — está em [O adversário tem corpo](#-o-adversário-tem-corpo).
 
 ### Quem hospeda não é quem clicou primeiro
 

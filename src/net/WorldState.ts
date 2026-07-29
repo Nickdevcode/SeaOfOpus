@@ -67,6 +67,14 @@ export interface ShipState {
   patches: PatchState[] | null;
 }
 
+/**
+ * O corpo do marujo como ele chega do lado que simula.
+ *
+ * É o que `PlayerController.applyRemoteStep` consome para o adversário andar,
+ * correr, pular, subir escada, governar e pregar tábua deste lado — os campos
+ * daqui são exatamente as grandezas de que os relógios de animação precisam, e
+ * nada além delas.
+ */
 export interface CrewState {
   readonly local: THREE.Vector3;
   yaw: number;
@@ -76,6 +84,8 @@ export interface CrewState {
   grounded: boolean;
   onLadder: boolean;
   atCapstan: boolean;
+  /** `true` quando ele está com a tábua nas mãos. Ver `Interaction.patching`. */
+  patching: boolean;
 }
 
 /** O céu e o tempo, como eles chegam do lado que simula. Ver `writeSky`. */
@@ -154,6 +164,7 @@ function createCrewState(): CrewState {
     grounded: true,
     onLadder: false,
     atCapstan: false,
+    patching: false,
   };
 }
 
@@ -414,6 +425,7 @@ function readSnapshot(buffer: ArrayBuffer, target: WorldState): SnapshotHeader |
     crew.grounded = (packed & (1 << 3)) !== 0;
     crew.onLadder = (packed & (1 << 4)) !== 0;
     crew.atCapstan = (packed & (1 << 5)) !== 0;
+    crew.patching = (packed & (1 << 6)) !== 0;
   }
 
   readEvents(r, target.events);

@@ -346,6 +346,7 @@ function updateDebug(dt: number): void {
 
   // Uma leitura só: o getter monta um objeto, e o overlay usa nove campos dele.
   const avatar = match.avatar.debug;
+  const foeBody = match.enemyAvatar.debug;
 
   let totalInflow = 0;
   for (const breach of ship.damage.breaches) totalInflow += breach.inflow;
@@ -379,7 +380,12 @@ function updateDebug(dt: number): void {
       : [
           `ENEMY (${online.opponentName || 'remote'})  ${enemy.knots.toFixed(2)} kn  ·  range ${match.range.toFixed(0)} m`,
           `enemy hold ${(enemy.damage.floodFraction * 100).toFixed(1)}%  ·  holes ${enemy.damage.breaches.length}  ·  planks ${enemy.planks}`,
-          `enemy crew ${match.crew[1].controller.station}  ·  local x ${match.crew[1].controller.local.x.toFixed(2)}  z ${match.crew[1].controller.local.z.toFixed(2)}`,
+          `enemy crew ${match.crew[1].controller.station}${match.crew[1].controller.onLadder ? ' (ladder)' : ''}  ·  local x ${match.crew[1].controller.local.x.toFixed(2)}  z ${match.crew[1].controller.local.z.toFixed(2)}`,
+          // O corpo dele, medido do mesmo jeito que o do jogador logo abaixo: é
+          // por esta linha que se vê se o adversário está sendo **animado** ou
+          // só posicionado — um `gait` cravado em zero com ele andando na tela é
+          // exatamente o defeito que o corpo remoto existe para não ter.
+          `enemy body ${match.enemyAvatar.root.visible ? 'shown' : 'hidden'}  ·  gait w ${foeBody.walk.toFixed(2)} r ${foeBody.run.toFixed(2)} i ${foeBody.idle.toFixed(2)} air ${foeBody.air.toFixed(2)} climb ${foeBody.climb.toFixed(2)} helm ${foeBody.helm.toFixed(2)}  ·  speed ${match.crew[1].controller.gait.speed.toFixed(2)} m/s`,
         ]),
     `contact ${match.contact.contacts} points  ·  depth ${(match.contact.depth * 100).toFixed(0)} cm`,
     // O bloco de rede só existe num duelo em rede, e é o painel que diz se o

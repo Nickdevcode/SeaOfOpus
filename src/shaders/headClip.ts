@@ -114,12 +114,11 @@ const VERTEX_BODY = /* glsl */ `
 /**
  * Instala o recorte num material do personagem.
  *
- * Não clona: hoje existe um `PlayerAvatar` só e cada `GLTFLoader` monta
- * materiais novos, então o material carregado é privado do avatar — clonar
- * deixaria o original órfão do `dispose`. **Quando o multiplayer chegar** e o GLB
- * passar a ser reaproveitado entre avatares, o material vira compartilhado e o
- * `clone()` passa a ser obrigatório, senão todos os piratas do servidor ficam
- * sem cabeça.
+ * Não clona **aqui**, e não precisa: o GLB é carregado uma vez e serve os dois
+ * corpos a bordo, mas quem já entrega material privado por avatar é
+ * `CharacterAsset.instantiateCharacter`. A ordem importa e é essa — sem o clone
+ * de lá, ligar o recorte para ver pelos próprios olhos decapitaria o adversário
+ * no mesmo quadro, porque os dois piratas dividiriam o uniform de limiar.
  *
  * O programa compilado, esse sim, é compartilhado de graça:
  * `Material.customProgramCacheKey` devolve o **texto-fonte** do

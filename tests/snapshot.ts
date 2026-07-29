@@ -141,6 +141,12 @@ function makeCrew(seed: number) {
       onLadder: seed !== 0,
       atCapstan: seed === 0,
     },
+    // A tábua na mão é o único estado do corpo que **não** mora no controlador:
+    // quem vê o rombo e o botão segurado no mesmo passo é a interação. Os dois
+    // marujos com valores opostos, como todo o resto deste arquivo — um campo
+    // booleano igual nos dois é um campo que pode estar sendo lido do lugar
+    // errado sem ninguém notar.
+    interaction: { patching: seed !== 0 },
   };
 }
 
@@ -491,7 +497,8 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
   const out: TestCase[] = [];
 
   for (let slot = 0; slot < 2; slot++) {
-    const source = match.crew[slot]!.controller as unknown as ReturnType<typeof makeCrew>['controller'];
+    const crewman = match.crew[slot]! as unknown as ReturnType<typeof makeCrew>;
+    const source = crewman.controller;
     const read = world.crew[slot]!;
 
     const ok =
@@ -502,13 +509,18 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
       read.cannonIndex === source.cannonIndex &&
       read.grounded === source.grounded &&
       read.onLadder === source.onLadder &&
-      read.atCapstan === source.atCapstan;
+      read.atCapstan === source.atCapstan &&
+      // O bit da tábua divide o byte com os outros quatro estados de corpo. Um
+      // deslocamento de bit ali não desalinha o quadro — ele só faz o corpo do
+      // adversário contar a história errada, que é o tipo de defeito que passa
+      // meses no ar.
+      read.patching === crewman.interaction.patching;
 
     out.push({
       nome: `marujo ${slot} · posição, olhar, posto e estado do corpo`,
-      medido: `"${read.station}" peça ${read.cannonIndex} · chão ${read.grounded} escada ${read.onLadder} cabrestante ${read.atCapstan}`,
-      esperado: `"${source.station}" peça ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan}`,
-      erro: ok ? '—' : 'o marujo do outro lado está num lugar ou num posto diferente',
+      medido: `"${read.station}" peça ${read.cannonIndex} · chão ${read.grounded} escada ${read.onLadder} cabrestante ${read.atCapstan} tábua ${read.patching}`,
+      esperado: `"${source.station}" peça ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan} ${crewman.interaction.patching}`,
+      erro: ok ? '—' : 'o marujo do outro lado está num lugar, num posto ou numa pose diferente',
       passou: ok,
     });
   }

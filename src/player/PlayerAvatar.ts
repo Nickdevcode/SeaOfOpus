@@ -2,10 +2,10 @@
  * O corpo do jogador a bordo: malha, esqueleto e mistura de locomoção.
  *
  * O corpo é olhado de dois lugares, e cada um cobra uma coisa diferente. De fora
- * — a câmera livre de hoje, o outro jogador do multiplayer que vem — o defeito
- * que trai um personagem é o pé patinando no convés. De dentro, em primeira
- * pessoa, o que trai é a cabeça: o olho nasce a 1,66 m e o crânio ocupa
- * exatamente essa altura. O primeiro problema se resolve com a fase única da
+ * — a câmera livre, e o adversário no duelo em rede — o defeito que trai um
+ * personagem é o pé patinando no convés. De dentro, em primeira pessoa, o que
+ * trai é a cabeça: o olho nasce a 1,66 m e o crânio ocupa exatamente essa
+ * altura. O primeiro problema se resolve com a fase única da
  * passada, logo abaixo; o segundo com o recorte de `shaders/headClip.ts`, e é
  * por ele que o corpo deixou de ficar escondido em primeira pessoa.
  *
@@ -26,11 +26,24 @@
  * O avatar entra como **filho do modelo do navio**, então acompanha jogo de
  * proa e adernada de graça — a mesma razão de `CameraRig` compor com
  * `ship.model.root` e não com `ship.body`.
+ *
+ * ## Dois corpos, uma classe
+ *
+ * A partida instancia **dois**: o do jogador, pendurado no casco dele, e o do
+ * adversário, pendurado no outro. É a mesma classe porque é a mesma coisa — um
+ * marujo a bordo —, e a única diferença é de onde vem o `PlayerController` que
+ * a alimenta: no host e no duelo local ele é simulado aqui, e no cliente que não
+ * simula a pose chega pela rede e `PlayerController.applyRemoteStep` a
+ * transforma nos mesmos relógios. Todo o resto deste arquivo é cego a essa
+ * distinção, e é isso que faz o corpo do outro jogador andar, correr, pular,
+ * subir a escada, governar e pregar tábua com os mesmos clipes e as mesmas
+ * regras do seu.
  */
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { damp } from '../core/MathUtils';
+import { instantiateCharacter, loadCharacter } from './CharacterAsset';
+import { HeadLook } from './HeadLook';
 import {
   HEAD_CLIP_OFF,
   HEAD_CLIP_THRESHOLD,
@@ -109,10 +122,35 @@ export class PlayerAvatar {
   /**
    * A torção que separa pernas de tronco. Só vale em primeira pessoa: de fora,
    * o corpo inteiro apontando para onde anda continua sendo o certo, e é essa a
-   * pose que o multiplayer vai replicar.
+   * pose que o adversário mostra. O que ele ganha no lugar dela é o pescoço —
+   * ver `HeadLook`.
    */
   private readonly body = new FirstPersonBody();
   private twistReady = false;
+
+  /**
+   * O pescoço que segue o olhar. Só age no corpo visto **de fora** — ver
+   * `HeadLook`, que explica por que ele e a torção do quadril não convivem.
+   */
+  private readonly headLook = new HeadLook();
+  private headLookReady = false;
+
+  /**
+   * Materiais **deste** corpo, para o descarte. Ver `CharacterAsset`: a
+   * geometria e as texturas são compartilhadas com o outro avatar e não são
+   * nossas para liberar.
+   */
+  private readonly materials: THREE.Material[] = [];
+
+  /**
+   * Some com o corpo por inteiro, sem gastar um passo de animação com ele.
+   *
+   * Existe por causa do corpo do adversário, que só faz sentido em rede: contra
+   * a máquina, quem comanda o casco inimigo é o `ShipAI`, que não move marujo
+   * nenhum — e um pirata plantado no convés em pose de parado, sem nunca dar um
+   * passo, é pior que nenhum pirata. Ver `Match.startOnline`.
+   */
+  hidden = false;
 
   /** Posição do corpo, atrasada pela transição de estação. Ver `updateStation`. */
   private readonly stationPosition = new THREE.Vector3();
@@ -125,33 +163,26 @@ export class PlayerAvatar {
   /**
    * Carrega o personagem. Falhar aqui **não** derruba o jogo: sem corpo, tudo
    * o mais continua jogável, e em primeira pessoa nem se nota.
+   *
+   * O arquivo vem de `CharacterAsset`, que o baixa **uma vez** e devolve uma
+   * cópia independente por avatar — malha e textura compartilhadas, esqueleto e
+   * material privados. Ver lá o porquê de cada uma dessas metades.
    */
   async load(url: string): Promise<boolean> {
     try {
-      const gltf = await new GLTFLoader().loadAsync(url);
-      const model = gltf.scene;
-
-      let skinned: THREE.SkinnedMesh | null = null;
-      model.traverse((node) => {
-        if (!(node as THREE.Mesh).isMesh) return;
-        const mesh = node as THREE.SkinnedMesh;
-        // O personagem é visto de perto — por outro jogador, e agora pelo dono do
-        // corpo. Sem isto o Three corta a malha quando o esqueleto a leva para
-        // fora da caixa de repouso.
-        mesh.frustumCulled = false;
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        if (mesh.isSkinnedMesh) skinned ??= mesh;
-      });
+      const character = instantiateCharacter(await loadCharacter(url));
+      const { model, skinned } = character;
+      this.materials.push(...character.materials);
 
       this.root.add(model);
       this.mixer = new THREE.AnimationMixer(model);
       this.installHeadClip(skinned);
       this.installTwist(skinned);
+      this.installHeadLook(skinned);
 
-      this.idle = this.action(gltf.animations, 'Idle');
-      this.walk = this.action(gltf.animations, 'Walk');
-      this.run = this.action(gltf.animations, 'Run');
+      this.idle = this.action(character.animations, 'Idle');
+      this.walk = this.action(character.animations, 'Walk');
+      this.run = this.action(character.animations, 'Run');
       if (!this.idle || !this.walk || !this.run) {
         console.warn('[avatar] clipes de locomoção não encontrados no GLB');
         return false;
@@ -159,29 +190,29 @@ export class PlayerAvatar {
 
       // O pulo é opcional: um GLB antigo em cache do navegador não pode tirar do
       // jogador a locomoção, que é o que ele usa o tempo todo.
-      this.jumpAir = this.action(gltf.animations, 'JumpAir');
-      this.jumpLand = this.action(gltf.animations, 'JumpLand');
+      this.jumpAir = this.action(character.animations, 'JumpAir');
+      this.jumpLand = this.action(character.animations, 'JumpLand');
       if (!this.jumpAir || !this.jumpLand) {
         console.warn('[avatar] clipes de pulo não encontrados no GLB; o corpo salta sem pose');
       }
 
       // A escalada é opcional pelo mesmo motivo do pulo: um GLB antigo em cache
       // não pode tirar do jogador a locomoção, que é o que ele usa o tempo todo.
-      this.climbUp = this.action(gltf.animations, 'ClimbUp');
+      this.climbUp = this.action(character.animations, 'ClimbUp');
       if (!this.climbUp) {
         console.warn('[avatar] clipe de escalada não encontrado no GLB');
       }
 
       // O timão, idem. Sem ele o jogo continua inteiro: o timoneiro governa em
       // pose de parado, que é exatamente o que fazia antes deste clipe existir.
-      this.helm = this.action(gltf.animations, 'Helm');
+      this.helm = this.action(character.animations, 'Helm');
       if (!this.helm) {
         console.warn('[avatar] clipe do timão não encontrado no GLB');
       }
 
       // E a tábua de reparo. Sem o clipe, o rombo continua fechando e a madeira
       // continua aparecendo pregada no casco — o que se perde é o gesto.
-      this.carry = this.action(gltf.animations, 'Carry');
+      this.carry = this.action(character.animations, 'Carry');
       if (!this.carry) {
         console.warn('[avatar] clipe de carregar tábua não encontrado no GLB');
       }
@@ -267,6 +298,18 @@ export class PlayerAvatar {
     }
   }
 
+  /**
+   * Prepara o pescoço que segue o olhar. Falhar custa só o gesto — e ele só
+   * aparece no corpo visto de fora, que é o do adversário. Ver `HeadLook`.
+   */
+  private installHeadLook(mesh: THREE.SkinnedMesh | null): void {
+    if (!mesh) return;
+    this.headLookReady = this.headLook.attach(mesh.skeleton, this.root);
+    if (!this.headLookReady) {
+      console.warn('[avatar] pescoço não encontrado no GLB; a cabeça não segue o olhar');
+    }
+  }
+
   /** Pendura o corpo no modelo do navio. */
   attach(parent: THREE.Object3D): void {
     parent.add(this.root);
@@ -286,6 +329,14 @@ export class PlayerAvatar {
    */
   update(dt: number, player: PlayerController, firstPerson: boolean): void {
     if (!this.loaded || !this.mixer || !this.idle || !this.walk || !this.run) return;
+
+    // Corpo desligado não gasta mixer. É o contrário da regra do parágrafo
+    // acima, e de propósito: ali o corpo some por um quadro e volta (a câmera se
+    // solta, o canhão é largado), aqui ele some por uma partida inteira.
+    if (this.hidden) {
+      this.root.visible = false;
+      return;
+    }
 
     // No canhão a câmera vai para trás da culatra e os pés ficam onde estavam ao
     // apertar o botão — o corpo apareceria de fora, decapitado, metros ao lado.
@@ -328,7 +379,7 @@ export class PlayerAvatar {
 
     // A torção é exclusiva de quem está dentro do corpo. Visto de fora, o corpo
     // inteiro apontado para onde anda continua sendo o certo — e é essa a pose
-    // que o multiplayer vai replicar.
+    // que o adversário mostra.
     const twisting = embodied && this.twistReady;
     if (twisting) this.updateWornFacing(dt, player, walking);
     else this.updateFacing(dt, player, walking);
@@ -339,6 +390,11 @@ export class PlayerAvatar {
     this.mixer.update(dt);
     // Depois do mixer, sempre: ele reescreve os 43 ossos a cada passagem.
     if (twisting) this.body.apply();
+    // E o pescoço, que é o mesmo olhar visto do outro lado. Exclusivo de quem
+    // **não** está dentro do corpo: em primeira pessoa a cabeça está recortada e
+    // a torção do quadril ocupa o mesmo instante, e as duas rotações não
+    // comutam. Ver `HeadLook`.
+    else if (this.headLookReady) this.headLook.apply(player.pitch);
     // E a tábua depois dos dois, porque ela lê as matrizes dos punhos: lida
     // antes, ela desenharia a pose do quadro anterior.
     // O limiar é o mesmo do peso do clipe, e não do relógio: andar cede a pose
@@ -678,18 +734,21 @@ export class PlayerAvatar {
     for (const clip of this.headClips) clip.setNeckShare(options.neckShare);
   }
 
+  /**
+   * Descarta **este** corpo.
+   *
+   * ⚠️ A geometria e as texturas **não** são liberadas aqui, e não é
+   * esquecimento: elas são do `CharacterAsset` e o outro avatar ainda está
+   * usando as mesmas. Liberá-las daqui apagaria o corpo do adversário junto com
+   * o do jogador. Quem as libera é `disposeCharacterAsset`, depois dos dois.
+   */
   dispose(): void {
     this.mixer?.stopAllAction();
     // Antes de varrer a árvore: a tábua é filha deste nó, mas a geometria e o
     // material dela são do módulo `PlankAsset` e ainda servem os dois cascos.
     this.plank.dispose();
     this.root.removeFromParent();
-    this.root.traverse((node) => {
-      const mesh = node as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      mesh.geometry.dispose();
-      const material = mesh.material;
-      for (const m of Array.isArray(material) ? material : [material]) m.dispose();
-    });
+    for (const material of this.materials) material.dispose();
+    this.materials.length = 0;
   }
 }

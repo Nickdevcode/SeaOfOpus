@@ -29,8 +29,10 @@
 
 import * as THREE from 'three';
 import { FIXED_TIMESTEP } from '../core/Engine';
+import { wrapAngle } from '../core/MathUtils';
 import type { InputFrame } from '../core/InputFrame';
 import type { Match } from '../game/Match';
+import type { PlayerStation } from '../player/PlayerController';
 import type { Ship } from '../ship/Ship';
 import { BALL_MASS, BALL_RADIUS, MUZZLE_SPEED } from '../ship/Cannon';
 import { breachInflow } from '../ship/ShipDamage';
@@ -234,6 +236,25 @@ export class GuestSession {
   private minDepthSinceAdjust = Number.POSITIVE_INFINITY;
   /** Passos que o host passou sem comando desde o último ajuste do avanço. */
   private starvedSinceAdjust = 0;
+
+  /**
+   * A pose do adversário neste instante, montada uma vez e reescrita por passo.
+   *
+   * Um objeto só, e não um `CrewState` novo por quadro: isto roda sessenta vezes
+   * por segundo dentro do orçamento do quadro de render. Ver a nota de alocação
+   * em `snapshotCodec`.
+   */
+  private readonly remotePose = {
+    local: new THREE.Vector3(),
+    yaw: 0,
+    pitch: 0,
+    station: 'deck' as PlayerStation,
+    cannonIndex: -1,
+    grounded: true,
+    onLadder: false,
+    atCapstan: false,
+    patching: false,
+  };
 
   /** Passo em que o posto mudou por predição local, à espera do recibo do host. */
   private stationPredictedAt = -1;
@@ -535,7 +556,7 @@ export class GuestSession {
     waves.syncUniforms();
 
     this.applySky();
-    this.applyCrew();
+    this.applyCrew(t);
   }
 
   /**
@@ -714,20 +735,66 @@ export class GuestSession {
     }
   }
 
-  /** O corpo do adversário é autoritativo; o meu, só nos campos que não prevejo. */
-  private applyCrew(): void {
+  /**
+   * O corpo do adversário é autoritativo; o meu, só nos campos que não prevejo.
+   *
+   * ## Por que o corpo dele é interpolado como o casco
+   *
+   * Porque ele é **visto**, e desde que existe avatar do adversário isso deixou
+   * de ser detalhe. Escrever a pose do último instantâneo direto no controlador
+   * — que era o que se fazia, e bastava enquanto ninguém o desenhava — dá um
+   * marujo que anda a quinze quadros por segundo em cima de um convés que anda a
+   * cento e quarenta e quatro: o corpo aos trancos, e a cada tranco um pé
+   * patinando na madeira.
+   *
+   * O `t` é o **mesmo** do casco, e essa é a parte que não pode divergir: o
+   * corpo anda em coordenadas do navio, então corpo e convés precisam ser
+   * desenhados no mesmo instante ou o marujo desliza sobre o próprio piso.
+   *
+   * O que **não** se interpola são os campos discretos — posto, peça, escada,
+   * cabrestante, tábua. Eles valem do `from` até o `to` chegar, e é o `from` que
+   * descreve o instante que está sendo desenhado. Interpolar um posto não
+   * significa nada; adiantá-lo faria o corpo assumir o timão antes de chegar
+   * nele.
+   *
+   * @param t onde o relógio de desenho está entre os dois instantâneos.
+   */
+  private applyCrew(t: number): void {
     // Índices invertidos como em `applyWorld`: local 1 é sempre o adversário, e
     // no fio ele é `this.remote`.
     const remote = this.match.crew[1].controller;
-    const state = this.to.crew[this.remote]!;
-    remote.local.copy(state.local);
-    remote.yaw = state.yaw;
-    remote.pitch = state.pitch;
-    remote.station = state.station;
-    remote.cannonIndex = state.cannonIndex;
-    remote.grounded = state.grounded;
-    remote.onLadder = state.onLadder;
-    remote.atCapstan = state.atCapstan;
+    const to = this.to.crew[this.remote]!;
+    const state = this.hasFrom ? this.from.crew[this.remote]! : to;
+    const pose = this.remotePose;
+
+    // Assumir o leme ou montar a peça **teleporta** os pés metros de distância.
+    // Interpolar essa reta daria um pirata deslizando pelo convés em pose de
+    // parado; cravá-lo no posto de origem até a troca valer devolve o salto para
+    // quem sabe suavizá-lo — `PlayerAvatar.updateStation`, que leva o corpo até
+    // a estação na mesma curva de 0,28 s da câmera.
+    const switching = state.station !== to.station || state.cannonIndex !== to.cannonIndex;
+    if (switching) {
+      pose.local.copy(state.local);
+      pose.yaw = state.yaw;
+      pose.pitch = state.pitch;
+    } else {
+      pose.local.lerpVectors(state.local, to.local, t);
+      // Pelo caminho curto: sem isto, cruzar ±π faz a cabeça dele dar quase uma
+      // volta inteira entre dois instantâneos.
+      pose.yaw = state.yaw + wrapAngle(to.yaw - state.yaw) * t;
+      pose.pitch = state.pitch + (to.pitch - state.pitch) * t;
+    }
+
+    pose.station = state.station;
+    pose.cannonIndex = state.cannonIndex;
+    pose.grounded = state.grounded;
+    pose.onLadder = state.onLadder;
+    pose.atCapstan = state.atCapstan;
+    pose.patching = state.patching;
+
+    // O passo do corpo dele: é aqui que a pose vira passada, pulo, escalada,
+    // mãos na roda e tábua na mão. Ver `PlayerController.applyRemoteStep`.
+    remote.applyRemoteStep(FIXED_TIMESTEP, pose, this.match.ships[1]!);
 
     // ⚠️ **O posto só é escrito quando o host já viu o comando que o mudou.**
     //

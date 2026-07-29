@@ -271,10 +271,42 @@ interface Blocker {
   throughHold?: boolean;
 }
 
+/**
+ * A pose de um marujo que chega pronta pela rede. Ver `applyRemoteStep`.
+ *
+ * É satisfeita estruturalmente pelo `CrewState` que o instantâneo produz — de
+ * propósito: um tipo importado de `net/` aqui inverteria a dependência e faria o
+ * jogador do convés precisar do formato de rede para compilar.
+ */
+export interface RemoteCrewPose {
+  /** Posição dos pés, em coordenadas locais do navio dele. */
+  readonly local: THREE.Vector3;
+  readonly yaw: number;
+  readonly pitch: number;
+  readonly station: PlayerStation;
+  readonly cannonIndex: number;
+  readonly grounded: boolean;
+  readonly onLadder: boolean;
+  readonly atCapstan: boolean;
+  /** `true` quando ele está com a tábua nas mãos. Ver `Interaction.patching`. */
+  readonly patching: boolean;
+}
+
+/**
+ * Deslocamento que deixa de ser caminhada e vira teleporte, em metros por passo.
+ *
+ * Meio metro é sete vezes o que a corrida cobre num passo de 1/60 s (4,7 m/s dá
+ * 7,8 cm), então nenhuma caminhada legítima chega perto — e as descontinuidades
+ * de verdade (assumir o leme, montar a peça, renascer) passam disso com folga.
+ */
+const REMOTE_TELEPORT = 0.5;
+
 const _moveDir = new THREE.Vector3();
 const _gravity = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _pivot = new THREE.Vector3();
+/** Deslocamento do marujo remoto neste passo. Ver `applyRemoteStep`. */
+const _remoteStep = new THREE.Vector3();
 /** Eixo de caminhada do passo. Reaproveitado: nada aqui aloca por tick. */
 const _move = { x: 0, y: 0 };
 
@@ -647,6 +679,101 @@ export class PlayerController {
         this.updateOnFoot(dt, frame, ship);
         break;
     }
+
+    this.updateEye();
+  }
+
+  /**
+   * Um passo de um marujo que **não** é simulado aqui: a pose chega pronta.
+   *
+   * É o caminho do corpo do adversário no cliente que não simula. Ele existe
+   * porque a pose sozinha não anima ninguém: o que move o personagem na tela não
+   * é a posição, são os **relógios** — passada, pulo, escada, timão e tábua —, e
+   * eles são alimentados por grandezas que o instantâneo não carrega (velocidade
+   * no convés, altura vencida por quadro, ângulo da roda). Sem este método, o
+   * marujo do outro lado chegava ao lugar certo em pose de estátua, deslizando
+   * pelo convés como peça de tabuleiro.
+   *
+   * ## Por que a velocidade é derivada, e não transmitida
+   *
+   * Porque derivá-la sai de graça e chega **melhor**. A posição já vem
+   * interpolada entre dois instantâneos (ver `GuestSession.applyCrew`), então a
+   * diferença entre dois passos é exatamente o quanto o corpo andou na tela — e
+   * é isso, e não a velocidade que o outro tinha, que a passada precisa saber
+   * para o pé ficar parado no convés durante o apoio. Mandar o vetor custaria
+   * seis bytes por marujo por instantâneo para produzir um pé que patina sempre
+   * que a rede engasgasse.
+   *
+   * ## O que conta como teleporte
+   *
+   * Assumir o timão, montar um canhão, agarrar a escada e renascer movem o corpo
+   * metros num passo. Derivar velocidade disso daria um pirata em disparada por
+   * um quadro — e, pior, um pulo detectado no meio. Nesses casos a velocidade é
+   * zerada e os relógios de pulo e escada são assentados em vez de alimentados.
+   *
+   * @param pose o estado autoritativo deste passo.
+   * @param ship o casco em que ele está — é dele que sai o ângulo da roda.
+   */
+  applyRemoteStep(dt: number, pose: RemoteCrewPose, ship: Ship): void {
+    // A pose do passo anterior, antes de qualquer coisa mexer nela: é dela que
+    // `syncView` interpola para a taxa do monitor. Mesma abertura de
+    // `fixedUpdate`, e pela mesma razão.
+    this.previousEyeLocal.copy(this.simEyeLocal);
+    this.previousVisualLocal.copy(this.simVisualLocal);
+
+    const stationChanged =
+      pose.station !== this.station || pose.cannonIndex !== this.cannonIndex;
+    const grabbedLadder = pose.onLadder && !this.onLadder;
+
+    _remoteStep.subVectors(pose.local, this.local);
+    const teleported =
+      stationChanged ||
+      grabbedLadder ||
+      _remoteStep.lengthSq() > REMOTE_TELEPORT * REMOTE_TELEPORT;
+
+    if (teleported) this.velocity.set(0, 0, 0);
+    else this.velocity.copy(_remoteStep).divideScalar(dt);
+
+    this.local.copy(pose.local);
+    this.yaw = pose.yaw;
+    this.pitch = pose.pitch;
+    // Antes de escrever o posto: é a **mudança** que o corpo usa para levar os
+    // pés até a estação com a mesma suavização da câmera. Ver
+    // `PlayerAvatar.updateStation`.
+    if (stationChanged) this.stationChangeCount++;
+    this.station = pose.station;
+    this.cannonIndex = pose.cannonIndex;
+    this.grounded = pose.grounded;
+    this.onLadder = pose.onLadder;
+    this.atCapstan = pose.atCapstan;
+
+    // Na escada e nas estações o corpo está preso a alguma coisa, e a passada
+    // tem de se apagar — é a mesma regra de `settleBob` e de `updateLadder`.
+    const onFoot = this.station === 'deck' && !this.onLadder;
+    const speed = onFoot ? Math.hypot(this.velocity.x, this.velocity.z) : 0;
+    this.gait.update(dt, speed, onFoot ? this.grounded : true);
+
+    // A escada é indexada pela **altura vencida**, como do lado de quem simula.
+    // O alinhamento com a grade de barras é feito uma vez, ao agarrar, e daí em
+    // diante se sustenta sozinho — sem ele a mão do outro jogador flutuaria
+    // entre dois enfrechates pelo resto da subida.
+    if (grabbedLadder) {
+      this.climb.align(this.local.y, MAST_LADDER.bottomY, MAST_LADDER.rungSpacing);
+    }
+    this.climb.update(dt, this.onLadder, this.onLadder && !teleported ? _remoteStep.y : 0);
+
+    // O timão sai do ângulo da roda, que é autoritativo e já foi escrito neste
+    // passo: a mão cai em cima de um punho desenhado sem nada precisar viajar.
+    this.helm.update(dt, this.station === 'helm', ship.rudder.wheelAngle);
+    // E a tábua, do único bit que este método precisa que o fio carregue: quem
+    // vê o rombo e o botão segurado é a `Interaction` do outro lado.
+    this.carry.update(dt, pose.patching);
+
+    if (onFoot && !teleported) this.jump.update(dt, this.velocity.y, this.grounded);
+    // `settle` e não `update`: quem foi teleportado para trás da roda não
+    // aterrissou de lugar nenhum, e um pouso disparado ali põe o adversário se
+    // agachando de pé no posto. Ver `JumpClock.settle`.
+    else this.jump.settle(dt);
 
     this.updateEye();
   }

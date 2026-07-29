@@ -35,6 +35,7 @@ import {
   resolveHullContact,
   type ContactReport,
 } from '../combat/HullContact';
+import { disposeCharacterAsset } from '../player/CharacterAsset';
 import { PlayerAvatar } from '../player/PlayerAvatar';
 import type { Interaction } from '../player/Interaction';
 import type { PlayerController } from '../player/PlayerController';
@@ -98,6 +99,15 @@ const SPAWN_BEARING = -0.45;
  * bruma, esta não. Ver `tintSail` para o porquê de ser multiplicação.
  */
 const ENEMY_SAIL = 0x8a2f28;
+
+/**
+ * O personagem, em disco. Um arquivo para os dois corpos a bordo.
+ *
+ * `BASE_URL` é o prefixo com que o Vite publica o `public/` — em produção ele
+ * pode não ser a raiz do domínio, e um caminho absoluto cravado aqui daria um
+ * 404 silencioso que só apareceria como "os piratas sumiram" depois do deploy.
+ */
+const CHARACTER_MODEL = `${import.meta.env.BASE_URL}models/pirate.glb`;
 
 /** Números da partida, para a tela de fim. */
 export interface MatchStats {
@@ -205,6 +215,22 @@ export class Match {
    * do projeto, e o jogo tem de estar jogável antes de ele chegar.
    */
   readonly avatar = new PlayerAvatar();
+
+  /**
+   * O corpo do adversário, pendurado no casco dele.
+   *
+   * Mesma classe, mesmos clipes, mesmo arquivo — o que muda é só de onde vem o
+   * controlador que o alimenta: no host ele é simulado aqui com a entrada que
+   * chega pela rede, e no cliente que não simula a pose vem pronta no
+   * instantâneo e `PlayerController.applyRemoteStep` a converte nos relógios de
+   * animação. Ver `CharacterAsset` para o porquê de os dois corpos saírem de um
+   * download só.
+   *
+   * Fica **escondido fora do duelo em rede**: contra a máquina quem comanda o
+   * outro casco é o `ShipAI`, que não move marujo nenhum, e um pirata plantado
+   * no convés sem nunca dar um passo é pior que nenhum pirata.
+   */
+  readonly enemyAvatar = new PlayerAvatar();
   readonly cannonballs: CannonballPool;
   readonly effects: Effects;
 
@@ -260,11 +286,17 @@ export class Match {
 
     this.ai = new ShipAI(this.enemyShip, this.difficulty);
 
-    // Filho do modelo do navio, não da cena: assim ele acompanha jogo, adernada
-    // e avanço sem ninguém recompor nada — a mesma razão de `CameraRig` compor
-    // com `ship.model.root`.
+    // Filhos do modelo de cada navio, não da cena: assim eles acompanham jogo,
+    // adernada e avanço sem ninguém recompor nada — a mesma razão de `CameraRig`
+    // compor com `ship.model.root`.
     this.avatar.attach(this.playerShip.model.root);
-    void this.avatar.load(`${import.meta.env.BASE_URL}models/pirate.glb`);
+    this.enemyAvatar.attach(this.enemyShip.model.root);
+    // Um pedido só de rede para os dois: o segundo `load` encontra o mesmo
+    // `Promise` e instancia uma cópia. Ver `CharacterAsset`.
+    void this.avatar.load(CHARACTER_MODEL);
+    void this.enemyAvatar.load(CHARACTER_MODEL);
+    // Só aparece em rede — ver a nota do campo.
+    this.enemyAvatar.hidden = true;
 
     this.deploy();
   }
@@ -299,6 +331,7 @@ export class Match {
   /** Começa um duelo novo contra o capitão escolhido. */
   startSolo(id: DifficultyId): void {
     this.role = 'solo';
+    this.enemyAvatar.hidden = true;
     this.difficulty = DIFFICULTIES[id];
     // Refeito porque os artilheiros nascem amarrados ao preset — e porque uma
     // semente nova por partida seria o contrário do que se quer: o duelo tem de
@@ -318,6 +351,9 @@ export class Match {
    */
   startOnline(role: Exclude<MatchRole, 'solo'>): void {
     this.role = role;
+    // E o adversário ganha corpo: do outro lado do fio há alguém que anda,
+    // corre, sobe a escada e prega tábua, e agora isso se vê.
+    this.enemyAvatar.hidden = false;
     this.ai = null;
     this.deploy();
     this.setState('fighting');
@@ -352,6 +388,7 @@ export class Match {
    */
   toMenu(): void {
     this.role = 'solo';
+    this.enemyAvatar.hidden = true;
     this.deploy();
     this.setState('menu');
   }
@@ -641,6 +678,12 @@ export class Match {
     for (const ship of this.ships) ship.syncModel(alpha);
     this.cannonballs.syncModel(alpha);
 
+    // O corpo do adversário mora aqui, e o do jogador no laço principal, porque
+    // só o segundo depende da câmera: é `main.ts` que sabe se ela está nos olhos
+    // dele. Ninguém olha pelos olhos deste, então ele é sempre visto de fora — e
+    // depois do `syncView` acima, que é quem escreve a pose do quadro.
+    this.enemyAvatar.update(dt, this.crew[1].controller, false);
+
     this.drainEvents();
 
     // `update` primeiro (é ele que abre a janela do rastro), depois as emissões do
@@ -716,6 +759,11 @@ export class Match {
 
   dispose(): void {
     this.avatar.dispose();
+    this.enemyAvatar.dispose();
+    // Depois dos dois, sempre: a malha e as texturas são compartilhadas por
+    // eles, e liberá-las antes tiraria o chão de debaixo do que ainda estivesse
+    // na cena. Ver `CharacterAsset.disposeCharacterAsset`.
+    disposeCharacterAsset(CHARACTER_MODEL);
     for (const view of this.damageViews) view.dispose();
     for (const ship of this.ships) ship.dispose();
     this.environment.clearHullClips();

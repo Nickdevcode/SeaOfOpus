@@ -412,15 +412,21 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
     w.i16(quantize(c.yaw, QUANT.angle));
     w.i16(quantize(c.pitch, QUANT.angle));
     const station = c.station === 'deck' ? 0 : c.station === 'helm' ? 1 : 2;
-    // Estação, canhão e os três estados de corpo cabem num byte: são 2 + 1 + 3
-    // bits de informação, e um campo por coisa custaria quatro bytes por marujo
+    // Estação, canhão e os quatro estados de corpo cabem num byte: são 2 + 1 + 4
+    // bits de informação, e um campo por coisa custaria cinco bytes por marujo
     // em cada um dos quinze instantâneos por segundo.
+    //
+    // A tábua na mão é o único deles que **não** sai do controlador: quem vê o
+    // rombo e o botão segurado no mesmo passo é a `Interaction`. Sem este bit o
+    // adversário tapava rombo de mãos vazias — ver a nota da versão 6 do
+    // protocolo.
     w.u8(
       station |
         ((c.cannonIndex < 0 ? 0 : c.cannonIndex) << 2) |
         (c.grounded ? 1 << 3 : 0) |
         (c.onLadder ? 1 << 4 : 0) |
-        (c.atCapstan ? 1 << 5 : 0),
+        (c.atCapstan ? 1 << 5 : 0) |
+        (crewman.interaction.patching ? 1 << 6 : 0),
     );
   }
 

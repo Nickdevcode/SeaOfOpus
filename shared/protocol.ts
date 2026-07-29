@@ -67,8 +67,16 @@
  * 0,176: 43% da faixa útil não cabia no fio, e um rombo bem alargado chegava do
  * outro lado com pouco mais da metade do tamanho real. Achado pelo teste de
  * instantâneo na primeira vez que ele rodou.
+ *
+ * **6** — o marujo passou a dizer se está com a **tábua nas mãos**. É um bit no
+ * byte de estado do corpo, que já tinha dois sobrando, e ele fecha o último
+ * gesto que faltava para o adversário ter corpo de gente: sem ele, quem estava
+ * tapando um rombo aparecia do outro lado parado, de mãos vazias, enquanto a
+ * madeira ia surgindo pregada no casco sozinha. Quem sabe disso é a
+ * `Interaction` — só ela vê o buraco e o botão segurado no mesmo passo —, e o
+ * outro lado não tem como deduzir.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** Casas do código de sala. */
 export const CODE_LENGTH = 4;

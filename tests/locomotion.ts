@@ -64,6 +64,8 @@
 
 import { GRAVITY, wrapAngle } from '../src/core/MathUtils';
 import { foldLegHeading } from '../src/player/FirstPersonBody';
+import { PlayerController, type RemoteCrewPose } from '../src/player/PlayerController';
+import type { Ship } from '../src/ship/Ship';
 import {
   CLIMB_CLIP,
   ClimbClock,
@@ -272,6 +274,79 @@ function sweepWheel(direction: 1 | -1, dt = 1 / 60): HelmSweep {
 
   sweep.phase = clock.phase;
   return sweep;
+}
+
+/**
+ * O casco que o marujo remoto precisa: só a roda, e só para lê-la.
+ *
+ * `applyRemoteStep` toca no navio para uma coisa e uma só — o ângulo do timão,
+ * que é a régua do clipe de governar. Montar um `Ship` de verdade aqui traria a
+ * geração de textura em canvas junto, e o teste deixaria de rodar fora do
+ * navegador por nada.
+ */
+function fakeShip(wheelAngle = 0): Ship {
+  return { rudder: { wheelAngle } } as unknown as Ship;
+}
+
+/**
+ * A pose como o teste precisa dela: escrevível.
+ *
+ * `RemoteCrewPose` é só de leitura porque quem a recebe não pode alterá-la — é o
+ * estado autoritativo do outro lado. Aqui é o contrário: nós somos o outro lado.
+ */
+type MutablePose = { -readonly [K in keyof RemoteCrewPose]: RemoteCrewPose[K] };
+
+/** A pose de partida do marujo remoto, no lugar em que ele nasce. */
+function remotePose(controller: PlayerController): MutablePose {
+  return {
+    local: controller.local.clone(),
+    yaw: controller.yaw,
+    pitch: 0,
+    station: 'deck',
+    cannonIndex: -1,
+    grounded: true,
+    onLadder: false,
+    atCapstan: false,
+    patching: false,
+  };
+}
+
+/**
+ * O adversário andando em linha reta, alimentado como a rede o alimenta: só a
+ * pose, um passo por vez, sem nunca dizer a que velocidade ele vai.
+ *
+ * Devolve a distância que cada ciclo da passada cobriu, medida **entre
+ * cruzamentos de fase** — como `distancePerCycle` faz para o corpo local, e pela
+ * mesma razão: um ciclo parcial no começo ou no fim contaminaria a média.
+ */
+function remoteWalkCycle(speed: number, seconds: number, dt = 1 / 240): number {
+  const controller = new PlayerController();
+  controller.spawn();
+  const pose = remotePose(controller);
+  const ship = fakeShip();
+
+  let travelled = 0;
+  let previous = controller.gait.phase;
+  let first = -1;
+  let last = 0;
+  let crossings = 0;
+
+  const steps = Math.round(seconds / dt);
+  for (let i = 0; i < steps; i++) {
+    // Para vante é −Z no referencial do navio, como em `updateOnFoot`.
+    pose.local.z -= speed * dt;
+    travelled += speed * dt;
+    controller.applyRemoteStep(dt, pose, ship);
+
+    if (controller.gait.phase < previous) {
+      crossings++;
+      if (first < 0) first = travelled;
+      last = travelled;
+    }
+    previous = controller.gait.phase;
+  }
+
+  return crossings > 1 ? (last - first) / (crossings - 1) : 0;
 }
 
 export function runLocomotionTests(): TestReport {
@@ -549,6 +624,79 @@ export function runLocomotionTests(): TestReport {
   check('andar de ré dobra as pernas', backwards.reversed ? 1 : 0, 1, 0, '');
   check('e o rumo dobrado alinha com o tronco',
     Math.abs(wrapAngle(backwards.heading - 0)), 0, 1e-9, 'rad');
+
+  // -- o corpo do adversário ---------------------------------------------------
+  //
+  // O corpo que a rede move não recebe velocidade nenhuma: ele recebe posições,
+  // e `applyRemoteStep` deriva o resto. Os casos abaixo cobrem as três formas de
+  // essa derivação sair errada — e nenhuma delas produz erro, exceção ou log.
+
+  // 26. **O pé do adversário não patina.** É a mesma igualdade da passada local,
+  //     medida pelo caminho oposto: lá a velocidade é conhecida e a distância
+  //     sai dela; aqui só as posições chegam, e é a velocidade que é deduzida.
+  //     Se a dedução escalar errado — dividir pelo dt errado, por exemplo —, o
+  //     ciclo deixa de cobrir a distância do clipe e o pé do outro jogador
+  //     desliza pelo convés. É o defeito clássico de personagem em rede.
+  check('a passada do adversário cobre a distância do clipe de andar',
+    remoteWalkCycle(WALK_CLIP.speed, 6), WALK_DISTANCE, 0.02, 'm');
+  check('e a de correr, na velocidade de corrida',
+    remoteWalkCycle(RUN_CLIP.speed, 6), RUN_DISTANCE, 0.02, 'm');
+
+  // 27. Assumir o leme **teleporta** os pés dele: `takeHelm` escreve o posto do
+  //     timoneiro, que pode estar a dois metros. Derivar velocidade daquele
+  //     salto daria 120 m/s por um quadro — o adversário em disparada com pose
+  //     de corrida, e um pouso disparado logo em seguida quando o "voo"
+  //     terminasse. O teleporte tem de zerar a velocidade, e o pulo tem de ser
+  //     assentado em vez de alimentado.
+  {
+    const controller = new PlayerController();
+    controller.spawn();
+    const pose = remotePose(controller);
+    const ship = fakeShip();
+    for (let i = 0; i < 30; i++) {
+      pose.local.z -= WALK_CLIP.speed / 60;
+      controller.applyRemoteStep(1 / 60, pose, ship);
+    }
+
+    pose.station = 'helm';
+    pose.local.set(0, controller.local.y, controller.local.z + 2);
+    controller.applyRemoteStep(1 / 60, pose, ship);
+
+    check('assumir o leme não põe o adversário em disparada',
+      controller.velocity.length(), 0, 1e-9, 'm/s');
+    check('nem o faz aterrissar de pé atrás da roda', controller.jump.land, 0, 1e-9, '');
+    check('e o corpo é avisado da troca de posto',
+      controller.stationChangeCount > 1 ? 1 : 0, 1, 0, '');
+  }
+
+  // 28. O pulo dele também sai da posição, e o clipe de ar é indexado pela
+  //     velocidade **vertical**: no ápice a fase tem de estar na metade, como no
+  //     pulo local. Um sinal trocado na derivada põe o adversário caindo na
+  //     subida e subindo na queda, com as pernas na pose errada nos dois
+  //     trechos.
+  {
+    const controller = new PlayerController();
+    controller.spawn();
+    const pose = remotePose(controller);
+    const ship = fakeShip();
+    const dt = 1 / 60;
+    const groundY = pose.local.y;
+
+    let vertical = JUMP_SPEED;
+    let peak = 0;
+    pose.grounded = false;
+    for (let i = 0; i < 60 && pose.local.y >= groundY; i++) {
+      pose.local.y += vertical * dt;
+      vertical -= GRAVITY * dt;
+      controller.applyRemoteStep(dt, pose, ship);
+      // O ápice é onde a subida vira queda.
+      if (Math.abs(vertical) < GRAVITY * dt) peak = controller.jump.airPhase;
+    }
+
+    check('no ápice do salto do adversário, o clipe de ar está na metade',
+      peak, 0.5, 0.05, '');
+    check('e o clipe de ar chegou a peso cheio', controller.jump.air, 1, 0.05, '');
+  }
 
   const falhas = cases.filter((c) => !c.passou).length;
   return { passou: falhas === 0, total: cases.length, falhas, cases };
