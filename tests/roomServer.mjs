@@ -154,6 +154,30 @@ async function pairByCode(perfA = 70, perfB = 70) {
 
 const cases = [];
 
+/**
+ * Deixa a fila vazia antes de um caso que depende dela estar.
+ *
+ * ⚠️ **Obrigatório contra o servidor publicado, e a falta disto reprovou um teste
+ * que estava certo.** Lá a fila é global e tem gente de verdade dentro: se alguém
+ * estiver esperando, o primeiro socket do teste é mandado para a sala **dele** e
+ * pareado com ele, o que é o comportamento correto do servidor e a ruína da
+ * asserção. O sintoma foi um `peer` com o apelido `Sailor` — que é justamente a
+ * assinatura do defeito que o caso seguinte procura, e ali era só o nome padrão de
+ * um capitão que não digitou o dele.
+ *
+ * A isca resolve os dois casos de uma vez: se havia alguém esperando, ela o pega e
+ * a vaga se esvazia; se não havia, ela vira a dona da vaga e devolve ao fechar.
+ */
+async function drainQueue() {
+  const bait = open('/queue');
+  await opened(bait);
+  hello(bait, 'Isca', 'queue');
+  await expect(bait, 'welcome');
+  bait.close(1000, 'left');
+  // A sala precisa de um instante para ver o fechamento e avisar a fila.
+  await new Promise((resolve) => setTimeout(resolve, 700));
+}
+
 async function test(nome, run) {
   const sockets = [];
   try {
@@ -173,6 +197,8 @@ async function test(nome, run) {
 }
 
 await test('a fila pareia dois capitães', async (keep) => {
+  await drainQueue();
+
   const first = open('/queue');
   keep.push(first);
   await opened(first);
@@ -205,6 +231,8 @@ await test('a fila pareia dois capitães', async (keep) => {
 });
 
 await test('a fila não decide quem simula antes de os dois se apresentarem', async (keep) => {
+  await drainQueue();
+
   // ⚠️ As duas conexões abrem **antes** de qualquer `hello`, e é isso que este
   // caso tem de diferente do de cima. É o que acontece quando dois amigos clicam
   // em "procurar capitão" no mesmo instante: os dois sockets entram na sala e só
@@ -245,6 +273,8 @@ await test('a fila não decide quem simula antes de os dois se apresentarem', as
 });
 
 await test('a fila não senta ninguém numa vaga que já não serve', async (keep) => {
+  await drainQueue();
+
   // Ana entra na fila e vira a vaga guardada.
   const ana = open('/queue');
   keep.push(ana);
@@ -285,6 +315,8 @@ await test('a fila não senta ninguém numa vaga que já não serve', async (kee
 });
 
 await test('quem desiste da fila devolve a vaga', async (keep) => {
+  await drainQueue();
+
   const ana = open('/queue');
   keep.push(ana);
   await opened(ana);
@@ -392,6 +424,8 @@ await test('quem fica sozinho é avisado de que o outro saiu', async (keep) => {
 });
 
 await test('quem foi pareado e ficou sozinho antes do começo é avisado', async (keep) => {
+  await drainQueue();
+
   const ana = open('/queue');
   keep.push(ana);
   await opened(ana);

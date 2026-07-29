@@ -1153,12 +1153,23 @@ conversa — dois capitães, fila, código, recusa, resultado.
 ```sh
 npm run dev:server      # num terminal
 npm run test:server     # no outro
+
+# e contra o servidor publicado, que é o que o jogo usa de verdade:
+ROOM_SERVER="wss://sea-of-opus-rooms.nickdev.workers.dev" npm run test:server
 ```
 
 Ele existe porque a sala é a única parte do duelo que **não dá para testar
 jogando**. Um defeito de física aparece na tela; um defeito de pareamento
 aparece como duas pessoas em telas de espera diferentes, cada uma achando que o
 problema é a internet da outra.
+
+> ⚠️ **Contra o publicado, a fila tem gente de verdade dentro** — e isso já reprovou
+> um caso que estava certo. Se alguém estiver esperando na fila, o primeiro socket do
+> teste é mandado para a sala **dele** e pareado com ele, que é o comportamento certo
+> do servidor e a ruína da asserção. Pior: o `peer` chega com o apelido `Sailor`, que
+> é a assinatura exata do defeito de pareamento que aquele caso procura — ali era só
+> o nome padrão de um capitão que não digitou o dele. Os casos de fila agora esvaziam
+> a vaga com uma isca antes de começar (`drainQueue`).
 
 **Balística** prova o caso limite: com arrasto zero a integração *tem* que reproduzir
 a parábola de livro, ida e volta. Provado o integrador, os outros casos verificam que
