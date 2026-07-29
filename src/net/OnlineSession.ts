@@ -10,7 +10,7 @@
  * recebe um `OnlineViewState` e nada mais.
  */
 
-import type { ServerMessage } from '../../shared/protocol';
+import type { JoinIntent, ServerMessage } from '../../shared/protocol';
 import { MessageType } from '../../shared/protocol';
 import type { WeatherMode } from '../core/Settings';
 import type { InputFrame } from '../core/InputFrame';
@@ -61,6 +61,16 @@ export class OnlineSession {
   guest: GuestSession | null = null;
 
   private role: 'host' | 'guest' | null = null;
+  /**
+   * Como se entrou nesta sala.
+   *
+   * Guardado porque é o que decide **qual tela de espera** o jogador vê quando o
+   * servidor responde. Sem ele, a fase saltava de `connecting` direto para
+   * `hosting` nos três caminhos: quem clicava em "procurar capitão" recebia a
+   * tela de "sua sala está aberta, passe o código adiante", e quem digitava um
+   * código também. Duas telas erradas de três, e a certa aparecia por acidente.
+   */
+  private intent: JoinIntent | null = null;
   private announcedSecond = -1;
   /** Taxa de quadros observada, para a nota de desempenho. */
   private fps = 60;
@@ -163,6 +173,7 @@ export class OnlineSession {
     this.host = null;
     this.guest = null;
     this.role = null;
+    this.intent = null;
     this.set({
       phase: 'idle',
       code: null,
@@ -209,10 +220,11 @@ export class OnlineSession {
     this.host?.afterStep(tick);
   }
 
-  private connect(intent: 'queue' | 'create' | 'join', nickname: string, code?: string): void {
+  private connect(intent: JoinIntent, nickname: string, code?: string): void {
     if (!this.serverUrl) return;
     this.leave();
 
+    this.intent = intent;
     this.set({ phase: 'connecting', message: null, waitingSeconds: 0 });
     this.announcedSecond = -1;
 
@@ -231,8 +243,13 @@ export class OnlineSession {
       case 'welcome':
         // Sem papel ainda: ele só existe quando houver com quem comparar. Ver a
         // nota em `ServerMessage.welcome`.
+        //
+        // A tela de espera sai de **como se entrou**, e não do que a fase era um
+        // instante atrás — que era sempre `connecting`, e por isso caía sempre no
+        // ramo de `hosting`. Ver `intent`.
         this.set({
-          phase: this.state.phase === 'joining' ? 'joining' : 'hosting',
+          phase:
+            this.intent === 'queue' ? 'queued' : this.intent === 'join' ? 'joining' : 'hosting',
           code: message.code,
         });
         return;
@@ -268,7 +285,11 @@ export class OnlineSession {
       case 'over': {
         // O vencedor vem no índice do host; quem é guest tem de traduzir.
         const mine: 0 | 1 = this.role === 'host' ? 0 : 1;
-        const won = message.winner === mine;
+        // Adversário que sai é adversário que perdeu, e esta mensagem só chega a
+        // quem **ficou** — a sala não a manda para quem saiu. Sem a cláusula, o
+        // vencedor vinha `null`, a comparação dava falso e quem estava vencendo
+        // um duelo abandonado recebia a tela de derrota.
+        const won = message.reason === 'left' ? true : message.winner === mine;
         this.overListener?.(won, message.reason);
         return;
       }
@@ -282,19 +303,33 @@ export class OnlineSession {
     }
   }
 
+  /**
+   * Um quadro binário chegou.
+   *
+   * A cerca de exceção é obrigatória, e não zelo: isto roda dentro do
+   * `onmessage` do socket, e o que escapar daqui sobe para o navegador sem
+   * ninguém para pegar. Um único quadro truncado — uma versão diferente, um
+   * pacote cortado — derrubaria o tratador de rede da partida inteira, e o
+   * sintoma seria o mundo congelando **sem erro nenhum na tela**. Perder um
+   * quadro é barato: o seguinte vem em 33 ms.
+   */
   private onFrame(frame: ArrayBuffer): void {
-    if (this.host) {
-      this.host.onFrame(frame);
-      return;
-    }
-    if (!this.guest) return;
+    try {
+      if (this.host) {
+        this.host.onFrame(frame);
+        return;
+      }
+      if (!this.guest) return;
 
-    const view = new DataView(frame);
-    if (view.byteLength >= 1 && view.getUint8(0) === MessageType.Stall) {
-      this.guest.markStalled();
-      return;
+      const view = new DataView(frame);
+      if (view.byteLength >= 1 && view.getUint8(0) === MessageType.Stall) {
+        this.guest.markStalled();
+        return;
+      }
+      this.guest.onFrame(frame);
+    } catch (error) {
+      console.warn('[sea-of-opus] dropped a malformed network frame', error);
     }
-    this.guest.onFrame(frame);
   }
 
   private onClosed(reason: string): void {

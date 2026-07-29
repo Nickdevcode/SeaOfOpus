@@ -24,6 +24,7 @@
  */
 
 import * as THREE from 'three';
+import { MAX_BREACHES } from '../../shared/protocol';
 import { GRAVITY, WATER_DENSITY, clamp, clamp01 } from '../core/MathUtils';
 import type { ShipBody } from './ShipBody';
 import {
@@ -157,6 +158,22 @@ const PATCH_DISTANCE = 1.1;
  * está num pedaço de casco que ninguém está olhando.
  */
 const MAX_PATCHES = 24;
+
+/**
+ * Rombos abertos que um casco guarda ao mesmo tempo.
+ *
+ * ⚠️ **Este teto faltava, e a falta dele não era um detalhe de desenho: era o
+ * formato de rede.** Ver `MAX_BREACHES` em `shared/protocol` — é de lá que o
+ * número vem, porque é o fio que manda nele. E não era um limite teórico: com
+ * `MERGE_DISTANCE` em 42 cm, um costado de 16 m comporta muito mais posições
+ * distintas que isso.
+ *
+ * Com a lista cheia, um tiro novo **alarga o rombo mais próximo** em vez de
+ * abrir mais um. É a degradação certa: o casco continua bebendo mais a cada
+ * acerto (a vazão é linear na área — ver `breachInflow`), e o jogador não perde
+ * o efeito do tiro que deu.
+ */
+export { MAX_BREACHES };
 
 /**
  * Quanto um rombo pode crescer ao absorver outros tiros.
@@ -466,9 +483,15 @@ export class ShipDamage {
     const existing = this.findNear(hit.local);
     if (existing) {
       // Tiro em cima de rombo aberto: alarga em vez de duplicar.
-      existing.area = Math.min(existing.area + BREACH_AREA * 0.6, BREACH_AREA * MAX_BREACH_SCALE);
-      existing.repair = 0;
-      return existing;
+      return this.widen(existing);
+    }
+
+    // Casco no teto de rombos: o tiro alarga o mais próximo que houver, sem
+    // limite de distância. Ver `MAX_BREACHES` — o efeito do acerto tem de
+    // continuar existindo, e alargar é o efeito que este modelo tem.
+    if (this.breaches.length >= MAX_BREACHES) {
+      const nearest = this.findNear(hit.local, Number.POSITIVE_INFINITY);
+      return nearest ? this.widen(nearest) : null;
     }
 
     // Tiro em cima de tábua pregada: arranca a tábua e devolve o rombo que ela
@@ -487,6 +510,13 @@ export class ShipDamage {
       id: this.nextBreachId++,
     };
     this.breaches.push(breach);
+    return breach;
+  }
+
+  /** Alarga um rombo existente, até o teto de `MAX_BREACH_SCALE`. */
+  private widen(breach: Breach): Breach {
+    breach.area = Math.min(breach.area + BREACH_AREA * 0.6, BREACH_AREA * MAX_BREACH_SCALE);
+    breach.repair = 0;
     return breach;
   }
 
@@ -563,7 +593,7 @@ export class ShipDamage {
    * plano d'água, e o plano vira peso aplicado no centróide.
    */
   fixedUpdate(dt: number, body: ShipBody, waves: WaveField): void {
-    body.worldDirToLocal(WORLD_UP, this.localUp);
+    this.orientToWorld(body);
     // Zerado aqui e reescrito só se houver água: senão o porão esgotado
     // continuaria pesando o valor do passo anterior para sempre.
     body.floodedMass = 0;
@@ -595,7 +625,7 @@ export class ShipDamage {
       return;
     }
 
-    this.waterPlane = this.solvePlane(this.floodVolume, this.localUp);
+    this.solveWaterPlane();
     const volume = this.sampleAtPlane(this.waterPlane, this.localUp, _centroid);
     if (volume <= 1e-6) {
       this.updateSinking(dt, body);
@@ -614,6 +644,40 @@ export class ShipDamage {
     body.floodedMass = WATER_DENSITY * volume;
 
     this.updateSinking(dt, body);
+  }
+
+  /**
+   * Recalcula o plano d'água a partir do volume que já está em `floodVolume`.
+   *
+   * ⚠️ **Existe por causa do duelo em rede, e a falta dele deixava o porão do
+   * cliente que não simula seco para sempre.** O volume de água chega
+   * autoritativo no instantâneo — o HUD subia, o navio calava mais fundo, tudo
+   * certo —, mas quem desenha a lâmina lê `waterPlane`, e `waterPlane` só era
+   * resolvido dentro de `fixedUpdate`, que é o caminho de quem simula. O
+   * jogador do outro lado descia ao porão com o casco furado e encontrava
+   * assoalho seco: "abri rombo e não entra água".
+   *
+   * Separado em vez de deixar `fixedUpdate` inteiro rodar no guest porque o
+   * resto de `fixedUpdate` **decide** o alagamento (vazão, bomba, peso da
+   * água), e decidir aqui seria abrir uma segunda verdade sobre o mesmo casco.
+   * Isto aqui só olha.
+   *
+   * @param body o corpo do navio, para saber onde é "para cima" no referencial
+   *   local. Omitido, reaproveita a vertical do último passo — que é o que
+   *   `fixedUpdate` quer, porque ele já a mediu.
+   */
+  solveWaterPlane(body?: ShipBody): void {
+    if (body) this.orientToWorld(body);
+    if (this.floodVolume <= 1e-4) {
+      this.waterPlane = -Infinity;
+      return;
+    }
+    this.waterPlane = this.solvePlane(this.floodVolume, this.localUp);
+  }
+
+  /** Mede a vertical do mundo no referencial do casco. */
+  private orientToWorld(body: ShipBody): void {
+    body.worldDirToLocal(WORLD_UP, this.localUp);
   }
 
   /** Zera tudo — usado no respawn e ao montar uma partida nova. */

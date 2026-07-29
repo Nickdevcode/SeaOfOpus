@@ -45,6 +45,24 @@ const CAPACITY = 60;
  */
 const AHEAD_THRESHOLD = 8;
 
+/**
+ * Distância em que um tick faltando conta como **buraco**, e não como atraso.
+ *
+ * Quatro quadros. A diferença entre os dois casos é o que a fila já tem:
+ *
+ * - Se o quadro pedido não chegou e **nada** mais chegou, ele está a caminho —
+ *   esperar é o certo, e a política de fome cobre o passo.
+ * - Se o quadro pedido não chegou mas o **seguinte** já está aqui, ele não vem
+ *   mais: a rede entrega em ordem, então quem passou na frente enterrou o que
+ *   ficou para trás. Repetir o comando anterior nesse caso é jogar fora o
+ *   comando certo, que está guardado a um passo de distância.
+ *
+ * A janela é curta de propósito. Ela cobre a perda das duas cópias que a
+ * redundância do lote manda (ver `INPUT_BATCH`) e não muito mais; buraco maior
+ * que isso é salto de relógio, e para salto quem responde é `AHEAD_THRESHOLD`.
+ */
+const AHEAD_WINDOW = 4;
+
 export class InputBuffer {
   /** Quadros à espera, ordenados por tick. Vai em todo instantâneo. */
   depth = 0;
@@ -61,6 +79,17 @@ export class InputBuffer {
   private starvedSinceReport = 0;
   /** Último tick consumido, para o guest medir a ida e volta. */
   lastConsumedTick = 0;
+  /**
+   * O carimbo do quadro que de fato alimentou o último passo, ou `-1` se ele
+   * foi alimentado por repetição.
+   *
+   * Não é o mesmo que `lastConsumedTick`, e a diferença é justamente o que
+   * `claimAhead` introduz: o passo pedido e o comando aplicado podem ser de
+   * ticks vizinhos. É a única medida que responde "o comando do jogador chegou?"
+   * — contar fome responde outra pergunta, e um comando pode se perder sem
+   * produzir fome nenhuma.
+   */
+  appliedTick = -1;
 
   private readonly frames = new Map<number, InputFrame>();
   private readonly pool: InputFrame[] = [];
@@ -98,6 +127,7 @@ export class InputBuffer {
 
     const stored = this.frames.get(tick) ?? this.claimAhead(tick);
     if (stored) {
+      this.appliedTick = stored.tick;
       this.frames.delete(stored.tick);
       copyInputFrame(stored, this.last);
       clearInputFrame(stored);
@@ -110,6 +140,7 @@ export class InputBuffer {
       return this.out;
     }
 
+    this.appliedTick = -1;
     this.starves++;
     this.starvedSinceReport = Math.min(this.starvedSinceReport + 1, 255);
     this.dropStale(tick);
@@ -151,19 +182,37 @@ export class InputBuffer {
    *
    * Aceitar o mais antigo disponível fecha o buraco em um passo: o comando é de
    * um instante ligeiramente diferente do pedido — e é o comando **certo**, em
-   * vez de um comando velho repetido. A guarda é a fila estar visivelmente
-   * gorda, para que a política normal (esperar o quadro certo chegar) continue
-   * valendo no jitter do dia a dia.
+   * vez de um comando velho repetido.
+   *
+   * ## Duas guardas, e não uma
+   *
+   * A versão anterior só aceitava com a fila **gorda**, o que resolvia o salto
+   * de relógio e deixava passar o caso comum: o buraco de um quadro só. Na fila
+   * rasa em que um duelo saudável trabalha — a mira é justamente manter uma ou
+   * duas unidades de folga —, oito quadros guardados nunca acontecem, então a
+   * perda das duas cópias de um mesmo comando caía direto na política de fome
+   * mesmo com o comando seguinte já em mãos. Uma fome dessas é relatada, e um
+   * relato de fome manda o avanço subir: o remédio de um problema que não
+   * existia virava latência permanente.
+   *
+   * Hoje há duas: buraco **curto** é aceito sempre (ver `AHEAD_WINDOW`), e o
+   * salto grande continua exigindo a fila gorda.
    */
   private claimAhead(tick: number): InputFrame | null {
-    if (this.frames.size < AHEAD_THRESHOLD) return null;
-
     let earliest: InputFrame | null = null;
     for (const frame of this.frames.values()) {
       if (frame.tick <= tick) continue;
       if (!earliest || frame.tick < earliest.tick) earliest = frame;
     }
-    return earliest;
+    if (!earliest) return null;
+
+    // Buraco curto: o comando certo está logo ali, e aplicá-lo um passo
+    // adiantado é melhor que repetir o anterior. Ver `AHEAD_WINDOW`.
+    if (earliest.tick - tick <= AHEAD_WINDOW) return earliest;
+
+    // Salto grande: só com a fila visivelmente gorda, que é o sinal de que o
+    // relógio do cliente pulou. Ver o parágrafo acima.
+    return this.frames.size >= AHEAD_THRESHOLD ? earliest : null;
   }
 
   /** Fomes desde o último instantâneo. Zerado por quem as reporta. */
@@ -184,6 +233,7 @@ export class InputBuffer {
     this.starves = 0;
     this.starvedSinceReport = 0;
     this.lastConsumedTick = 0;
+    this.appliedTick = -1;
   }
 
   /** Devolve ao pool o que ficou para trás. */

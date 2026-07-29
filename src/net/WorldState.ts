@@ -24,15 +24,20 @@ import {
   type SnapshotHeader,
 } from './snapshotCodec';
 
-/** Rombos por casco que o formato transporta. Ver `MAX_PATCHES` em `ShipDamage`. */
-const MAX_BREACHES = 32;
-
 export interface BreachState {
   id: number;
   readonly local: THREE.Vector3;
   readonly normal: THREE.Vector3;
   area: number;
   repair: number;
+}
+
+/** Uma tábua pregada, como ela chega do lado que simula. Ver `Patch`. */
+export interface PatchState {
+  id: number;
+  readonly local: THREE.Vector3;
+  readonly normal: THREE.Vector3;
+  area: number;
 }
 
 export interface CannonState {
@@ -58,6 +63,8 @@ export interface ShipState {
   sinkTime: number;
   /** `null` quando o instantâneo não trouxe a lista (ela não mudou). */
   breaches: BreachState[] | null;
+  /** Idem, e as duas vêm sempre juntas: uma tábua nasce de um rombo que fecha. */
+  patches: PatchState[] | null;
 }
 
 export interface CrewState {
@@ -105,6 +112,8 @@ export interface WorldState {
   windDirection: number;
   windStrength: number;
   waveTime: number;
+  /** Rumo da ondulação de fundo. Ver a nota no codec — sem ele, dois mares. */
+  swellDirection: number;
   readonly sky: SkyState;
   readonly ships: [ShipState, ShipState];
   readonly crew: [CrewState, CrewState];
@@ -131,6 +140,7 @@ function createShipState(): ShipState {
     floodFraction: 0,
     sinkTime: 0,
     breaches: null,
+    patches: null,
   };
 }
 
@@ -171,6 +181,7 @@ export function createWorldState(): WorldState {
     windDirection: 0,
     windStrength: 0,
     waveTime: 0,
+    swellDirection: 0,
     sky: createSkyState(),
     ships: [createShipState(), createShipState()],
     crew: [createCrewState(), createCrewState()],
@@ -178,14 +189,25 @@ export function createWorldState(): WorldState {
   };
 }
 
-/** Reserva de rombos, para a leitura não alocar por quadro. */
+/** Reserva de rombos e tábuas, para a leitura não alocar por quadro. */
 const breachPool: BreachState[][] = [[], []];
+const patchPool: PatchState[][] = [[], []];
 
 function borrowBreach(slot: ShipSlot, index: number): BreachState {
   const pool = breachPool[slot]!;
   let entry = pool[index];
   if (!entry) {
     entry = { id: 0, local: new THREE.Vector3(), normal: new THREE.Vector3(), area: 0, repair: 0 };
+    pool[index] = entry;
+  }
+  return entry;
+}
+
+function borrowPatch(slot: ShipSlot, index: number): PatchState {
+  const pool = patchPool[slot]!;
+  let entry = pool[index];
+  if (!entry) {
+    entry = { id: 0, local: new THREE.Vector3(), normal: new THREE.Vector3(), area: 0 };
     pool[index] = entry;
   }
   return entry;
@@ -234,21 +256,37 @@ function readShip(r: Reader, target: ShipState, slot: ShipSlot, withBreaches: bo
 
   if (!withBreaches) {
     target.breaches = null;
+    target.patches = null;
     return;
   }
 
-  const count = Math.min(r.u8(), MAX_BREACHES);
-  const list: BreachState[] = [];
-  for (let i = 0; i < count; i++) {
+  // ⚠️ Sem `Math.min` aqui: o escritor já grampeia em `MAX_BREACHES`, e cortar
+  // de novo **deste lado** era justamente o defeito — o leitor parava antes do
+  // escritor e todo o resto do instantâneo saía do lugar. Um teto só, na fonte.
+  const breachCount = r.u8();
+  const breaches: BreachState[] = [];
+  for (let i = 0; i < breachCount; i++) {
     const breach = borrowBreach(slot, i);
     breach.id = r.u8();
     r.local(breach.local, QUANT.breach);
     breach.normal.set(r.i8() / 127, r.i8() / 127, r.i8() / 127).normalize();
     breach.area = r.u8() / 2550;
     breach.repair = r.u8() / 255;
-    list.push(breach);
+    breaches.push(breach);
   }
-  target.breaches = list;
+  target.breaches = breaches;
+
+  const patchCount = r.u8();
+  const patches: PatchState[] = [];
+  for (let i = 0; i < patchCount; i++) {
+    const patch = borrowPatch(slot, i);
+    patch.id = r.u8();
+    r.local(patch.local, QUANT.breach);
+    patch.normal.set(r.i8() / 127, r.i8() / 127, r.i8() / 127).normalize();
+    patch.area = r.u8() / 2550;
+    patches.push(patch);
+  }
+  target.patches = patches;
 }
 
 /** O céu e o tempo. Ver `writeSky`, do outro lado. */
@@ -324,9 +362,23 @@ function readEvents(r: Reader, out: MatchEvent[]): void {
 /**
  * Lê um instantâneo para dentro de um `WorldState`.
  *
+ * O corpo real é `readSnapshot`; isto aqui é a casca que transforma um quadro
+ * truncado ou de outra versão em `null` em vez de numa exceção. `DataView`
+ * lança ao ler além do fim, e essa exceção subiria pelo `onmessage` do socket:
+ * um único pacote ruim derrubaria o tratador de rede do jogo inteiro, e o
+ * sintoma seria o mundo congelando sem nenhum erro visível.
+ *
  * @returns o cabeçalho, ou `null` se o quadro não for um instantâneo válido.
  */
 export function decodeSnapshot(buffer: ArrayBuffer, target: WorldState): SnapshotHeader | null {
+  try {
+    return readSnapshot(buffer, target);
+  } catch {
+    return null;
+  }
+}
+
+function readSnapshot(buffer: ArrayBuffer, target: WorldState): SnapshotHeader | null {
   if (buffer.byteLength < 10) return null;
   const r = new Reader(new DataView(buffer));
   if (r.u8() !== MessageType.Snapshot) return null;
@@ -342,6 +394,7 @@ export function decodeSnapshot(buffer: ArrayBuffer, target: WorldState): Snapsho
   target.windDirection = dequantize(r.i16(), QUANT.angle);
   target.windStrength = r.u8() / 255;
   target.waveTime = r.f32();
+  target.swellDirection = dequantize(r.i16(), QUANT.angle);
 
   readSky(r, target.sky);
 

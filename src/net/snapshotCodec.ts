@@ -35,6 +35,7 @@ import type * as THREE from 'three';
 import { MessageType, QUANT, dequantize, quantize } from '../../shared/protocol';
 import { wrapAngle } from '../core/MathUtils';
 import type { InputFrame } from '../core/InputFrame';
+import { INPUT_FRAME_BYTES, MAX_BREACHES } from '../../shared/protocol';
 import type { Match } from '../game/Match';
 import type { MatchEvent } from '../game/MatchEvents';
 import type { Ship } from '../ship/Ship';
@@ -209,11 +210,22 @@ export function encodeInput(frames: readonly InputFrame[]): ArrayBuffer {
   return inputBuffer.slice(0, w.offset);
 }
 
-/** Desempacota um lote de entrada para dentro dos objetos passados. */
+/**
+ * Desempacota um lote de entrada para dentro dos objetos passados.
+ *
+ * A contagem é conferida contra o **tamanho do buffer** antes de qualquer
+ * leitura, e não é zelo teórico: um quadro truncado (ou forjado) faria
+ * `DataView` lançar no meio do laço, e esse lançamento sobe pelo `onmessage` do
+ * socket — ou seja, um pacote ruim de um lado derrubaria o tratador de rede do
+ * outro. Devolver zero quadros é a resposta certa: o `InputBuffer` já sabe o que
+ * fazer quando não chega comando.
+ */
 export function decodeInput(buffer: ArrayBuffer, out: InputFrame[]): number {
+  if (buffer.byteLength < 2) return 0;
   const r = new Reader(new DataView(buffer));
   r.u8();
   const count = r.u8();
+  if (buffer.byteLength < 2 + count * INPUT_FRAME_BYTES) return 0;
 
   for (let i = 0; i < count && i < out.length; i++) {
     const frame = out[i]!;
@@ -310,8 +322,15 @@ function writeShip(w: Writer, ship: Ship, includeBreaches: boolean): void {
   w.u16(Math.round(Math.min(damage.sinkTime, 65) * 1000));
 
   if (!includeBreaches) return;
-  w.u8(Math.min(damage.breaches.length, 255));
-  for (const breach of damage.breaches) {
+
+  // ⚠️ O teto é o **mesmo** dos dois lados do fio, e agora ele é uma constante
+  // só, importada de onde os rombos moram. Enquanto o escritor mandava quantos
+  // houvesse e o leitor parava em 32, um casco muito castigado desalinhava o
+  // instantâneo inteiro a partir dali. Ver `MAX_BREACHES`.
+  const breachCount = Math.min(damage.breaches.length, MAX_BREACHES);
+  w.u8(breachCount);
+  for (let i = 0; i < breachCount; i++) {
+    const breach = damage.breaches[i]!;
     w.u8(breach.id & 0xff);
     w.local(breach.local, QUANT.breach);
     w.i8(Math.round(breach.normal.x * 127));
@@ -321,6 +340,26 @@ function writeShip(w: Writer, ship: Ship, includeBreaches: boolean): void {
     // útil inteira num byte.
     w.u8(Math.round(Math.min(breach.area * 2550, 255)));
     w.u8(Math.round(Math.max(0, Math.min(1, breach.repair)) * 255));
+  }
+
+  // As tábuas pregadas viajam junto, e é o que faltava para o costado do
+  // adversário contar a história certa: sem elas, um rombo tapado do outro lado
+  // simplesmente **sumia** do casco aqui, em vez de virar cicatriz com madeira
+  // por cima. Um navio no fim de um combate longo é uma colcha de retalhos, e
+  // metade dessa leitura estava indo embora no fio.
+  //
+  // Onze bytes por tábua, e só quando a lista muda: `repair` não existe aqui
+  // (uma tábua está pregada ou não está), então ela é um rombo menos um byte.
+  const patchCount = Math.min(damage.patches.length, MAX_BREACHES);
+  w.u8(patchCount);
+  for (let i = 0; i < patchCount; i++) {
+    const patch = damage.patches[i]!;
+    w.u8(patch.id & 0xff);
+    w.local(patch.local, QUANT.breach);
+    w.i8(Math.round(patch.normal.x * 127));
+    w.i8(Math.round(patch.normal.y * 127));
+    w.i8(Math.round(patch.normal.z * 127));
+    w.u8(Math.round(Math.min(patch.area * 2550, 255)));
   }
 }
 
@@ -353,6 +392,15 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   w.i16(quantize(waves.windDirection, QUANT.angle));
   w.u8(Math.round(Math.max(0, Math.min(1, waves.windStrength)) * 255));
   w.f32(waves.time);
+  // ⚠️ **O rumo da ondulação de fundo, e ele faltava.** As duas ondas longas do
+  // espectro compõem a direção com este ângulo (ver `WaveField.syncUniforms`), e
+  // são justamente elas que levantam um casco de 16 m. Ele nascia do vento
+  // *local* de cada cliente — diferente nos dois, porque cada um tinha passado
+  // um tempo diferente na tela de título — e depois só andava do lado que
+  // simula, porque quem o move é `followWind`. Resultado: dois mares distintos
+  // desde o primeiro quadro, e um navio que aos olhos de um dos dois flutua fora
+  // da onda. Dois bytes fecham a conta inteira.
+  w.i16(quantize(wrapAngle(waves.swellDirection), QUANT.angle));
 
   writeSky(w, match);
 

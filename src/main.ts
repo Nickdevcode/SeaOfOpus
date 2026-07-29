@@ -169,6 +169,11 @@ online.onStart((config) => {
 
 online.onOver((won, reason) => {
   if (menu.current === 'outcome') return;
+  // **Antes de `leave`**, e a ordem é o que impede o mundo de sair andando
+  // sozinho atrás da tela de fim: `leave` desliga a sessão de rede, e sem ela o
+  // passo seguinte cairia no caminho de quem simula — dois cascos integrando
+  // física local, sem capitão da máquina e sem entrada nenhuma para o segundo.
+  match.endOnline(won);
   audio.outcome(won);
   menu.showOutcome(won, match.stats, 'online');
   online.leave();

@@ -29,13 +29,13 @@
 
 import * as THREE from 'three';
 import { FIXED_TIMESTEP } from '../core/Engine';
-import { copyInputFrame, createInputFrame, type InputFrame } from '../core/InputFrame';
+import type { InputFrame } from '../core/InputFrame';
 import type { Match } from '../game/Match';
 import type { Ship } from '../ship/Ship';
 import { BALL_MASS, BALL_RADIUS, MUZZLE_SPEED } from '../ship/Cannon';
 import { breachInflow } from '../ship/ShipDamage';
-import { INPUT_BATCH } from '../../shared/protocol';
 import { encodeInput } from './snapshotCodec';
+import { InputOutbox } from './InputOutbox';
 import { advanceHostEstimate, correctHostEstimate, interpolationFactor } from './renderClock';
 import { createWorldState, decodeSnapshot, type WorldState } from './WorldState';
 import type { RoomClient } from './RoomClient';
@@ -100,6 +100,9 @@ const LEAD_MAX = 24;
 
 /** Fração do desvio do leme corrigida por instantâneo. Ver `applyShipParts`. */
 const WHEEL_CATCHUP = 0.08;
+
+/** Fração do desvio da mira corrigida por instantâneo. Ver `correctOperatedAim`. */
+const AIM_CATCHUP = 0.12;
 
 /**
  * Intervalo entre ajustes do avanço, em passos. Meio segundo.
@@ -211,9 +214,14 @@ export class GuestSession {
   private readonly history = new Map<number, THREE.Vector3>();
   private readonly historyPool: THREE.Vector3[] = [];
 
-  /** Os últimos quadros enviados, para a redundância do lote. */
-  private readonly outbox: InputFrame[] = Array.from({ length: INPUT_BATCH }, createInputFrame);
-  private outboxCount = 0;
+  /**
+   * A janela de comandos que sai daqui, com a costura que a mantém sem buracos.
+   *
+   * Ver `InputOutbox` — em resumo, cada correção do relógio de predição pula ou
+   * repete um carimbo, e o host descarta as duas coisas. Sem a costura, cada
+   * correção custava um comando do jogador.
+   */
+  private readonly outbox = new InputOutbox();
 
   private leadTimer = 0;
   /**
@@ -249,6 +257,12 @@ export class GuestSession {
     return this.slot === 0 ? 1 : 0;
   }
 
+  /** A peça que o jogador local está servindo, ou `-1`. */
+  private get operatedCannon(): number {
+    const mine = this.match.crew[0].controller;
+    return mine.station === 'cannon' ? mine.cannonIndex : -1;
+  }
+
   get ready(): boolean {
     return this.hasTo;
   }
@@ -266,7 +280,7 @@ export class GuestSession {
     this.lead = 4;
     this.visualOffset.set(0, 0, 0);
     this.releaseHistory(Number.POSITIVE_INFINITY);
-    this.outboxCount = 0;
+    this.outbox.reset();
     this.stalled = false;
   }
 
@@ -321,6 +335,7 @@ export class GuestSession {
     }
 
     this.reconcile();
+    this.correctOperatedAim();
     // Os eventos do host viram os eventos deste passo: fumaça, estrondo, lasca e
     // as balas nascem daqui. Ver `MatchEvents` — um caminho, dois papéis.
     //
@@ -333,6 +348,38 @@ export class GuestSession {
       this.match.events.push(event);
     }
     this.to.events.length = 0;
+  }
+
+  /**
+   * Reaproxima a mira da peça que **eu** sirvo do ângulo que o host tem dela.
+   *
+   * ⚠️ **Sem isto, a mira do canhão é a única coisa do jogo que diverge para
+   * sempre.** Ela é acumular-e-grampear dos mesmos deltas dos dois lados, o que
+   * concorda perfeitamente enquanto nenhum comando se perde — e comando se
+   * perde. Bastava um, e daí em diante o cano que eu vejo apontado para o casco
+   * dele não é o cano de onde a bala sai: eu miro, aperto, a bala nasce do outro
+   * lado com outro ângulo e passa longe. É a leitura mais frustrante que um
+   * duelo pode dar, porque nada na tela sugere que o problema não foi a mira.
+   *
+   * É o mesmo remédio da roda do timão (ver `WHEEL_CATCHUP`) e roda no mesmo
+   * ritmo em que a informação nova chega: **uma vez por instantâneo**, e não uma
+   * vez por passo. Aqui a diferença importa mais que na roda, porque este ângulo
+   * está debaixo da mão de quem está mirando agora — puxá-lo sessenta vezes por
+   * segundo seria arrastar a peça contra o próprio jogador.
+   *
+   * O ganho é pequeno de propósito: o valor que chega descreve meia ida e volta
+   * atrás. A doze por cento por instantâneo, um erro fecha em cerca de meio
+   * segundo e é imperceptível com o cano em movimento.
+   */
+  private correctOperatedAim(): void {
+    const index = this.operatedCannon;
+    if (index < 0) return;
+    const cannon = this.match.ships[0]!.cannons[index];
+    const target = this.to.ships[this.slot]!.cannons[index];
+    if (!cannon || !target) return;
+
+    cannon.traverse += (target.traverse - cannon.traverse) * AIM_CATCHUP;
+    cannon.elevation += (target.elevation - cannon.elevation) * AIM_CATCHUP;
   }
 
   /**
@@ -478,6 +525,13 @@ export class GuestSession {
     waves.time = this.from.waveTime + (this.to.waveTime - this.from.waveTime) * t;
     waves.windDirection = this.to.windDirection;
     waves.windStrength = this.to.windStrength;
+    // ⚠️ **E o rumo da ondulação de fundo junto**, que é o que faltava e o que
+    // fazia os dois jogadores navegarem mares diferentes. Quem o move é
+    // `WaveField.followWind`, e `followWind` mora no passo de quem simula: deste
+    // lado ele ficava congelado no valor de fábrica enquanto do outro girava
+    // 2% por segundo em direção ao vento. As duas ondas longas do espectro
+    // compõem a direção com ele — e são elas que levantam o casco.
+    waves.swellDirection = this.to.swellDirection;
     waves.syncUniforms();
 
     this.applySky();
@@ -561,11 +615,11 @@ export class GuestSession {
       const target = to.cannons[i]!;
       const previous = from.cannons[i]!;
       cannon.beginStep();
-      // A peça que **eu** estou operando não é corrigida a cada instantâneo: a
-      // mira é acumular-e-grampear dos mesmos deltas que o host aplica, então os
-      // dois concordam sozinhos. Escrever por cima daria um cano que recua meio
-      // grau quinze vezes por segundo enquanto se tenta mirar.
-      const operatedByMe = mine && this.match.crew[0].controller.cannonIndex === i;
+      // A peça que **eu** estou operando não é escrita por cima a cada passo: a
+      // mira responde ao meu mouse agora, e um cano que salta meio grau quinze
+      // vezes por segundo é impossível de apontar. Quem a reaproxima da verdade
+      // é `correctOperatedAim`, uma vez por instantâneo e de leve.
+      const operatedByMe = mine && this.operatedCannon === i;
       if (!operatedByMe) {
         cannon.traverse = previous.traverse + (target.traverse - previous.traverse) * t;
         cannon.elevation = previous.elevation + (target.elevation - previous.elevation) * t;
@@ -579,14 +633,31 @@ export class GuestSession {
     // uma bala que o outro atirou.
     ship.damage.floodVolume = to.floodFraction * ship.damage.holdVolume;
     ship.damage.sinkTime = to.sinkTime;
-    if (to.breaches) this.applyBreaches(ship, to.breaches);
+    if (to.breaches) this.applyBreaches(ship, to.breaches, to.patches);
     // Mesmo quando a lista não mudou, o esguicho muda: a onda andou e o casco
     // adernou. Ver `refreshBreachInflow`.
     else if (ship.damage.breaches.length > 0) this.refreshBreachInflow(ship);
+
+    // ⚠️ **E a lâmina d'água é resolvida aqui, todo passo.**
+    //
+    // O volume chega pronto na linha de cima e sempre chegou — o HUD subia, o
+    // casco calava mais fundo, tudo certo. O que faltava era converter esse
+    // volume no **plano** que o desenho lê, e quem fazia essa conversão era
+    // `ShipDamage.fixedUpdate`, que é o caminho de quem simula. Deste lado o
+    // plano ficava em `-Infinity` para sempre, e `DamageView` esconde a água
+    // quando ele não é finito: o jogador descia ao porão com o casco furado e
+    // encontrava assoalho seco. "Abri rombo e não entra água" é exatamente isto.
+    //
+    // Todo passo, e não só quando a lista muda, porque o plano depende da
+    // adernada — e a adernada muda sessenta vezes por segundo.
+    ship.damage.solveWaterPlane(ship.body);
   }
 
-  private applyBreaches(ship: Ship, incoming: WorldState['ships'][0]['breaches']): void {
-    if (!incoming) return;
+  private applyBreaches(
+    ship: Ship,
+    incoming: NonNullable<WorldState['ships'][0]['breaches']>,
+    patches: WorldState['ships'][0]['patches'],
+  ): void {
     const { breaches } = ship.damage;
     breaches.length = 0;
     for (const source of incoming) {
@@ -606,6 +677,24 @@ export class GuestSession {
       });
     }
     this.refreshBreachInflow(ship);
+
+    // As tábuas vêm no mesmo campo condicional, e são o que faltava para o
+    // costado do adversário contar a história certa: sem elas, o rombo que ele
+    // acabou de tapar **sumia** do casco em vez de virar cicatriz com madeira
+    // por cima. Reescrever a lista inteira é seguro porque ela é autoritativa
+    // dos dois lados — inclusive a minha, que eu previ localmente e que o host
+    // acabou de confirmar.
+    if (!patches) return;
+    const list = ship.damage.patches;
+    list.length = 0;
+    for (const source of patches) {
+      list.push({
+        id: source.id,
+        local: source.local.clone(),
+        normal: source.normal.clone(),
+        area: source.area,
+      });
+    }
   }
 
   /**
@@ -775,15 +864,10 @@ export class GuestSession {
     frame.yaw = view.yaw;
     frame.pitch = view.pitch;
 
-    // Desliza a janela: o mais antigo cai fora.
-    for (let i = this.outbox.length - 1; i > 0; i--) {
-      copyInputFrame(this.outbox[i - 1]!, this.outbox[i]!);
-    }
-    copyInputFrame(frame, this.outbox[0]!);
-    this.outboxCount = Math.min(this.outboxCount + 1, this.outbox.length);
+    this.outbox.add(frame);
 
     if (frame.tick % SEND_EVERY !== 0) return;
-    this.client.sendFrame(encodeInput(this.outbox.slice(0, this.outboxCount)));
+    this.client.sendFrame(encodeInput(this.outbox.batch));
   }
 
   /**
@@ -866,7 +950,15 @@ export class GuestSession {
     // também quando o comando chega exatamente na hora, que é o alvo. Guiar por
     // ela fazia o avanço subir justamente quando ele estava certo, e nunca mais
     // descer.
-    if (starved > 0) this.lead = Math.min(this.lead + 2, LEAD_MAX);
+    //
+    // O tamanho do passo de subida acompanha o tamanho da fome. Era dois
+    // sempre, e dois é a resposta certa para uma rede que engasgou de verdade —
+    // não para o único passo perdido que um pacote atrasado produz. Como avanço
+    // é latência de comando pura, subir dois por causa de um custa 33 ms de
+    // atraso permanente em toda ação que dependa do host, e o ajuste seguinte só
+    // devolve um deles.
+    if (starved >= 4) this.lead = Math.min(this.lead + 2, LEAD_MAX);
+    else if (starved > 0) this.lead = Math.min(this.lead + 1, LEAD_MAX);
     else if (floor > DEPTH_TARGET) this.lead = Math.max(this.lead - 1, LEAD_MIN);
   }
 }

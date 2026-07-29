@@ -46,8 +46,23 @@
  * fila, e os dois casos que ele precisava distinguir têm a mesma aparência ali:
  * fila vazia é tanto "o comando chegou tarde" quanto "o comando chegou na hora
  * exata". O avanço subia em cima do segundo e nunca mais descia.
+ *
+ * **4** — três campos que faltavam ao mundo, e os três produziam a mesma queixa
+ * ("não está sincronizado") por caminhos diferentes:
+ *
+ * - **O rumo da ondulação de fundo** (`swellDirection`). Ele nascia do vento
+ *   *local* de cada cliente — que era diferente, porque cada um tinha ficado um
+ *   tempo diferente na tela de título — e depois só andava no lado que simula.
+ *   As duas ondas longas do espectro são as que levantam o casco, então os dois
+ *   jogadores viam o mesmo navio flutuando em mares diferentes desde o primeiro
+ *   quadro.
+ * - **As tábuas pregadas.** Um rombo tapado sumia do costado do adversário em
+ *   vez de virar cicatriz com madeira por cima.
+ * - **A mira da peça operada**, que agora também é corrigida pelo instantâneo
+ *   como já era a roda do timão: acumular deltas dos dois lados só concorda
+ *   enquanto nenhum comando se perde.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Casas do código de sala. */
 export const CODE_LENGTH = 4;
@@ -160,6 +175,23 @@ export const MessageType = {
  * a pena bolar um esquema de confirmação e reenvio.
  */
 export const INPUT_BATCH = 4;
+
+/**
+ * Rombos (e tábuas pregadas) que o formato transporta por casco.
+ *
+ * Mora aqui, e não junto do modelo de avaria, porque **é o fio que manda neste
+ * número**. A lista viaja atrás de uma contagem de um byte, e o leitor do outro
+ * lado precisa parar exatamente onde o escritor parou: enquanto os dois lados
+ * tinham cada um o seu teto — o escritor mandava quantos houvesse, o leitor
+ * parava em 32 —, um casco muito castigado desalinhava o instantâneo inteiro a
+ * partir dali, e o guest passava a ler o marujo, o adversário e os eventos em
+ * cima de bytes que pertenciam a outra coisa.
+ *
+ * Um teto, uma definição, e `ShipDamage` o importa daqui para nunca abrir mais
+ * rombos do que cabe contar. Ver `MAX_BREACHES` lá para o que acontece com o
+ * tiro que chega com a lista cheia.
+ */
+export const MAX_BREACHES = 24;
 
 /**
  * Bytes de um `InputFrame` no fio.

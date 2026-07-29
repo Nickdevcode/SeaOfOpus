@@ -273,10 +273,22 @@ export class Environment {
    * `QualitySettings`.
    */
   reseed(seed: number): void {
+    // ⚠️ **O tempo vem primeiro, e a ordem é o conserto.**
+    //
+    // `WaveField.generate` fixa o rumo da ondulação de fundo no rumo do vento
+    // **daquele instante**, e é dele que as duas ondas longas do espectro tiram
+    // a direção pelo resto da partida. Gerando o mar antes de semear o tempo, o
+    // rumo que ele congelava era o que o vento local tinha alcançado girando
+    // desde que a página abriu — um número diferente em cada máquina. Os dois
+    // jogadores entravam no mesmo mar com as ondas grandes vindo de lados
+    // diferentes, e a queixa que isso produz é a mais vaga possível: "não está
+    // sincronizado".
+    this.weather.reseed(seed ^ 0x5eed);
+    this.waveField.windDirection = this.weather.direction;
+    this.waveField.windStrength = this.weather.wind;
     this.waveField.generate(MAX_WAVES, seed);
     this.waveField.time = 0;
     this.waveField.syncUniforms();
-    this.weather.reseed(seed ^ 0x5eed);
   }
 
   applyQuality(quality: QualitySettings): void {

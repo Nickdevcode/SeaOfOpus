@@ -323,8 +323,35 @@ export class Match {
     this.setState('fighting');
   }
 
-  /** Volta ao menu, com o mundo intacto para servir de plano de fundo. */
+  /**
+   * Encerra um duelo em rede com o resultado que a sala anunciou.
+   *
+   * ⚠️ **Sem isto, o duelo do cliente que não simula nunca acabava.** Quem
+   * decide o fim é o host, e a notícia chega pelo lobby; deste lado o estado
+   * continuava em `fighting` e o mundo seguia rodando atrás da tela de
+   * resultado. Pior: a sessão de rede é desligada junto com o anúncio, e sem
+   * ela o passo do quadro seguinte cai no caminho de **quem simula** — com o
+   * capitão da máquina descartado e nenhuma entrada para o segundo casco. Os
+   * dois navios voltavam a integrar física local, do nada, sob a tela de fim.
+   *
+   * Não passa por `checkOutcome` porque o veredito não é nosso: aqui só se
+   * escreve o que já foi decidido do outro lado do fio.
+   */
+  endOnline(won: boolean): void {
+    if (this.role === 'solo') return;
+    this.setState(won ? 'won' : 'lost');
+  }
+
+  /**
+   * Volta ao menu, com o mundo intacto para servir de plano de fundo.
+   *
+   * O papel volta a ser `solo` junto, e não é arrumação: enquanto ele ficasse em
+   * `guest`, o mundo de fundo continuaria contando estatística de eventos que já
+   * não vêm de lugar nenhum, e `collectNetEvents` continuaria enchendo a fila do
+   * instantâneo de um duelo que acabou.
+   */
   toMenu(): void {
+    this.role = 'solo';
     this.deploy();
     this.setState('menu');
   }
@@ -489,6 +516,12 @@ export class Match {
     // Sem navios na lista: nenhuma bala tem contra o que resolver acerto, que é
     // exatamente o que se quer. Ver `CannonballPool.spawnGhost`.
     this.cannonballs.fixedUpdate(dt, EMPTY_SHIPS, this.environment.waveField);
+
+    // Os rombos chegam prontos do host, e contá-los é a única parte das
+    // estatísticas que este lado consegue medir sozinho. Sem esta linha a tela
+    // de fim de quem não simula mostrava quatro zeros — o duelo inteiro sem
+    // número nenhum.
+    this.countNewBreaches();
   }
 
   /**
@@ -631,9 +664,15 @@ export class Match {
    * empilha no mesmo array e chama este mesmo método. Um caminho, dois papéis.
    */
   private drainEvents(): void {
+    // Quem não simula não tem `drainShots` nem `onImpact` para contar tiro — o
+    // que ele tem é esta lista, que chega pronta do host com os índices já
+    // traduzidos para "0 é o meu". É a mesma contagem, medida de onde dá.
+    const counting = this.role === 'guest';
+
     for (const event of this.events) {
       switch (event.kind) {
         case 'shot':
+          if (counting && event.ship === 0) this.stats.shotsFired++;
           this.effects.muzzleBlast(event.position, event.direction);
           this.listener.onShot?.(event.position, event.direction, event.ship === 0);
           break;
@@ -642,6 +681,7 @@ export class Match {
           this.listener.onSplash?.(event.position, event.speed);
           break;
         case 'hull':
+          if (counting && event.ship === 1) this.stats.shotsLanded++;
           this.effects.woodImpact(event.position, event.normal, event.speed);
           this.listener.onHullHit?.(
             event.position,
@@ -651,6 +691,7 @@ export class Match {
           );
           break;
         case 'mast':
+          if (counting && event.ship === 1) this.stats.shotsLanded++;
           this.listener.onMastHit?.(event.position, event.speed);
           break;
         case 'collision':

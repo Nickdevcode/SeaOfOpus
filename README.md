@@ -1004,6 +1004,21 @@ const s = await import('/tests/determinism.ts');
 console.table(s.runDeterminismTests().cases);
 ```
 
+O sétimo é a exceção, e ele **não** roda no navegador: o que ele exercita é o
+servidor de sala, e o servidor não está no bundle do jogo. Ele abre WebSockets de
+verdade contra um `wrangler dev` vivo e conversa o mesmo lobby que o jogo
+conversa — dois capitães, fila, código, recusa, resultado.
+
+```sh
+npm run dev:server      # num terminal
+npm run test:server     # no outro
+```
+
+Ele existe porque a sala é a única parte do duelo que **não dá para testar
+jogando**. Um defeito de física aparece na tela; um defeito de pareamento
+aparece como duas pessoas em telas de espera diferentes, cada uma achando que o
+problema é a internet da outra.
+
 **Balística** prova o caso limite: com arrasto zero a integração *tem* que reproduzir
 a parábola de livro, ida e volta. Provado o integrador, os outros casos verificam que
 o solucionador e o projétil que voa de verdade concordam — a propriedade de que a mira
@@ -1292,6 +1307,87 @@ formato: é a diferença entre transmitir **o que mudou** e transmitir **o que �
 e ela só cobra quando um pacote se perde. Hoje o olhar vai absoluto ao lado do
 delta — quatro bytes a mais por quadro de entrada, e o ângulo passa a ser o mesmo
 por construção. O delta continua indo porque é dele que a mira do canhão vive.
+
+### E a quarta rodada: o relógio que comia comando
+
+Depois de tudo acima ainda restava o relato mais difícil de ler de todos: *"tem
+hora que tá tudo certo pra mim, tem hora que eu não consigo mexer em nada"*, e
+do outro lado *"ele mexia e tremia tudo, flicava tudo"*. Um dos dois sempre
+estava bem — e quem estava mal era sempre quem tinha calhado de ser o convidado
+naquela partida.
+
+A causa é uma frase: **o relógio de predição do cliente é corrigido de um em um,
+e cada correção custava um comando.**
+
+O convidado carimba cada comando com o passo em que ele deve valer, e esse
+carimbo persegue o relógio do host. Quando a correção sobe, `predictionTick`
+incrementa por cima dela e o carimbo pula **dois** — o tick do meio nunca foi
+enviado e nunca vai ser. Quando desce, o passo seguinte reproduz o carimbo
+anterior — e o host descarta carimbo repetido em silêncio, por construção, porque
+é assim que a redundância do lote funciona.
+
+| correção | o que sai no fio | o que o host faz |
+|---|---|---|
+| para cima | um **buraco** na numeração | passa fome, repete o comando anterior |
+| para baixo | uma **duplicata** | descarta o segundo, e com ele o comando daquele passo |
+
+E o buraco não parava no buraco. Fome relatada faz o cliente correr mais à
+frente; correr mais à frente provoca outra correção de relógio; outra correção
+abre outro buraco. Uma catraca, girando sempre para o mesmo lado até o avanço
+bater no teto — que são 400 ms entre a mão e o convés. O que se vê disso é um
+marujo que anda mas não obedece e é puxado de volta a cada instantâneo: *tremia
+tudo*.
+
+A saída não é adivinhar melhor, é **não abrir o buraco**. `InputOutbox` costura a
+janela de envio: o tick pulado vai como repetição do anterior (estado repete,
+borda não — a mesma política do `InputBuffer`), e o tick repetido é fundido no que
+já estava lá (bordas por OU, olhar somado). Do lado do host, `InputBuffer` passou a
+aceitar o comando **seguinte** quando o pedido não vem e ele já está em mãos: a
+rede entrega em ordem, então quem passou na frente enterrou o que ficou para trás,
+e repetir o comando velho é jogar fora o comando certo que está a um passo dali.
+
+`tests/netclock.ts` mede isso agora contando **apertos**, e não quadros — a
+primeira versão do teste contava ticks entregues e dava zero perdas com o defeito
+ligado, porque o tick chegava com o comando faltando dentro dele.
+
+### As outras cinco da mesma rodada
+
+- 🌊 **Dois mares.** O rumo da ondulação de fundo (`swellDirection`) nascia do
+  vento **local** de cada cliente — diferente nos dois, porque cada um tinha
+  passado um tempo diferente na tela de título — e depois só andava do lado que
+  simula. As duas ondas longas do espectro são as que levantam um casco de 16 m:
+  os dois jogadores viam o mesmo navio flutuando em ondas diferentes desde o
+  primeiro quadro. Hoje o rumo é semeado com o resto do mundo e viaja no
+  instantâneo.
+- 🕳️ **"Abri rombo e não entra água."** O volume de água chegava certo — o HUD
+  subia, o casco calava mais fundo —, mas quem desenha a lâmina lê `waterPlane`,
+  e `waterPlane` só era resolvido dentro de `ShipDamage.fixedUpdate`, que é o
+  caminho de quem simula. O convidado descia ao porão com o casco furado e
+  encontrava assoalho seco.
+- 🏁 **Três de cada quatro duelos nunca terminavam.** O instantâneo sai de quatro
+  em quatro passos e o naufrágio cai num passo qualquer. Terminando fora da
+  cadência, o resultado nunca subia pelo lobby — e como o relógio da partida para
+  no mesmo instante, ele nunca mais subiria. Os dois ficavam olhando um mar
+  congelado, sem tela de fim e sem erro.
+- 🎯 **A mira que divergia para sempre.** A pontaria da peça é acumular-e-grampear
+  dos mesmos deltas dos dois lados, o que concorda enquanto nenhum comando se
+  perde. Bastava um: daí em diante o cano que o convidado via não era o cano de
+  onde a bala saía. Agora ela é puxada de leve para o ângulo do host uma vez por
+  instantâneo, como a roda do timão já era.
+- 🔢 **Trinta e três rombos quebravam o formato.** A lista viaja atrás de uma
+  contagem de um byte, o escritor mandava quantos houvesse e o leitor parava em
+  32. Passando disso, o instantâneo inteiro saía do lugar a partir dali — o
+  marujo, o adversário e os eventos lidos em cima de bytes de outra coisa. Um
+  teto só, no protocolo, e o tiro que chega com a lista cheia **alarga** o rombo
+  mais próximo em vez de sumir.
+
+E na sala: um código digitado errado **criava** a sala daquelas letras e sentava
+o jogador nela para sempre (agora ele ouve que não existe sala com esse código);
+quem clicava em "procurar capitão" via a tela de "sua sala está aberta, passe o
+código adiante" (a tela agora sai de *como* se entrou, e não do que a fase era um
+instante atrás); e a fila podia entregar uma vaga que já não servia, deixando
+quem a recebeu sentado sozinho **fora** da fila — hoje ela pede de novo e vira o
+dono de uma vaga nova.
 
 ### Medindo
 

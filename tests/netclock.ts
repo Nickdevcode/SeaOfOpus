@@ -26,6 +26,7 @@
 
 import { createInputFrame, InputBit, type InputFrame } from '../src/core/InputFrame';
 import { InputBuffer } from '../src/net/InputBuffer';
+import { InputOutbox } from '../src/net/InputOutbox';
 import {
   advanceHostEstimate,
   correctHostEstimate,
@@ -54,6 +55,15 @@ const SNAPSHOT_EVERY = 4;
 const SEND_EVERY = 2;
 /** Passos simulados. Dez segundos. */
 const TICKS = 600;
+
+/**
+ * As bordas com que cada passo se identifica, em rodízio.
+ *
+ * Quatro bits distintos, um por passo. É o que permite provar, do lado do host,
+ * **quais** apertos chegaram — e não só quantos quadros. Ver a nota em
+ * `simulate`.
+ */
+const STEP_MARKS = [InputBit.Fire, InputBit.Jump, InputBit.Reload, InputBit.Interact];
 
 /**
  * O relógio do cliente, na versão **corrigida**: anda um por passo e é ajustado
@@ -110,6 +120,59 @@ class BrokenClock {
   }
 }
 
+/**
+ * Um relógio que **corrige a fase o tempo todo**, para exercitar a costura.
+ *
+ * O `GuestClock` acima acaba se assentando: passado o aquecimento, o avanço
+ * encontra a latência e a correção some, então ele nunca chega a exercitar o
+ * caso que interessa. E o caso que interessa é o normal num duelo de verdade —
+ * dois cristais de quartzo em máquinas diferentes derivam sempre, e cada ajuste
+ * de avanço reabre a correção.
+ *
+ * Este aqui força a mão: ele sobe e desce um passo alternadamente, com a
+ * frequência que uma rede instável produziria numa tarde inteira. Cada subida é
+ * um carimbo pulado e cada descida é um carimbo repetido — que era exatamente
+ * um comando perdido, de um jeito ou de outro.
+ */
+class DriftingClock {
+  localTick = 0;
+  hostTick = 0;
+  lead = 8;
+  private snapshots = 0;
+  private direction = 1;
+  /**
+   * ⚠️ Uma bandeira, e **não** `localTick === 0`.
+   *
+   * O relógio anda desde o primeiro passo, e o primeiro instantâneo chega
+   * dezenas de passos depois — então a comparação com zero nunca é verdadeira e
+   * o alinhamento inicial nunca acontece. É o mesmo erro que `GuestSession`
+   * cometia, e ele foi reproduzido aqui por acidente ao escrever este teste: o
+   * host passou fome em cem por cento dos passos, que é exatamente o sintoma
+   * que o defeito original produzia.
+   */
+  private started = false;
+
+  onSnapshot(hostTick: number): void {
+    this.hostTick = hostTick;
+    if (!this.started) {
+      this.started = true;
+      this.localTick = hostTick + this.lead;
+      return;
+    }
+
+    // Um empurrão a cada três instantâneos: cinco por segundo, alternando de
+    // lado. É mais castigo do que uma rede real dá, e é o ponto.
+    this.snapshots++;
+    if (this.snapshots % 3 !== 0) return;
+    this.localTick += this.direction;
+    this.direction = this.direction === 1 ? -1 : 1;
+  }
+
+  next(): number {
+    return ++this.localTick;
+  }
+}
+
 interface ClockLike {
   onSnapshot(hostTick: number, depth: number): void;
   next(): number;
@@ -124,7 +187,16 @@ interface ClockLike {
 function simulate(
   clock: ClockLike,
   latencyTicks: number,
-): { starves: number; consumed: number; lateStarves: number; lateConsumed: number } {
+): {
+  starves: number;
+  consumed: number;
+  lateStarves: number;
+  lateConsumed: number;
+  /** Bordas que o jogador produziu e o host de fato aplicou. */
+  delivered: number;
+  /** Bordas que o jogador produziu na janela contada. */
+  stamped: number;
+} {
   /**
    * Passos que não contam para o regime.
    *
@@ -136,8 +208,7 @@ function simulate(
 
   const buffer = new InputBuffer();
   let starvesAtWarmup = 0;
-  const outbox: InputFrame[] = Array.from({ length: 4 }, createInputFrame);
-  let outboxCount = 0;
+  const outbox = new InputOutbox();
 
   /** Pacotes em trânsito: chegam `latencyTicks` depois de saírem. */
   const wire: { at: number; data: ArrayBuffer }[] = [];
@@ -145,6 +216,32 @@ function simulate(
 
   let hostTick = 0;
   let consumed = 0;
+
+  /**
+   * As **bordas** que o jogador produziu em cada tick, e as que chegaram lá.
+   *
+   * É a medida que interessa de verdade, e chegar a ela levou duas tentativas.
+   * Contar fome mede o host, não o jogador. Contar *ticks entregues* também não
+   * basta, e foi a primeira versão deste teste: quando um carimbo se repete, o
+   * tick chega — com o comando do outro passo faltando dentro dele. O contador
+   * dizia "entregue" e o `F` no timão tinha sumido.
+   *
+   * Borda é o que o jogador aperta, e é onde a perda dói: um tiro que não sai,
+   * um posto que não se assume, um pulo que não acontece. A expectativa é a
+   * **união** das bordas de um mesmo tick, porque dois passos que caem no mesmo
+   * carimbo são dois apertos que precisam valer os dois.
+   */
+  const expected = new Map<number, number>();
+  const arrived = new Map<number, number>();
+  /**
+   * O último passo em que carimbar ainda conta.
+   *
+   * O cliente corre à frente do host, então os comandos dos últimos passos ainda
+   * estão no fio ou na fila quando a corrida termina — cobrá-los seria reprovar
+   * o sistema por não ter viajado no tempo. A folga cobre o avanço, a rede e a
+   * granularidade do lote.
+   */
+  const LAST_COUNTED = TICKS - latencyTicks - 24;
 
   for (let step = 0; step < TICKS; step++) {
     // --- host: entrega o que chegou ---
@@ -162,36 +259,44 @@ function simulate(
     frame.tick = tick;
     frame.held = InputBit.MoveForward;
     frame.moveY = 1;
-
-    for (let i = outbox.length - 1; i > 0; i--) {
-      const source = outbox[i - 1]!;
-      const target = outbox[i]!;
-      target.tick = source.tick;
-      target.held = source.held;
-      target.pressed = source.pressed;
-      target.moveX = source.moveX;
-      target.moveY = source.moveY;
-      target.lookX = source.lookX;
-      target.lookY = source.lookY;
+    // Uma borda por passo, e a marca sai do **passo**, não do tick.
+    //
+    // A distinção é o que dá dentes ao teste, e a primeira versão errou nela: com
+    // a marca vindo do tick, dois passos que caem no mesmo carimbo — que é
+    // exatamente o que uma correção de relógio para baixo produz — apertavam o
+    // mesmo botão. O comando perdido era indistinguível do comando entregue, e o
+    // contador dizia zero perdas enquanto a costura estava desligada.
+    frame.pressed = STEP_MARKS[step % STEP_MARKS.length]!;
+    if (step >= WARMUP && step < LAST_COUNTED) {
+      expected.set(tick, (expected.get(tick) ?? 0) | frame.pressed);
     }
-    const first = outbox[0]!;
-    first.tick = frame.tick;
-    first.held = frame.held;
-    first.moveY = frame.moveY;
-    outboxCount = Math.min(outboxCount + 1, outbox.length);
 
+    outbox.add(frame);
     if (tick % SEND_EVERY === 0) {
-      wire.push({ at: step + latencyTicks, data: encodeInput(outbox.slice(0, outboxCount)) });
+      wire.push({ at: step + latencyTicks, data: encodeInput(outbox.batch) });
     }
 
     // --- host: consome o passo dele ---
     hostTick++;
-    buffer.consume(hostTick);
+    const applied = buffer.consume(hostTick);
     consumed++;
+    // Anotado pelo **carimbo de origem**, e não pelo passo do host: `claimAhead`
+    // pode entregar o comando num passo vizinho, e ele continua sendo o comando
+    // que o jogador deu. Ver `InputBuffer.appliedTick`.
+    if (buffer.appliedTick >= 0) {
+      arrived.set(buffer.appliedTick, (arrived.get(buffer.appliedTick) ?? 0) | applied.pressed);
+    }
 
     // --- host: manda instantâneo ---
     if (hostTick % SNAPSHOT_EVERY === 0) clock.onSnapshot(hostTick, buffer.depth);
     if (step === WARMUP - 1) starvesAtWarmup = buffer.starves;
+  }
+
+  let stamped = 0;
+  let delivered = 0;
+  for (const [tick, bits] of expected) {
+    stamped += popcount(bits);
+    delivered += popcount(bits & (arrived.get(tick) ?? 0));
   }
 
   return {
@@ -199,7 +304,16 @@ function simulate(
     consumed,
     lateStarves: buffer.starves - starvesAtWarmup,
     lateConsumed: consumed - WARMUP,
+    delivered,
+    stamped,
   };
+}
+
+/** Quantos bits ligados há num inteiro. Cada bit é um aperto do jogador. */
+function popcount(bits: number): number {
+  let count = 0;
+  for (let value = bits; value !== 0; value >>>= 1) count += value & 1;
+  return count;
 }
 
 export function runNetClockTests(): TestReport {
@@ -219,6 +333,101 @@ export function runNetClockTests(): TestReport {
       esperado: '< 5% depois de estabilizar',
       erro: rate < 0.05 ? '—' : 'o host segue simulando sem comando do outro lado',
       passou: rate < 0.05,
+    });
+  }
+
+  // --- 1b. nenhum comando se perde na correção do relógio ----------------------
+  //
+  // O caso que este arquivo passou a existir para provar. Contar fome não bastava
+  // e nunca bastou: uma correção de relógio **para baixo** repete o carimbo, o
+  // host descarta o segundo quadro como duplicata e o comando daquele passo some
+  // sem que nenhum contador se mexa. Uma correção **para cima** abre um buraco, e
+  // esse sim vira fome — que o cliente lê como "preciso correr mais à frente", o
+  // que provoca mais correção e mais buraco. A catraca girava até o teto de
+  // avanço, e do lado de lá isso se vê como um marujo que anda sem obedecer e é
+  // puxado de volta a cada instantâneo.
+  //
+  // O que se mede aqui é o jogador, não o host: de cada comando carimbado,
+  // quantos o host chegou a aplicar. Ver `InputOutbox` para a costura.
+  {
+    const run = simulate(new DriftingClock(), 3);
+    const lost = run.stamped - run.delivered;
+    cases.push({
+      nome: 'costura · relógio corrigindo não come comando',
+      medido: `${lost} apertos perdidos em ${run.stamped}`,
+      esperado: '0 — a janela costura buraco e duplicata',
+      erro: lost === 0 ? '—' : 'cada correção de relógio custa um comando do jogador',
+      passou: lost === 0,
+    });
+
+    const rate = run.lateStarves / run.lateConsumed;
+    cases.push({
+      nome: 'costura · relógio corrigindo não provoca fome',
+      medido: `${run.lateStarves} fomes em ${run.lateConsumed} passos (${(rate * 100).toFixed(1)}%)`,
+      esperado: '< 2% — sem buraco não há o que faltar',
+      erro: rate < 0.02 ? '—' : 'o buraco do relógio virou fome, e fome faz o avanço subir',
+      passou: rate < 0.02,
+    });
+  }
+
+  // --- 1c. um buraco de um passo é fechado pela fila ---------------------------
+  //
+  // O outro lado da mesma moeda, medido de dentro do `InputBuffer`: quando o
+  // quadro pedido não veio mas o **seguinte** já está em mãos, ele não vem mais —
+  // a rede entrega em ordem. Repetir o comando anterior nesse caso é jogar fora o
+  // comando certo, que está guardado a um passo de distância.
+  {
+    const gap = new InputBuffer();
+    const primeiro = createInputFrame();
+    primeiro.tick = 1;
+    primeiro.held = InputBit.MoveForward;
+    gap.push(primeiro);
+
+    const terceiro = createInputFrame();
+    terceiro.tick = 3;
+    terceiro.held = InputBit.MoveBack;
+    terceiro.pressed = InputBit.Fire;
+    gap.push(terceiro);
+
+    gap.consume(1);
+    const noBuraco = gap.consume(2);
+    const fechou =
+      gap.starves === 0 &&
+      gap.appliedTick === 3 &&
+      noBuraco.held === InputBit.MoveBack &&
+      noBuraco.pressed === InputBit.Fire;
+
+    cases.push({
+      nome: 'fila · buraco de um passo usa o comando seguinte',
+      medido: `fomes ${gap.starves} · aplicou o tick ${gap.appliedTick} · pressed ${noBuraco.pressed}`,
+      esperado: 'fomes 0 · tick 3 · a borda preservada',
+      erro: fechou ? '—' : 'o comando certo estava na fila e foi trocado por uma repetição',
+      passou: fechou,
+    });
+  }
+
+  // --- 1d. um salto de relógio não é confundido com buraco ---------------------
+  //
+  // A guarda do caso acima. Um comando que só vale daqui a meio segundo não pode
+  // ser puxado para agora só porque o de agora está atrasado — aí a espera é o
+  // certo, e é o que a política de fome cobre.
+  {
+    const jump = new InputBuffer();
+    const futuro = createInputFrame();
+    futuro.tick = 400;
+    futuro.pressed = InputBit.Fire;
+    jump.push(futuro);
+    jump.consume(1);
+
+    cases.push({
+      nome: 'fila · comando de um futuro distante espera a vez dele',
+      medido: `fomes ${jump.starves} · aplicou ${jump.appliedTick}`,
+      esperado: 'fomes 1 · aplicou -1 (repetiu)',
+      erro:
+        jump.starves === 1 && jump.appliedTick === -1
+          ? '—'
+          : 'um comando de meio segundo à frente foi aplicado agora',
+      passou: jump.starves === 1 && jump.appliedTick === -1,
     });
   }
 

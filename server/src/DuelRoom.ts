@@ -127,14 +127,28 @@ export class DuelRoom implements DurableObject {
     const code = url.searchParams.get('code');
     if (!code) return new Response('Missing room code.', { status: 400 });
 
+    // ⚠️ **Um código que ninguém abriu não é uma sala vazia: é um engano.**
+    //
+    // `idFromName` sempre resolve, então digitar quatro letras erradas
+    // **criava** a sala daquelas letras e sentava o jogador nela. Ele ficava
+    // olhando um cronômetro esperando um adversário que não existe e nunca vai
+    // existir, sem nada na tela sugerindo que ele errou uma letra. É preciso
+    // distinguir "abrir uma sala" de "entrar numa sala", e só quem entra pode
+    // ser recusado.
+    //
+    // A recusa sai daqui como status HTTP, e quem a traduz para o jogador é o
+    // Worker — ver `refuse` e `claimRoom` em `index.ts`. Nem toda recusa é para
+    // ser contada: a da fila é para ser **contornada**.
+    if (url.searchParams.get('join') === '1' && !(await this.state.storage.get('room'))) {
+      return new Response('No such room.', { status: 404 });
+    }
+
     const room = await this.room(code, url.searchParams.get('queued') === '1');
 
     // Duas pessoas por sala, e ponto. Um terceiro socket não vira espectador
     // por acidente: ele receberia os quadros dos dois e ninguém saberia por quê.
     const existing = this.state.getWebSockets();
-    if (existing.length >= 2) {
-      return new Response('Room is full.', { status: 409 });
-    }
+    if (existing.length >= 2) return new Response('Room is full.', { status: 409 });
     if (room.phase !== 'waiting') {
       return new Response('Duel already under way.', { status: 409 });
     }

@@ -217,6 +217,18 @@ export class Weather {
     this.target = start;
     this.locked = false;
 
+    // ⚠️ **O rumo do vento entra na conta, e ele ficava de fora.**
+    //
+    // Ele gira sozinho desde que a página abriu (ver `WIND_TURN_RATE`), então
+    // dois jogadores que passaram tempos diferentes na tela de título chegavam
+    // ao duelo com rumos diferentes. O instantâneo corrige o do vento — mas o
+    // rumo da **ondulação de fundo** nasce dele, uma vez, dentro de
+    // `WaveField.generate`, e daí em diante os dois mares eram outros. Semear o
+    // rumo aqui, do mesmo número que semeia tudo, é o que faz "a mesma semente
+    // dá o mesmo mar" ser verdade desde o primeiro quadro, e não só a partir do
+    // primeiro instantâneo.
+    this.direction = (createRandom(seed ^ 0x571d)() * TAU) % TAU;
+
     const preset = PRESETS[start];
     this.baseWind = preset.wind;
     this.wind = preset.wind;

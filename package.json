@@ -14,6 +14,7 @@
     "check": "tsc --noEmit",
     "check:all": "npm run check && npm -w server run check",
     "dev:server": "npm -w server run dev",
+    "test:server": "node tests/roomServer.mjs",
     "deploy:server": "npm -w server run deploy",
     "tail:server": "npm -w server run tail"
   },
