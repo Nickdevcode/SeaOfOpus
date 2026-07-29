@@ -98,6 +98,9 @@ const DEPTH_TARGET = 1;
 const LEAD_MIN = 3;
 const LEAD_MAX = 24;
 
+/** Fração do desvio do leme corrigida por instantâneo. Ver `applyShipParts`. */
+const WHEEL_CATCHUP = 0.08;
+
 /**
  * Intervalo entre ajustes do avanço, em passos. Meio segundo.
  *
@@ -521,12 +524,30 @@ export class GuestSession {
     ship.rudder.previousWheelAngle = ship.rudder.wheelAngle;
     ship.rudder.previousRudderAngle = ship.rudder.rudderAngle;
 
-    // A **minha** roda não é escrita: ela já girou aqui, no mesmo passo em que o
-    // comando saiu da minha mão. `Rudder.update` é integração pura de um comando
-    // grampeado, então o host chega exatamente ao mesmo ângulo — e é isto que
-    // tira a sensação de leme emperrado. O navio dele responde depois, o que não
-    // é latência: é massa, e o jogador lê como massa.
-    if (!mine) {
+    if (mine) {
+      // A **minha** roda gira aqui, no mesmo passo em que o comando sai da minha
+      // mão — quem a integra é `Ship.fixedUpdateRemote`, e sem essa chamada ela
+      // não girava de jeito nenhum. É isto que tira a sensação de leme
+      // emperrado: o navio responder depois não é latência, é massa, e o jogador
+      // lê como massa.
+      //
+      // Mas ela **também** é puxada de leve para o ângulo do host, e o motivo é
+      // o mesmo que obrigou o olhar a viajar absoluto: os dois lados chegam ao
+      // ângulo somando incrementos, e um comando que se perca deixa os dois
+      // ângulos diferentes **para sempre**, sem nada que os reaproxime. Aqui a
+      // deriva custa menos que no olhar — a roda bate no batente e volta ao meio
+      // várias vezes por combate, e cada uma dessas ressincroniza sozinha —, mas
+      // "menos" não é "nada" num duelo de dez minutos.
+      //
+      // O ganho é deliberadamente pequeno. O valor que chega descreve o passado
+      // de meia ida e volta atrás; puxar forte para ele seria arrastar a roda
+      // contra a mão de quem está girando agora. A oito por cento por
+      // instantâneo, um erro fecha em cerca de um segundo de roda parada e é
+      // imperceptível com a roda em movimento.
+      ship.rudder.setWheel(
+        ship.rudder.wheelAngle + (to.wheelAngle - ship.rudder.wheelAngle) * WHEEL_CATCHUP,
+      );
+    } else {
       ship.rudder.setWheel(from.wheelAngle + (to.wheelAngle - from.wheelAngle) * t);
     }
 

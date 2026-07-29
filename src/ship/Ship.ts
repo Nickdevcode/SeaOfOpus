@@ -318,6 +318,45 @@ export class Ship {
     for (const cannon of this.cannons) cannon.beginStep();
   }
 
+  /**
+   * O passo do navio no lado que **não** simula.
+   *
+   * ⚠️ **Sem isto, a roda do timão não gira — e essa foi a queixa mais insistente
+   * do primeiro duelo em rede: "não consigo controlar o barco".** O caminho do
+   * comando tem três etapas, e só duas rodavam no cliente: o marujo assume o
+   * posto (roda), o marujo escreve `controls.wheel` (roda), e **alguém tem de
+   * integrar esse comando em ângulo de roda** — que é a primeira linha de
+   * `fixedUpdate`, e `fixedUpdate` é o caminho de quem simula. O comando era
+   * escrito e apagado no passo seguinte sem nunca virar movimento.
+   *
+   * O efeito era pior do que "a roda não anda": o navio **virava**, porque o
+   * host recebia o comando e girava o leme de lá. Mas do lado de cá a roda ficava
+   * imóvel, as mãos do marujo ficavam imóveis (a pose delas é indexada pelo
+   * ângulo da roda) e o painel dizia `wheel 0%`. Todo o retorno imediato que
+   * existe para o jogador acreditar que ele está no comando estava desligado, e
+   * o único sinal que sobrava era o casco começando a guinar segundos depois —
+   * que é justamente o que se lê como "não respondeu".
+   *
+   * O que roda aqui é só o que o cliente **prevê** ou **anima**: o leme, o
+   * cabrestante, a vela e a bandeira. Nada de empuxo, arrasto, contato ou
+   * alagamento — essas coisas chegam prontas no instantâneo, e simulá-las aqui
+   * seria abrir uma segunda verdade sobre o mesmo casco.
+   */
+  fixedUpdateRemote(dt: number, waves: WaveField): void {
+    // Integração pura de um comando grampeado: o host chega ao mesmo ângulo com
+    // a mesma entrada, e é isso que torna a predição do leme correta em vez de
+    // otimista.
+    this.rudder.update(this.controls.wheel, dt);
+    if (this.controls.capstanTurns > 0) this.anchor.heave(this.controls.capstanTurns);
+
+    // Pano: a vela e a bandeira leem a pose e o vento que a rede escreveu. A
+    // vela empurra o casco ao passar, e essa força não vai a lugar nenhum aqui —
+    // ver `ShipBody.clearForces`.
+    this.sail.update(dt, this.body, waves);
+    this.ensign.update(dt, this.sail.localWind);
+    this.body.clearForces();
+  }
+
   fixedUpdate(dt: number, waves: WaveField): void {
     this.rudder.update(this.controls.wheel, dt);
     if (this.controls.capstanTurns > 0) this.anchor.heave(this.controls.capstanTurns);

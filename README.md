@@ -1260,7 +1260,34 @@ A rodada seguinte trouxe três coisas, e só uma delas era netcode:
   sempre. O prazo foi para dez minutos e deixou de ser a defesa principal: hoje a
   sala devolve a vaga à fila no instante em que esvazia.
 
-O do olhar é o mais instrutivo dos onze. Ele não é um erro de cálculo nem de
+### E o mais simples de todos, que ficou por último
+
+Depois de tudo acima, o convidado ainda não conseguia governar o navio. A causa
+não tinha nada de sutil: **o passo do navio não roda no lado que não simula**, e
+é a primeira linha dele que transforma o comando da roda em ângulo de roda.
+
+O caminho do timão tem três etapas, e só duas rodavam no cliente:
+
+| etapa | rodava? |
+|---|---|
+| o marujo assume o posto | ✅ |
+| o marujo escreve `controls.wheel` | ✅ |
+| **alguém integra esse comando** | ❌ — mora em `Ship.fixedUpdate` |
+
+O comando era escrito e apagado no passo seguinte sem nunca virar movimento. E
+o efeito era pior que "a roda não anda": o navio **virava**, porque o host
+recebia o comando e girava o leme de lá — mas do lado de cá a roda ficava
+imóvel, as mãos do marujo ficavam imóveis (a pose delas é indexada pelo ângulo
+da roda) e o painel dizia `wheel 0%`. Todo o retorno imediato que existe para o
+jogador acreditar que está no comando estava desligado, e o único sinal que
+sobrava era o casco guinando segundos depois — que é exatamente o que se lê como
+"não respondeu".
+
+`Ship.fixedUpdateRemote` roda agora o que o cliente prevê ou anima — leme,
+cabrestante, vela e bandeira — e nada do que chega pronto pelo fio. Os canhões
+ficam de fora de propósito: integrá-los aqui faria a bala sair duas vezes.
+
+O do olhar é o mais instrutivo dos doze. Ele não é um erro de cálculo nem de
 formato: é a diferença entre transmitir **o que mudou** e transmitir **o que é**,
 e ela só cobra quando um pacote se perde. Hoje o olhar vai absoluto ao lado do
 delta — quatro bytes a mais por quadro de entrada, e o ângulo passa a ser o mesmo

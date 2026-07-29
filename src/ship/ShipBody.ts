@@ -193,6 +193,21 @@ export class ShipBody {
     this.torque.set(0, 0, 0);
   }
 
+  /**
+   * Descarta o que se acumulou sem integrar.
+   *
+   * Existe para o lado que **não** simula. Lá a pose chega pronta pela rede e
+   * `integrate` nunca roda — mas alguns subsistemas continuam rodando pelo que
+   * eles *desenham* (a vela, que precisa medir o vento para se inflar), e eles
+   * empurram força ao passar. Sem esta chamada, esse acumulador cresceria por
+   * toda a partida sem nunca ser lido: inofensivo hoje, e exatamente o tipo de
+   * número que estoura em `Infinity` no dia em que alguém resolver lê-lo.
+   */
+  clearForces(): void {
+    this.force.set(0, 0, 0);
+    this.torque.set(0, 0, 0);
+  }
+
   /** Pose interpolada entre o passo anterior e o atual, para o render. */
   sampleOrigin(alpha: number, target: THREE.Vector3, targetRotation: THREE.Quaternion): void {
     targetRotation.copy(this.previousOrientation).slerp(this.orientation, alpha);

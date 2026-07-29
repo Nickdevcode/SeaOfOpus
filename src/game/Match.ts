@@ -472,6 +472,18 @@ export class Match {
 
     this.crew[0].fixedUpdate(dt, frame);
 
+    // ⚠️ **Depois do marujo, e é o que faz o timão funcionar deste lado.** Ele
+    // acabou de escrever `controls.wheel`; sem alguém integrando esse comando, a
+    // roda não gira, as mãos não giram e o painel diz `wheel 0%` enquanto o
+    // navio guina lá longe por decisão do host. Ver `Ship.fixedUpdateRemote`.
+    //
+    // Roda para os **dois** cascos: o do adversário não tem comando local (a roda
+    // dele fica em zero aqui), e a pose autoritativa dele é escrita logo em
+    // seguida por `GuestSession.applyShipParts`, que roda depois deste método e
+    // ganha de qualquer coisa que se tenha calculado.
+    const waves = this.environment.waveField;
+    for (const ship of this.ships) ship.fixedUpdateRemote(dt, waves);
+
     for (const ship of this.ships) ship.pendingShots.length = 0;
 
     // Sem navios na lista: nenhuma bala tem contra o que resolver acerto, que é
