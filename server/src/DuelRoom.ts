@@ -305,6 +305,30 @@ export class DuelRoom implements DurableObject {
     const dataOther = this.peerData(other);
     if (dataOne.role !== null || dataOther.role !== null) return;
 
+    // ⚠️ **Os dois têm de ter se apresentado, e a falta desta linha quebrava a
+    // partida rápida em uma de cada duas tentativas.**
+    //
+    // Um socket entra em `getWebSockets()` no `acceptWebSocket` da `fetch`, muito
+    // antes de o `hello` dele chegar. Quando os dois capitães clicam em "procurar"
+    // no mesmo instante — que é o caso mais comum que a fila tem, dois amigos
+    // combinando de jogar —, as quatro coisas se intercalam como *aceita A, aceita
+    // B, hello de A, hello de B*, e este método rodava no terceiro passo: com dois
+    // sockets na sala, dois papéis nulos, e o segundo capitão ainda sem nome nem
+    // nota.
+    //
+    // O estrago era duplo e nenhuma das duas metades aparecia como erro. O
+    // desempate de `joinedAt` lia zero para quem não falou, então **quem chegou
+    // primeiro era tratado como o segundo** e perdia o comando da sala para uma
+    // máquina de nota zero. E o `hello` de verdade, ao chegar, encontrava os papéis
+    // já decididos e caía na saída acima — ou seja, o segundo capitão **nunca
+    // recebia o `peer`**. Ele ficava no cronômetro de procura para sempre, enquanto
+    // o outro ficava em "adversário a bordo" esperando um `ready` que não vinha. O
+    // sinal de que era isto: o nome do adversário aparecia como `Sailor`.
+    //
+    // Sair aqui é seguro porque este método é chamado por todo `hello`: o do
+    // atrasado pareia os dois com informação completa dos dois lados.
+    if (dataOne.joinedAt === 0 || dataOther.joinedAt === 0) return;
+
     // Quem chegou primeiro é o `first`, e isso é lido do carimbo do `hello` —
     // **não** da ordem em que a plataforma devolve os sockets, que não é
     // ordenada. Ver `PeerData.joinedAt`.
@@ -380,17 +404,39 @@ export class DuelRoom implements DurableObject {
     // ser indefinido — senão a próxima pessoa a entrar seria pareada contra um
     // papel decidido numa comparação que já não vale.
     let remaining = 0;
+    let dismissed = 0;
     for (const socket of this.state.getWebSockets()) {
       if (socket === ws) continue;
       remaining++;
       const peer = this.peerData(socket);
+      // Se ele já tinha papel, ele **já viu** a tela de "adversário a bordo" e
+      // mandou o `ready` dele. Zerar o papel em silêncio o deixava ali para
+      // sempre: sem cronômetro (a fase de espera já tinha acabado), sem erro e sem
+      // adversário, esperando um `start` que precisa de dois `ready` e nunca vai
+      // sair. É a janela curta entre o pareamento e o começo — meio segundo —, e
+      // quem cai nela não tem nem como saber que caiu.
+      const wasPaired = peer.role !== null;
       peer.role = null;
       peer.ready = false;
       this.setPeerData(socket, peer);
+      if (!wasPaired) continue;
+
+      // O mesmo texto nas duas pontas de propósito: o cliente pinta a mensagem do
+      // `error` e, quando o socket fecha em seguida, pinta o motivo do fechamento
+      // por cima. Dois textos diferentes fariam o segundo apagar o primeiro com
+      // uma explicação pior. Ver `refuse` em `index.ts`, que segue a mesma regra.
+      const reason = 'The other captain left before the duel started.';
+      this.send(socket, { t: 'error', reason });
+      this.close(socket, 1000, reason);
+      dismissed++;
     }
 
-    // Saiu o último: a vaga desta sala não serve mais a ninguém.
-    if (remaining === 0) await this.releaseQueueSlot(room);
+    // Saiu o último — ou foi dispensado por causa dele. A vaga desta sala não
+    // serve mais a ninguém, e não se espera pelo `webSocketClose` de quem se
+    // acabou de mandar embora: a API de hibernação não promete chamá-lo para um
+    // fechamento que partiu daqui, e uma vaga morta na fila custa dez minutos de
+    // alguém olhando uma tela de procura que não vai encontrar nada.
+    if (remaining === dismissed) await this.releaseQueueSlot(room);
   }
 
   // -- encanamento ---------------------------------------------------------------

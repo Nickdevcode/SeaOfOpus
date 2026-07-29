@@ -142,6 +142,25 @@ export interface MatchListener {
   onStateChange?(state: MatchState, previous: MatchState): void;
 }
 
+/**
+ * Velocidade de aproximação a partir da qual o encontro dos cascos soa, em m/s.
+ *
+ * Abaixo disso os dois estão apenas encostados, e o mar mexe com eles o tempo todo:
+ * um estrondo a cada balanço seria ruído, não informação.
+ */
+const COLLISION_SPEED = 0.4;
+
+/**
+ * Segundos de rearme entre duas pancadas que abrem casco.
+ *
+ * É o que separa "bateram de novo" de "continuam raspando". Num costado a costado a
+ * onda faz a velocidade de aproximação subir e descer várias vezes por segundo, e
+ * sem rearme um atracamento abriria rombo a cada passo — sessenta por segundo. Um
+ * segundo e meio é mais que o tempo de os dois cascos se separarem e voltarem, então
+ * uma investida nova sempre conta, e um rangido contínuo conta uma vez.
+ */
+const RAM_COOLDOWN = 1.5;
+
 /** Lista vazia de navios, para o passo do guest. Ver `fixedUpdateRemote`. */
 const EMPTY_SHIPS: readonly Ship[] = [];
 
@@ -152,6 +171,8 @@ const _muzzleDirection = new THREE.Vector3();
 const _impactNormal = new THREE.Vector3();
 const _jetPosition = new THREE.Vector3();
 const _jetDirection = new THREE.Vector3();
+const _ramLocal = new THREE.Vector3();
+const _splinterNormal = new THREE.Vector3();
 
 export class Match {
   state: MatchState = 'menu';
@@ -250,6 +271,8 @@ export class Match {
   private readonly damageViews: readonly DamageView[];
   /** Rombos de cada navio no passo anterior, para detectar os novos. */
   private previousBreaches = { player: 0, enemy: 0 };
+  /** Segundos até a próxima pancada poder abrir casco. Ver `RAM_COOLDOWN`. */
+  private ramCooldown = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -427,6 +450,8 @@ export class Match {
     this.stats.breachesTaken = 0;
     this.previousBreaches.player = 0;
     this.previousBreaches.enemy = 0;
+    this.ramCooldown = 0;
+    this.contact.contacts = 0;
 
     for (const ship of this.ships) ship.syncModel(1);
   }
@@ -464,15 +489,9 @@ export class Match {
     this.stats.duration += dt;
 
     // 1. Contato: forças acumuladas antes de qualquer um integrar.
-    const before = this.contact.contacts;
+    const contactsBefore = this.contact.contacts;
     resolveHullContact(this.playerShip, this.enemyShip, this.contact);
-    if (this.contact.contacts > 0 && before === 0 && this.contact.closingSpeed > 0.4) {
-      this.events.push({
-        kind: 'collision',
-        position: this.contact.point,
-        speed: this.contact.closingSpeed,
-      });
-    }
+    this.registerCollision(dt, contactsBefore);
 
     // 2. Quem comanda, antes dos navios que eles comandam. Timão, pontaria e
     //    gatilho deste passo têm de valer neste passo, e não no seguinte.
@@ -493,6 +512,52 @@ export class Match {
     this.checkOutcome();
 
     if (this.role === 'host') this.collectNetEvents(eventsBefore);
+  }
+
+  /**
+   * Traduz o contato deste passo em baque e em avaria.
+   *
+   * ## Quem abre casco é a pancada, e ela abre nos dois
+   *
+   * `HullContact` faz os cascos se recusarem a ocupar o mesmo lugar, e isso sozinho
+   * é só uma cerca: chegar perto para de ser impossível e continua não custando
+   * nada. Duas chalupas de 37 t se encontrando a 3 m/s trocam 157 kJ — mais energia
+   * do que quase qualquer bala do jogo entrega —, e a madeira cede. O estrago é
+   * simétrico de propósito: quem investe leva o que dá, e é isso que mantém o
+   * abalroamento como risco em vez de estratégia ótima. Ver `ShipDamage.ram`.
+   *
+   * O limiar de velocidade mora lá, e não aqui: é `ram` que devolve zero quando o
+   * encontro foi só um encostão, e é desse zero que sai a decisão de nem armar o
+   * rearme. Uma regra, um lugar.
+   *
+   * @param before quantos contatos havia no passo anterior. É o que distingue o
+   *   primeiro instante de um encontro do meio de um rangido que já dura.
+   */
+  private registerCollision(dt: number, before: number): void {
+    this.ramCooldown = Math.max(0, this.ramCooldown - dt);
+
+    const { contacts, closingSpeed, point } = this.contact;
+    if (contacts === 0) return;
+
+    let opened = 0;
+    if (this.ramCooldown <= 0) {
+      for (const ship of this.ships) {
+        ship.body.worldToLocal(point, _ramLocal);
+        opened += ship.damage.ram(_ramLocal, closingSpeed);
+      }
+      if (opened > 0) this.ramCooldown = RAM_COOLDOWN;
+    }
+
+    // O baque sai no primeiro passo do encontro e em toda pancada nova. Um rangido
+    // que já está acontecendo não repete o estrondo sessenta vezes por segundo.
+    if (opened === 0 && (before > 0 || closingSpeed <= COLLISION_SPEED)) return;
+
+    // ⚠️ **Clonado**, e antes não era. `netEvents` guarda este objeto por até quatro
+    // passos à espera do instantâneo, e `contact.point` é reescrito a cada passo:
+    // sem a cópia, o abalroamento chegava ao outro lado no lugar em que os cascos
+    // estavam quatro passos depois. É a mesma regra que todo evento daqui segue —
+    // ver `MatchEvents`.
+    this.events.push({ kind: 'collision', position: point.clone(), speed: closingSpeed });
   }
 
   /**
@@ -738,11 +803,35 @@ export class Match {
           this.listener.onMastHit?.(event.position, event.speed);
           break;
         case 'collision':
+          this.splinterCollision(event.position, event.speed);
           this.listener.onCollision?.(event.position, event.speed);
           break;
       }
     }
     this.events.length = 0;
+  }
+
+  /**
+   * Lascas saltando dos dois cascos no ponto do abalroamento.
+   *
+   * A normal não viaja no evento e não precisa viajar: ela é a direção do centro de
+   * cada navio para o ponto de contato, achatada na horizontal, e os dois lados do
+   * fio têm a pose dos dois cascos. Dois punhados de lasca em sentidos opostos é o
+   * que um encontro de madeira contra madeira parece — e sai de graça, sem um byte
+   * a mais no instantâneo.
+   *
+   * A força vem da velocidade numa escala própria: 4 m/s é o encontrão que arranca
+   * tudo o que há para arrancar. Ver `Effects.splinters` para por que ela não é a
+   * mesma escala da bala.
+   */
+  private splinterCollision(position: THREE.Vector3, speed: number): void {
+    const power = Math.min(speed / 4, 1.2);
+    for (const ship of this.ships) {
+      _splinterNormal.subVectors(position, ship.body.comPosition);
+      _splinterNormal.y = 0;
+      if (_splinterNormal.lengthSq() < 1e-6) continue;
+      this.effects.splinters(position, _splinterNormal.normalize(), power);
+    }
   }
 
   /** Os esguichos que entram pelos rombos abertos, vistos do porão. */

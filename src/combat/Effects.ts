@@ -472,10 +472,8 @@ export class Effects {
     }
   }
 
-  /** A bala entrando na madeira: lascas para fora e poeira de serragem. */
+  /** A bala entrando na madeira: o clarão do impacto e a lasca que salta dele. */
   woodImpact(position: THREE.Vector3, normal: THREE.Vector3, speed: number): void {
-    const power = Math.min(speed / 70, 1.5);
-
     this.glow.emit({
       position,
       velocity: _velocity.set(0, 0, 0),
@@ -489,6 +487,22 @@ export class Effects {
       spin: 0,
     });
 
+    this.splinters(position, normal, Math.min(speed / 70, 1.5));
+  }
+
+  /**
+   * Lascas e poeira de serragem saltando da madeira arrebentada.
+   *
+   * Separada de `woodImpact` porque a bala não é a única coisa que arranca tábua: um
+   * abalroamento também, e ele **não** tem clarão de pólvora — o clarão é o metal
+   * quente entrando, não a madeira cedendo. Pôr o mesmo efeito nos dois daria uma
+   * faísca em cada encostão de casco.
+   *
+   * @param power força do estrago, 0..1,5. É força e não velocidade porque as duas
+   *   causas vivem em escalas diferentes: uma bala chega a 70 m/s e dois cascos se
+   *   encontram a 3, e o que se quer nos dois casos é a mesma lasca voando.
+   */
+  splinters(position: THREE.Vector3, normal: THREE.Vector3, power: number): void {
     for (let i = 0; i < 12; i++) {
       this.scatter(_velocity.copy(normal).multiplyScalar(4 + this.random() * 9 * power), 4);
       this.smoke.emit({

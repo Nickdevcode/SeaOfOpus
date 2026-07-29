@@ -151,6 +151,39 @@ Só o que entra **abaixo do convés** alaga. Tiro na amurada arranca lasca e nad
 E um rombo acima da linha d'água só bebe quando passa crista de onda. Mire na linha
 d'água — é lá que o furo custa caro.
 
+### 💥 Abalroar quebra os dois cascos
+
+O canhão não é o único jeito de abrir casco. Duas chalupas de 37 t se encontrando a
+3 m/s trocam **157 kJ** — mais energia do que quase qualquer bala do jogo entrega —, e
+madeira não tem como não ceder. Bateu, quebrou:
+
+| Aproximação | O que abre em **cada** casco |
+|---|---|
+| até 1,2 m/s | nada. É atracar: os cascos rangem e se afastam |
+| 1,2 – 2,1 m/s | 1 rombo |
+| 2,1 – 3,0 m/s | 2 rombos |
+| acima de 3,0 m/s | 3 rombos |
+
+Três decisões sustentam isso:
+
+- **O estrago é simétrico.** Quem investe leva o mesmo que dá, e é isso que mantém o
+  abalroamento como *risco* em vez de estratégia ótima. Uma investida a 4 m/s abre
+  três furos na linha d'água dos dois — 400 L/s de cada lado, contra 750 da bomba.
+  Dá para sobreviver, e não dá para ignorar.
+- **Os rombos não se fundem.** Eles nascem espalhados 90 cm ao longo do costado, mais
+  que os 42 cm da distância de fusão: três buracos separados bebem três vezes, e um
+  buraco alargado três vezes satura. Sem esse espaçamento, a pancada mais forte do
+  jogo valeria menos que a soma das partes dela.
+- **Encostar não conta.** O limiar de 1,2 m/s é mais do que o mar empurra dois cascos
+  encostados numa ondulação normal. Sem ele, colar no adversário e deixar a onda
+  trabalhar afundaria os dois de graça — e há um rearme de um segundo e meio para que
+  um costado a costado longo conte uma vez, e não sessenta por segundo.
+
+> 🪵 E os cascos de fato **param** um no outro agora. Ver
+> [o abalroamento, por dentro](#-o-que-é-simulado-de-verdade) — a queixa de "um barco
+> entra dentro do outro" tinha duas causas de aritmética, e nenhuma delas aparecia
+> como erro em lugar nenhum.
+
 ### 🎯 Acertar duas vezes no mesmo lugar vale por dois
 
 Parece óbvio, e por muito tempo não foi. O modelo de avaria tinha duas regras que se
@@ -930,10 +963,48 @@ conversão do glTF já girou os eixos de repouso.
 | **Balística** | Arrasto quadrático. A 95 m/s a bala perde 5,4 m/s² só de arrasto, contra 9,81 de gravidade — não é detalhe que dê para ignorar. Alcance máximo cai 29% em relação ao vácuo. |
 | **Alagamento** | Volume com superfície livre horizontal **no mundo**: ao adernar, a água escorre para o bordo baixo e o peso vai junto, o que aderna mais. |
 | **Âncora** | Amarra elástica com amortecimento, mais o atrito do ferro no fundo. Largar a 10 nós freia o navio em 2,5 s, com um caldo depois — e a amarra tesa no escovém faz o navio pivotar em torno da proa (o *anchor turn*). O ferro é desenhado subindo pela amarra conforme se recolhe, e volta ao fundo se a passada no cabrestante parar. |
-| **Abalroamento** | Mola-amortecedor entre os dois cascos, aplicada no ponto de contato — encostar de proa faz o navio pivotar. |
+| **Abalroamento** | Mola-amortecedor de 6 MN/m entre os dois cascos, aplicada no ponto de contato — encostar de proa faz o navio pivotar. Três coroas de sondagens por casco (bojo, linha d'água e costado seco), de ponta a ponta. A força é dividida pelos contatos que **de fato** tocaram, e a direção da expulsão é decidida uma vez por par: o casco empurra na direção de onde o outro vem. Ver as duas notas abaixo. |
 | **Esteira** | Mapa de espuma em render target com ping-pong, reprojetado no mundo a cada quadro para a espuma **ficar na água** em vez de andar com o navio. |
 | **Chuva** | Riscos numa caixa fixa em volta da câmera, com a posição de cada gota sendo função só do tempo. Zero estado na CPU, zero alocação: o que se anima é um uniform. |
 | **Áudio** | Web Audio puro. Distância não baixa só o volume: **fecha o filtro**, porque é o agudo que o ar come primeiro. A reverberação é uma convolução com resposta ao impulso gerada em código. |
+
+### 🚢 "Um barco entra dentro do outro" — três causas somadas
+
+O passo de contato existia desde o começo, rodava sessenta vezes por segundo e
+**achava** contato. Ainda assim os cascos se atravessavam, e não havia erro nenhum
+para encontrar: um contato fraco, um contato ausente e um contato que se cancela
+produzem exatamente a mesma imagem na tela. Eram os três ao mesmo tempo.
+
+- 🔟 **A força era dividida por dez, e não pelos contatos que tocaram.** A intenção
+  estava certa — dez sondagens encostadas têm de empurrar como um contato, não como
+  dez —, mas o divisor era o número de sondagens de *um bordo*, fixo. Um encontro de
+  proa põe uma ou duas sondagens dentro do outro casco, e recebia **um décimo** da
+  força projetada: 1,9 m/s² para desfazer uma aproximação de vários metros por
+  segundo. Agora junta-se tudo numa passada e aplica-se na outra, dividindo pela
+  contagem real.
+- 🎯 **As sondagens paravam a 1,23 m da roda de proa.** Elas cobriam os 94% centrais
+  do casco, amostrados pelo meio de cada faixa. Uma proa só encontrava o outro navio
+  depois de entrar nele **dois metros e meio** — o momento em que a sondagem finalmente
+  alcança uma seção do outro casco mais cheia que a dela. Não era falta de força: era
+  falta do que medir. Hoje elas vão de ponta a ponta e o contato de proa começa com
+  16 cm de sobreposição.
+- ➕➖ **E duas proas de frente cancelavam a força inteira.** Cada sondagem escolhia
+  sair pela face mais próxima dela, o que é o certo para um ponto isolado e
+  catastrófico para um casco: a roda de proa é simétrica, então as sondagens de
+  bombordo e de boreste entram em espelho e empurram em sentidos opostos com o mesmo
+  módulo. **Oito contatos, 36 cm de penetração e 0,0 m/s² de empurrão** — medido pelo
+  teste, não visto na tela. A saída deixou de ser geometria de ponto e passou a ser
+  geometria de par: a marcação relativa dos dois centros diz por onde o outro vem, é a
+  mesma para todas as sondagens (nada cancela) e muda devagar (nada oscila).
+
+O resultado, com os três consertados e a rigidez em 6 MN/m: costado a costado com
+40 cm de sobreposição dá 94 m/s² de separação; uma proa no costado dá 168; duas proas
+de frente, 282. Antes, o primeiro dava décimos e os outros dois davam zero.
+
+> 🧪 Os quatro encontros que existem — costado a costado, proa no costado, proa contra
+> proa e mar aberto — estão em `tests/contact.ts`, junto da terceira lei (a reação tem
+> de fechar) e da escada de rombos do abalroamento. Foi ele que achou o
+> cancelamento, num conserto que já estava escrito e parecia pronto.
 
 ---
 
@@ -1034,7 +1105,7 @@ escolhido.
 
 ## 🧪 Testes
 
-Não há executor de testes instalado — seriam dependências novas para quatro arquivos.
+Não há executor de testes instalado — seriam dependências novas para oito arquivos.
 Eles rodam **no navegador**, com o servidor de desenvolvimento no ar:
 
 ```js
@@ -1047,6 +1118,9 @@ console.table(a.runAiTests().cases);
 
 const d = await import('/tests/damage.ts');
 console.table(d.runDamageTests().cases);
+
+const c = await import('/tests/contact.ts');
+console.table(c.runContactTests().cases);
 
 const l = await import('/tests/locomotion.ts');
 console.table(l.runLocomotionTests().cases);
@@ -1231,6 +1305,12 @@ olha**.
 8. 🎞️ **Clipes de andar de lado e de ré.** A torção de quadril e a passada lida
    ao contrário resolvem o essencial sem tocar no GLB, mas continuam sendo
    disfarce: um `anim_strafe.py` entregaria o contato de pé certo no strafe.
+9. ⚖️ **Calibrar o ritmo do naufrágio.** Medido jogando: **leva rajada demais de
+   bala de canhão para um casco querer afundar**. Adiado de propósito, e não
+   esquecido — o abalroamento acabou de entrar como segunda via de estrago, e mexer
+   nos dois números no mesmo dia deixaria sem saber qual deles mudou o duelo. O que
+   se calibra quando chegar a vez: `BREACH_AREA`, `MAX_JET_SPEED` e `PUMP_RATE`, os
+   três em `ShipDamage`, e todos com o teste de avaria por cima.
 
 ---
 
@@ -1472,6 +1552,43 @@ código adiante" (a tela agora sai de *como* se entrou, e não do que a fase era
 instante atrás); e a fila podia entregar uma vaga que já não servia, deixando
 quem a recebeu sentado sozinho **fora** da fila — hoje ela pede de novo e vira o
 dono de uma vaga nova.
+
+### 👻 E a partida rápida, que pareava com um fantasma
+
+A sala por código funcionava; **"procurar capitão" quebrava metade das vezes**, e o
+sintoma era o mais difícil que existe de apurar de fora: um dos dois entrava no duelo
+e o outro ficava no cronômetro de procura para sempre. Qual dos dois era sorteio, e
+cada um tinha motivo para achar que o problema era a internet do outro.
+
+A causa era uma janela de trinta milissegundos que só a fila alcança. Um socket entra
+na lista da sala no instante em que é aceito — muito antes de o `hello` dele chegar —,
+e quando os dois capitães clicam no mesmo instante (que é o caso mais comum que a
+fila tem: dois amigos combinando de jogar) as quatro coisas se intercalam como *aceita
+A, aceita B, hello de A, hello de B*. O pareamento rodava no terceiro passo, com dois
+sockets na sala e **um** nome.
+
+O estrago era duplo, e nenhuma das duas metades aparecia como erro:
+
+- O desempate de chegada lia zero para quem não tinha falado, então **quem chegou
+  primeiro era tratado como o segundo** e perdia o comando da sala para uma máquina
+  de nota zero.
+- E o `hello` de verdade, ao chegar, encontrava os papéis já decididos e ia embora
+  sem fazer nada — ou seja, o segundo capitão **nunca recebia a mensagem de
+  pareamento**. Ele esperava para sempre; o outro esperava um `ready` que não vinha.
+
+O conserto é uma linha: a sala não decide quem simula antes de os dois terem se
+apresentado. A assinatura do defeito, para quem já viu acontecer, era o adversário
+aparecer chamado **`Sailor`** — o nome de fábrica de quem ainda não falou.
+
+Da mesma rodada: quem era pareado e ficava sozinho na janela entre o pareamento e o
+começo — meio segundo — não era avisado de nada. A espera já tinha acabado, então não
+havia nem cronômetro andando para sugerir que algo estava errado; ele ficava em
+"adversário a bordo" até fechar a aba. Agora a sala diz o que houve e devolve a vaga
+à fila.
+
+> 🧪 Os dois estão em `tests/roomServer.mjs`, e o primeiro só dá para provar abrindo as
+> duas conexões **antes** de qualquer `hello` — que é exatamente a sequência que
+> nenhum teste anterior produzia, porque nenhum jogador conseguiria descrevê-la.
 
 ### Medindo
 

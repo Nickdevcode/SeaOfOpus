@@ -29,11 +29,18 @@ import { GRAVITY, WATER_DENSITY, clamp, clamp01 } from '../core/MathUtils';
 import type { ShipBody } from './ShipBody';
 import {
   DECK_Y,
+  HALF_LENGTH,
   HOLD_FLOOR_Y,
   HULL_LENGTH,
   ceilingY,
+  hullSurfaceNormal,
+  hullSurfacePoint,
   innerHalfWidthAt,
+  sampleSection,
+  sectionV,
   tToZ,
+  zToT,
+  type HullSection,
 } from './ShipDimensions';
 import type { ShipHit } from '../combat/HitDetection';
 import type { WaveField } from '../world/WaveField';
@@ -201,6 +208,41 @@ const MAX_BREACH_SCALE = 3.2;
 const SPRAY_SPEED = 1.6;
 
 /**
+ * Velocidade de aproximação a partir da qual um abalroamento abre casco, em m/s.
+ *
+ * Abaixo disso os cascos se encostam, rangem e se afastam — é atracar, e atracar
+ * não arranca tábua. 1,2 m/s é mais que o mar empurra dois navios encostados um
+ * contra o outro numa ondulação normal, e menos que qualquer manobra em que alguém
+ * *escolheu* ir para cima do outro. A separação importa: sem ela, colar no
+ * adversário e deixar a onda trabalhar afundaria os dois de graça.
+ */
+const RAM_SPEED = 1.2;
+
+/**
+ * Quanta velocidade a mais vale um rombo a mais, em m/s.
+ *
+ * A escada sai em 1,2 → um rombo, 2,1 → dois, 3,0 e acima → três. Uma chalupa a
+ * pano faz uns 5 m/s, então uma investida deliberada entrega o teto e um encostão
+ * de manobra entrega um furo só. É a leitura que o jogo quer: bateu, quebrou, e
+ * quanto mais forte, mais quebrou.
+ */
+const RAM_SPEED_STEP = 0.9;
+
+/** Rombos que um abalroamento abre por casco, no máximo. Ver `RAM_SPEED_STEP`. */
+const RAM_BREACHES_MAX = 3;
+
+/**
+ * Distância entre os rombos de um mesmo abalroamento, ao longo do costado.
+ *
+ * Tem de ser maior que `MERGE_DISTANCE` (42 cm), senão os três rombos que a pancada
+ * abre viram um só alargado — e um rombo alargado bebe menos que três separados,
+ * porque o alargamento satura em `MAX_BREACH_SCALE`. 90 cm dá o dobro da folga
+ * necessária e ainda mantém o estrago concentrado onde os cascos se tocaram, que é
+ * onde ele tem de estar para a história se ler no costado.
+ */
+const RAM_SPREAD = 0.9;
+
+/**
  * Fração do porão cheia que conta como perdido.
  *
  * Não é 1: com o porão em 92% a água já está passando por cima do vau e o navio
@@ -351,6 +393,16 @@ const _worldPoint = new THREE.Vector3();
 const _centroid = new THREE.Vector3();
 const _force = new THREE.Vector3();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
+/** Rascunhos do rombo de abalroamento. Ver `ShipDamage.ram`. */
+const _ramSection: HullSection = { halfBeam: 0, keelY: 0, sheerY: 0, fullness: 1 };
+const _ramHit: ShipHit = {
+  fraction: 0,
+  local: new THREE.Vector3(),
+  normal: new THREE.Vector3(),
+  part: 'hull',
+  floods: true,
+};
 
 export class ShipDamage {
   readonly breaches: Breach[] = [];
@@ -511,6 +563,80 @@ export class ShipDamage {
     };
     this.breaches.push(breach);
     return breach;
+  }
+
+  /**
+   * Rasga o casco num abalroamento.
+   *
+   * ## Por que abalroar tem de abrir casco
+   *
+   * Porque sem isso `HullContact` é só uma cerca: os navios param de se atravessar,
+   * e chegar perto continua não custando nada. Duas chalupas de 37 t se encontrando
+   * a três metros por segundo trocam 157 kJ, o que é mais energia do que quase
+   * qualquer bala do jogo entrega — e a madeira não tem como não ceder. Bateu,
+   * quebrou, nos **dois** cascos: quem investe leva o mesmo estrago que dá, e é isso
+   * que impede o abalroamento de virar a estratégia ótima em vez de um risco.
+   *
+   * ## Um rombo de bala, e não um tipo novo de avaria
+   *
+   * O que a pancada abre é a mesma coisa que uma bala abre — mesma área, mesma
+   * fusão, mesma tábua para pregar em cima. É reuso deliberado: `registerHit`
+   * já resolve rombo em cima de rombo, rombo em cima de tábua e casco no teto de
+   * rombos, e um caminho separado para o abalroamento significaria manter as três
+   * regras em dois lugares. O que a pancada tem de diferente não é o buraco, é a
+   * **quantidade** deles — ver `RAM_SPEED_STEP`.
+   *
+   * @param local ponto do contato, em coordenadas locais deste casco. Não precisa
+   *   estar na superfície: o que se lê dele é a estação, a altura e o bordo, e o
+   *   rombo é posto no costado que corresponde.
+   * @param speed velocidade de aproximação no contato, em m/s.
+   * @returns quantos rombos foram abertos ou alargados. Zero é "só encostou".
+   */
+  ram(local: THREE.Vector3, speed: number): number {
+    if (speed < RAM_SPEED) return 0;
+
+    const count = Math.min(
+      1 + Math.floor((speed - RAM_SPEED) / RAM_SPEED_STEP),
+      RAM_BREACHES_MAX,
+    );
+    // O bordo sai do sinal de X: a pancada veio do lado em que o ponto está.
+    const side = local.x >= 0 ? 1 : -1;
+
+    let opened = 0;
+    for (let i = 0; i < count; i++) {
+      // Centrados no contato e espalhados para os dois lados dele ao longo do
+      // costado, sem chegar às pontas exatas — na roda de proa não há costado onde
+      // pôr um rombo.
+      const z = clamp(
+        local.z + (i - (count - 1) / 2) * RAM_SPREAD,
+        -HALF_LENGTH * 0.96,
+        HALF_LENGTH * 0.96,
+      );
+      if (this.tear(z, local.y, side)) opened++;
+    }
+    return opened;
+  }
+
+  /**
+   * Abre um rombo na superfície do casco, na estação `z` e na altura `y`.
+   *
+   * A altura vem do contato e é projetada na superfície pelo parâmetro `v` da
+   * seção, que é a mesma conversão que a bala usa (`HitDetection.hullNormalAt`) —
+   * então o rombo nasce exatamente onde a malha tem madeira, e não flutuando ao
+   * lado dela.
+   */
+  private tear(z: number, y: number, side: number): boolean {
+    const t = zToT(z);
+    const section = sampleSection(t, _ramSection);
+    const v = clamp01(sectionV(section, y));
+
+    hullSurfacePoint(t, v, side, _ramHit.local);
+    // Acima do convés é amurada: arranca lasca e nada mais, como no tiro. É a mesma
+    // linha que `ShipHit.floods` desenha, e ela vale por qualquer causa.
+    if (_ramHit.local.y >= DECK_Y) return false;
+
+    hullSurfaceNormal(t, v, side, _ramHit.normal);
+    return this.registerHit(_ramHit) !== null;
   }
 
   /** Alarga um rombo existente, até o teto de `MAX_BREACH_SCALE`. */

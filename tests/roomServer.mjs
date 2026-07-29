@@ -204,6 +204,46 @@ await test('a fila pareia dois capitães', async (keep) => {
   if (startA.timeOfDay !== startB.timeOfDay) throw new Error('the two sides got different clocks');
 });
 
+await test('a fila não decide quem simula antes de os dois se apresentarem', async (keep) => {
+  // ⚠️ As duas conexões abrem **antes** de qualquer `hello`, e é isso que este
+  // caso tem de diferente do de cima. É o que acontece quando dois amigos clicam
+  // em "procurar capitão" no mesmo instante: os dois sockets entram na sala e só
+  // depois os dois nomes chegam. Era a única sequência em que a partida rápida
+  // quebrava, e ela quebrava metade das vezes.
+  const ana = open('/queue');
+  keep.push(ana);
+  await opened(ana);
+
+  const beto = open('/queue');
+  keep.push(beto);
+  await opened(beto);
+
+  // Só a Ana se apresentou. A sala tem dois sockets e um nome — não há com o quê
+  // comparar, então não há nada a decidir.
+  hello(ana, 'Ana', 'queue', 90);
+  await expect(ana, 'welcome');
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const early = ana.inbox.find((message) => message.t === 'peer');
+  if (early) {
+    throw new Error(`paired against a captain who had not said hello: ${JSON.stringify(early)}`);
+  }
+
+  hello(beto, 'Beto', 'queue', 40);
+  await expect(beto, 'welcome');
+  const roleA = await expect(ana, 'peer');
+  const roleB = await expect(beto, 'peer');
+
+  // `Sailor` aqui é a assinatura exata do defeito: era o nome de fábrica de quem
+  // ainda não tinha falado, e era o que o outro lado recebia como adversário.
+  if (roleA.nickname !== 'Beto' || roleB.nickname !== 'Ana') {
+    throw new Error(`each side must see the other one’s name; got ${roleA.nickname}/${roleB.nickname}`);
+  }
+  // E o desempate volta a valer: quem chegou primeiro fica com o comando, e a nota
+  // do outro é a de verdade em vez de zero.
+  if (roleA.role !== 'host') throw new Error(`the captain who arrived first got "${roleA.role}"`);
+  if (roleB.role !== 'guest') throw new Error(`the second captain got "${roleB.role}"`);
+});
+
 await test('a fila não senta ninguém numa vaga que já não serve', async (keep) => {
   // Ana entra na fila e vira a vaga guardada.
   const ana = open('/queue');
@@ -349,6 +389,32 @@ await test('quem fica sozinho é avisado de que o outro saiu', async (keep) => {
   guest.close(1000, 'left');
   const over = await expect(host, 'over');
   if (over.reason !== 'left') throw new Error(`ended as "${over.reason}", not "left"`);
+});
+
+await test('quem foi pareado e ficou sozinho antes do começo é avisado', async (keep) => {
+  const ana = open('/queue');
+  keep.push(ana);
+  await opened(ana);
+  hello(ana, 'Ana', 'queue');
+  const room = await expect(ana, 'welcome');
+
+  const beto = open(`/room/${room.code}`);
+  keep.push(beto);
+  await opened(beto);
+  hello(beto, 'Beto', 'join');
+  await expect(ana, 'peer');
+  await expect(beto, 'peer');
+
+  // Beto desiste na janela entre o pareamento e o `start` — meio segundo em que
+  // os dois já se conhecem e o duelo ainda não começou. Sem aviso, a Ana ficava na
+  // tela de "adversário a bordo" para sempre: a espera já tinha acabado, então não
+  // havia nem cronômetro andando para sugerir que algo estava errado.
+  beto.close(1000, 'left');
+  const error = await expect(ana, 'error');
+  if (!/left/i.test(error.reason)) throw new Error(`unhelpful reason: ${error.reason}`);
+
+  // Um instante para a sala devolver a vaga à fila antes do próximo caso.
+  await new Promise((resolve) => setTimeout(resolve, 400));
 });
 
 console.table(cases);
