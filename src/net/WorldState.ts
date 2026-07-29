@@ -270,7 +270,7 @@ function readShip(r: Reader, target: ShipState, slot: ShipSlot, withBreaches: bo
     breach.id = r.u8();
     r.local(breach.local, QUANT.breach);
     breach.normal.set(r.i8() / 127, r.i8() / 127, r.i8() / 127).normalize();
-    breach.area = r.u8() / 2550;
+    breach.area = r.u8() / QUANT.breachArea;
     breach.repair = r.u8() / 255;
     breaches.push(breach);
   }
@@ -283,7 +283,7 @@ function readShip(r: Reader, target: ShipState, slot: ShipSlot, withBreaches: bo
     patch.id = r.u8();
     r.local(patch.local, QUANT.breach);
     patch.normal.set(r.i8() / 127, r.i8() / 127, r.i8() / 127).normalize();
-    patch.area = r.u8() / 2550;
+    patch.area = r.u8() / QUANT.breachArea;
     patches.push(patch);
   }
   target.patches = patches;

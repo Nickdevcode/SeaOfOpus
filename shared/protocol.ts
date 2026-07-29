@@ -61,8 +61,14 @@
  * - **A mira da peça operada**, que agora também é corrigida pelo instantâneo
  *   como já era a roda do timão: acumular deltas dos dois lados só concorda
  *   enquanto nenhum comando se perde.
+ *
+ * **5** — a escala da **área do rombo** subiu de 2550 para 1400 (ver
+ * `QUANT.breachArea`). A anterior saturava em 0,1 m² e o modelo produz até
+ * 0,176: 43% da faixa útil não cabia no fio, e um rombo bem alargado chegava do
+ * outro lado com pouco mais da metade do tamanho real. Achado pelo teste de
+ * instantâneo na primeira vez que ele rodou.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Casas do código de sala. */
 export const CODE_LENGTH = 4;
@@ -225,6 +231,22 @@ export const QUANT = {
   local: 256,
   /** Posições de rombo no casco, m. */
   breach: 512,
+  /**
+   * Área efetiva de um rombo, m². Um byte.
+   *
+   * ⚠️ **Era 2550, e 2550 satura antes do que o jogo produz.** Um rombo nasce
+   * com 0,055 m² e cresce até 3,2 vezes isso ao absorver outros tiros
+   * (`MAX_BREACH_SCALE`), ou seja, até 0,176 m². Com o teto do byte em
+   * 255/2550 = 0,1 m², **43% da faixa útil não cabia no fio**: um rombo bem
+   * alargado chegava do outro lado com pouco mais da metade do tamanho que
+   * tinha. Quem não simula desenhava um furo menor que o real e, pior, calculava
+   * o esguicho a partir dessa área — 236 L/s no lugar de 416.
+   *
+   * 1400 põe o teto em 0,182 m², um dedo acima do máximo que o modelo permite, e
+   * ainda dá 0,7 cm² de resolução — vinte vezes mais fino que o passo com que a
+   * área cresce.
+   */
+  breachArea: 1400,
   /**
    * Fração do dia, 0..1.
    *

@@ -1000,11 +1000,24 @@ console.table(l.runLocomotionTests().cases);
 const n = await import('/tests/netclock.ts');
 console.table(n.runNetClockTests().cases);
 
+const p = await import('/tests/snapshot.ts');
+console.table(p.runSnapshotTests().cases);
+
 const s = await import('/tests/determinism.ts');
 console.table(s.runDeterminismTests().cases);
 ```
 
-O sétimo é a exceção, e ele **não** roda no navegador: o que ele exercita é o
+**Instantâneo** é o que fecha a classe de defeito que nenhum outro teste pega e
+nenhum jogador consegue descrever: um campo que o escritor manda e o leitor não
+lê. Não há erro, não há exceção — o que acontece é que todos os campos dali para
+a frente saem deslocados, e o outro lado passa a mostrar valores que pertencem a
+outra coisa. Ele monta um mundo falso com **um valor distinto em cada campo**,
+codifica, decodifica e compara um por um. Na primeira vez que rodou, achou um
+defeito que estava no ar: a escala da área do rombo saturava em 0,1 m² e o modelo
+produz até 0,176 — 43% da faixa não cabia no fio, e um rombo bem alargado chegava
+do outro lado com pouco mais da metade do tamanho.
+
+O oitavo é a exceção, e ele **não** roda no navegador: o que ele exercita é o
 servidor de sala, e o servidor não está no bundle do jogo. Ele abre WebSockets de
 verdade contra um `wrangler dev` vivo e conversa o mesmo lobby que o jogo
 conversa — dois capitães, fila, código, recusa, resultado.

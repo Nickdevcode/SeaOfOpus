@@ -336,9 +336,9 @@ function writeShip(w: Writer, ship: Ship, includeBreaches: boolean): void {
     w.i8(Math.round(breach.normal.x * 127));
     w.i8(Math.round(breach.normal.y * 127));
     w.i8(Math.round(breach.normal.z * 127));
-    // A área de um rombo vive na casa dos centésimos de m²; ×2550 põe a faixa
-    // útil inteira num byte.
-    w.u8(Math.round(Math.min(breach.area * 2550, 255)));
+    // A escala mora em `QUANT` porque ela **não é óbvia**: ver a nota lá para o
+    // teto que saturava e cortava um rombo alargado quase pela metade.
+    w.u8(Math.round(Math.min(breach.area * QUANT.breachArea, 255)));
     w.u8(Math.round(Math.max(0, Math.min(1, breach.repair)) * 255));
   }
 
@@ -359,7 +359,7 @@ function writeShip(w: Writer, ship: Ship, includeBreaches: boolean): void {
     w.i8(Math.round(patch.normal.x * 127));
     w.i8(Math.round(patch.normal.y * 127));
     w.i8(Math.round(patch.normal.z * 127));
-    w.u8(Math.round(Math.min(patch.area * 2550, 255)));
+    w.u8(Math.round(Math.min(patch.area * QUANT.breachArea, 255)));
   }
 }
 

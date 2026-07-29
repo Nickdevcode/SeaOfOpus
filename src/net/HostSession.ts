@@ -14,7 +14,7 @@
  * interpolação é a mesma suavidade por um quarto do preço.
  */
 
-import { MessageType } from '../../shared/protocol';
+import { MessageType, QUANT } from '../../shared/protocol';
 import type { Match } from '../game/Match';
 import { createInputFrame, type InputFrame } from '../core/InputFrame';
 import type { Ship } from '../ship/Ship';
@@ -122,7 +122,7 @@ export class HostSession {
     let key = damage.breaches.length * 31 + damage.patches.length;
     for (const breach of damage.breaches) {
       key = (Math.imul(key, 16777619) ^ breach.id) >>> 0;
-      key = (Math.imul(key, 16777619) ^ Math.round(breach.area * 2550)) >>> 0;
+      key = (Math.imul(key, 16777619) ^ Math.round(breach.area * QUANT.breachArea)) >>> 0;
     }
     for (const patch of damage.patches) {
       key = (Math.imul(key, 16777619) ^ patch.id) >>> 0;
