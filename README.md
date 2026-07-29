@@ -1274,9 +1274,30 @@ sessão, nenhuma com reenvio, e descartar uma só trava a entrada na sala.
 ### Publicar o servidor de sala
 
 ```bash
-cd server
-npx wrangler login     # abre o navegador; conta gratuita, sem cartão
-npx wrangler deploy
+npm run deploy:server        # da raiz, e é o jeito recomendado
+```
+
+> ⚠️ **`npx wrangler deploy` na raiz não publica nada** — e essa é a pegadinha
+> mais cara deste repositório, porque ela **parece** ter funcionado. A
+> configuração do Worker mora em `server/wrangler.jsonc`, e o wrangler só procura
+> no diretório atual e nos pais, nunca nos filhos. Da raiz, ele para com *"The
+> Cloudflare application detection logic has been run in the root of a workspace
+> instead of targeting a specific project"* e **sai sem subir nada**. Quem rodar
+> isso no meio de uma sessão de correções fica com o cliente novo no ar e o
+> servidor velho embaixo dele — e o sintoma disso não é "o deploy falhou", é o
+> jogo recusando toda conexão com *"This game version cannot duel that one"*,
+> porque as duas pontas passam a discordar do `PROTOCOL_VERSION`.
+>
+> O script acima existe justamente para tornar o erro impossível: ele entra no
+> workspace certo por conta própria. Se preferir o comando cru, é
+> `cd server && npx wrangler deploy` — o `cd` **não** é opcional.
+
+A primeira vez pede autenticação: `npx wrangler login` dentro de `server/` (conta
+gratuita, sem cartão). Para conferir o que está de fato no ar a qualquer momento:
+
+```bash
+cd server && npx wrangler deployments list   # data e versão de cada publicação
+curl https://<seu-worker>.workers.dev/health # deve devolver {"ok":true}
 ```
 
 Depois, na hospedagem do jogo, defina `VITE_ROOM_SERVER` com o endereço que o
@@ -1289,6 +1310,7 @@ sem isso, qualquer página da internet abre salas na sua conta.
 
 | Sintoma | O que é | O que fazer |
 |---|---|---|
+| **"This game version cannot duel that one"** | Cliente e servidor discordam do `PROTOCOL_VERSION`. Quase sempre é o Worker que ficou para trás — ver a pegadinha do `cd server` acima | `npm run deploy:server` e recarregue os dois navegadores sem cache |
 | **"No room server at ws://…"** | Não há nada escutando naquele endereço | O segundo terminal está rodando? `curl http://127.0.0.1:8930/health` devolve `{"ok":true}`? |
 | `/health` devolve **HTML** | Outro processo tomou a porta | `netstat -ano \| findstr :8930`, encerre o intruso — ou troque a porta em `wrangler.jsonc` **e** no `.env.development` |
 | Botão de online apagado | Falta `VITE_ROOM_SERVER` | Local: o `.env.development` existe? Publicado: refaça o build **sem cache** |

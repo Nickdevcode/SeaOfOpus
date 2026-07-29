@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "check:all": "npm run check && npm -w server run check",
-    "dev:server": "npm -w server run dev"
+    "dev:server": "npm -w server run dev",
+    "deploy:server": "npm -w server run deploy",
+    "tail:server": "npm -w server run tail"
   },
   "dependencies": {
     "postprocessing": "^6.39.3",
