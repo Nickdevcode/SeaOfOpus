@@ -35,7 +35,7 @@ import type { Ship } from '../ship/Ship';
 import { BALL_MASS, BALL_RADIUS, MUZZLE_SPEED } from '../ship/Cannon';
 import { INPUT_BATCH } from '../../shared/protocol';
 import { encodeInput } from './snapshotCodec';
-import { advanceRenderClock, interpolationFactor } from './renderClock';
+import { advanceHostEstimate, correctHostEstimate, interpolationFactor } from './renderClock';
 import { createWorldState, decodeSnapshot, type WorldState } from './WorldState';
 import type { RoomClient } from './RoomClient';
 
@@ -75,9 +75,16 @@ const INTERP_DELAY = SNAPSHOT_INTERVAL;
 /** Um lote de entrada a cada dois passos: 30 mensagens por segundo. */
 const SEND_EVERY = 2;
 
-/** Faixa saudável da fila do host. Ver `adjustLead`. */
-const DEPTH_MIN = 2;
-const DEPTH_MAX = 4;
+/**
+ * Fundo de fila que se quer manter no host, em quadros.
+ *
+ * Um quadro é o amortecedor mínimo: com ele, um pacote que atrase até um passo
+ * inteiro ainda encontra o que consumir. Dois seriam mais seguros e custariam
+ * 17 ms de latência de comando a mais o tempo todo — e a segurança que eles
+ * comprariam já é comprada de graça pela redundância do lote, que reenvia cada
+ * quadro duas vezes. Ver `adjustLead`.
+ */
+const DEPTH_TARGET = 1;
 
 /**
  * Limites do avanço, em passos.
@@ -174,15 +181,17 @@ export class GuestSession {
   private localTick = 0;
 
   /**
-   * O relógio de **desenho**, em passos fracionários.
+   * Onde se acha que o relógio do host está **agora**, em passos fracionários.
    *
-   * Anda sozinho, um por passo, e o instantâneo só o corrige — a mesma regra de
-   * `localTick`, e pelo mesmo motivo: derivado de `hostTick`, ele ficaria parado
-   * três passos e pularia quatro, que é exatamente o tranco que este arquivo
-   * existe para não ter. É fracionário porque é dele que sai o fator de
-   * interpolação entre os dois instantâneos. Ver `advanceRenderClock`.
+   * Anda sozinho, um por passo, e o instantâneo corrige só a fase dela. O
+   * relógio de desenho é esta estimativa menos o atraso de interpolação — e é
+   * por ser derivado de uma rampa que ele anda liso. Ver `renderClock.ts`, que
+   * conta a versão anterior e por que ela tremia.
    */
-  private renderClock = 0;
+  private hostEstimate = 0;
+
+  /** `true` depois que o primeiro instantâneo alinhou os dois relógios. */
+  private clockStarted = false;
 
   /** Quanto o corpo local corre à frente do host, em passos. */
   lead = 4;
@@ -203,6 +212,22 @@ export class GuestSession {
   private outboxCount = 0;
 
   private leadTimer = 0;
+  /**
+   * A fila mais vazia que o host relatou desde o último ajuste do avanço.
+   *
+   * É o **mínimo**, e não o último valor, porque é o mínimo que diz se sobra
+   * folga: uma fila que oscila entre zero e quatro não tem gordura nenhuma para
+   * cortar, ainda que o instantâneo em que se olhou mostrasse quatro.
+   */
+  private minDepthSinceAdjust = Number.POSITIVE_INFINITY;
+
+  /** Passo em que o posto mudou por predição local, à espera do recibo do host. */
+  private stationPredictedAt = -1;
+  private lastStation: 'deck' | 'helm' | 'cannon' = 'deck';
+  private lastCannonIndex = -1;
+  private lastOnLadder = false;
+  private lastAtCapstan = false;
+
   /** `true` quando o host avisou que a janela dele saiu de foco. */
   stalled = false;
 
@@ -227,7 +252,10 @@ export class GuestSession {
     this.hasTo = false;
     this.hostTick = 0;
     this.localTick = 0;
-    this.renderClock = 0;
+    this.hostEstimate = 0;
+    this.clockStarted = false;
+    this.minDepthSinceAdjust = Number.POSITIVE_INFINITY;
+    this.stationPredictedAt = -1;
     this.lead = 4;
     this.visualOffset.set(0, 0, 0);
     this.releaseHistory(Number.POSITIVE_INFINITY);
@@ -259,16 +287,29 @@ export class GuestSession {
     this.hasTo = true;
     this.hostTick = this.to.tick;
     this.depth = this.to.bufferDepth;
+    if (this.depth < this.minDepthSinceAdjust) this.minDepthSinceAdjust = this.depth;
     this.stalled = false;
 
     // Primeiro instantâneo: o avanço nasce medido, e os dois relógios já nascem
     // alinhados a ele. Ver `estimateLead` e `advanceRenderClock`.
-    if (this.localTick === 0) {
+    //
+    // ⚠️ A guarda é uma bandeira, e **não** `localTick === 0`, que era o que
+    // havia aqui e nunca era verdade: `predictionTick` incrementa o relógio a
+    // cada passo desde que a partida começa, e o primeiro instantâneo chega
+    // dezenas de passos depois. O ramo de baixo é que rodava sempre, e o efeito
+    // era o avanço nascer no valor de fábrica e ter de **descobrir** a latência
+    // subindo de um em um — que é exatamente o trabalho que `estimateLead`
+    // existe para não ser preciso fazer.
+    if (!this.clockStarted) {
+      this.clockStarted = true;
       this.lead = this.estimateLead();
       this.localTick = this.hostTick + this.lead;
-      this.renderClock = this.hostTick - INTERP_DELAY;
+      this.hostEstimate = this.hostTick;
     } else {
       this.syncClock();
+      // A fase da estimativa é corrigida **aqui**, e só aqui: é o único momento
+      // em que há informação nova sobre onde o host está.
+      this.hostEstimate = correctHostEstimate(this.hostEstimate, this.hostTick);
     }
 
     this.reconcile();
@@ -314,21 +355,27 @@ export class GuestSession {
   fixedUpdate(frame: InputFrame): void {
     if (!this.hasTo) return;
 
-    this.advanceRenderClock();
+    // Antes de `applyWorld`, que é quem escreve a autoridade por cima. Ver
+    // `trackStationPrediction`.
+    this.trackStationPrediction(frame.tick);
+    // Um por passo, sempre. Toda a correção mora na chegada do instantâneo — é
+    // o que mantém a velocidade do mundo constante entre dois pacotes.
+    this.hostEstimate = advanceHostEstimate(this.hostEstimate);
     this.applyWorld();
+    this.rememberStation();
     this.rememberPrediction(frame.tick);
     this.queueOutgoing(frame);
     this.adjustLead();
   }
 
   /**
-   * Anda o relógio de desenho um passo, perseguindo o instantâneo mais recente.
+   * O instante que está sendo desenhado, em passos fracionários.
    *
-   * O alvo é `hostTick − INTERP_DELAY`, que é onde a pose está pronta para ser
-   * interpolada — um instantâneo atrás do mais novo, com o outro já em mão.
+   * Um instantâneo atrás da estimativa do host: é onde a pose já tem os dois
+   * pontos entre os quais interpolar.
    */
-  private advanceRenderClock(): void {
-    this.renderClock = advanceRenderClock(this.renderClock, this.hostTick - INTERP_DELAY);
+  private get renderClock(): number {
+    return this.hostEstimate - INTERP_DELAY;
   }
 
   /**
@@ -425,7 +472,38 @@ export class GuestSession {
     waves.windStrength = this.to.windStrength;
     waves.syncUniforms();
 
+    this.applySky();
     this.applyCrew();
+  }
+
+  /**
+   * O céu e o tempo, escritos como chegaram.
+   *
+   * **Sem interpolar**, e é uma escolha, não um esquecimento: entre dois
+   * instantâneos passam 67 ms, e nesse tempo o sol de um dia de doze minutos
+   * anda três centésimos de grau. Interpolar isso custaria tratar a virada da
+   * meia-noite (0,99 → 0,01, que interpolado dá um dia inteiro ao contrário em
+   * um passo) para ganhar exatamente nada que se veja.
+   */
+  private applySky(): void {
+    const sky = this.to.sky;
+    const environment = this.match.environment;
+
+    environment.dayNight.timeOfDay = sky.timeOfDay;
+    environment.weather.applyRemote({
+      current: sky.current,
+      target: sky.target,
+      baseWind: sky.baseWind,
+      clouds: sky.clouds,
+      rain: sky.rain,
+      visibility: sky.visibility,
+      flash: sky.flash,
+      // Vento e rumo viajam como propriedade do mar, porque é o mar que os
+      // consome; o tempo os recebe de volta só para o HUD ter o que mostrar.
+      wind: this.to.windStrength,
+      direction: this.to.windDirection,
+    });
+    environment.fixedUpdateRemote();
   }
 
   private applyShipParts(
@@ -509,16 +587,67 @@ export class GuestSession {
     remote.onLadder = state.onLadder;
     remote.atCapstan = state.atCapstan;
 
-    // Do meu corpo, o posto vem sempre do host: assumir o timão depende de estado
-    // do navio que este cliente não possui, e uma predição rejeitada arrancaria a
-    // câmera do jogador. O custo some de graça dentro da transição de câmera que
-    // já existe — ela dura 0,28 s, mais que qualquer ida e volta jogável.
+    // ⚠️ **O posto só é escrito quando o host já viu o comando que o mudou.**
+    //
+    // Escrever sempre — que era o que se fazia — parte de uma premissa razoável
+    // e errada: a de que o cliente não prevê o posto. Ele prevê, e sempre
+    // previu, porque `Crewman.fixedUpdate` é o **mesmo** código dos dois lados e
+    // `Interaction.press` chama `takeHelm()` aqui também. O que havia era uma
+    // predição sem reconciliação: o jogador assumia o timão neste instante e o
+    // instantâneo seguinte, que descreve um passado anterior ao aperto, o
+    // devolvia ao convés. Com a ida e volta que este projeto tem, isso são cinco
+    // ou seis instantâneos desfazendo o comando antes de o host confirmá-lo — e
+    // o jogador vê a câmera pular entre o convés e a roda, com os controles
+    // trocando de significado a cada salto. Era o "os controles se invertem".
+    //
+    // `ackTick` é o recibo: enquanto o último comando que o host consumiu for
+    // anterior ao que causou a mudança daqui, o estado que chega ainda **não
+    // pode** falar sobre ela, e o certo é deixar a predição em pé. Quando o
+    // recibo passa, a autoridade volta a valer inteira — e se o host tiver
+    // recusado, a correção acontece aí, uma vez só, em vez de piscar.
+    const settled = this.stationPredictedAt < 0 || this.to.ackTick >= this.stationPredictedAt;
+    if (!settled) return;
+    this.stationPredictedAt = -1;
+
     const mine = this.match.crew[0].controller;
     const mineState = this.to.crew[this.slot]!;
     mine.station = mineState.station;
     mine.cannonIndex = mineState.cannonIndex;
     mine.onLadder = mineState.onLadder;
     mine.atCapstan = mineState.atCapstan;
+  }
+
+  /**
+   * Anota que o posto mudou **aqui**, e em que passo.
+   *
+   * Roda antes de `applyWorld`, e a ordem é o que torna a leitura possível: o
+   * passo do marujo local já aconteceu (`Match.fixedUpdateRemote` roda antes
+   * desta sessão), e a autoridade ainda não foi escrita por cima. Uma diferença
+   * em relação ao que ficou do passo anterior só pode ter vindo daqui.
+   */
+  private trackStationPrediction(tick: number): void {
+    const mine = this.match.crew[0].controller;
+    const changed =
+      mine.station !== this.lastStation ||
+      mine.cannonIndex !== this.lastCannonIndex ||
+      mine.onLadder !== this.lastOnLadder ||
+      mine.atCapstan !== this.lastAtCapstan;
+
+    if (changed) this.stationPredictedAt = tick;
+
+    this.lastStation = mine.station;
+    this.lastCannonIndex = mine.cannonIndex;
+    this.lastOnLadder = mine.onLadder;
+    this.lastAtCapstan = mine.atCapstan;
+  }
+
+  /** Depois de `applyCrew`: a autoridade também conta como "o que ficou". */
+  private rememberStation(): void {
+    const mine = this.match.crew[0].controller;
+    this.lastStation = mine.station;
+    this.lastCannonIndex = mine.cannonIndex;
+    this.lastOnLadder = mine.onLadder;
+    this.lastAtCapstan = mine.atCapstan;
   }
 
   // -- predição -------------------------------------------------------------------
@@ -585,6 +714,14 @@ export class GuestSession {
    * `INPUT_BATCH`.
    */
   private queueOutgoing(frame: InputFrame): void {
+    // O olhar que este passo produziu, medido **depois** de o marujo já ter
+    // andado — `Match.fixedUpdateRemote` roda antes desta sessão. É o ângulo
+    // exato com que a interação foi decidida aqui, e é o que o host tem de usar
+    // para decidir igual. Ver `PlayerController.applyLook`.
+    const view = this.match.crew[0].controller;
+    frame.yaw = view.yaw;
+    frame.pitch = view.pitch;
+
     // Desliza a janela: o mais antigo cai fora.
     for (let i = this.outbox.length - 1; i > 0; i--) {
       copyInputFrame(this.outbox[i - 1]!, this.outbox[i]!);
@@ -639,22 +776,37 @@ export class GuestSession {
   }
 
   /**
-   * Ajusta o quanto o corpo corre à frente, pela fila do host.
+   * Ajusta o quanto o corpo corre à frente, pelo **fundo** da fila do host.
    *
-   * Fila vazia significa entrada chegando tarde: adiantar mais. Fila cheia
-   * significa entrada chegando cedo demais e envelhecendo na espera, o que é
-   * latência de comando pura: recuar. A assimetria é de propósito — a fila
-   * **zerada** sobe dois de uma vez, porque ali já se está perdendo comando, e
-   * perder comando é muito pior que jogar com trinta milissegundos a mais de
-   * atraso. Para baixo, sempre de um em um.
+   * ## Por que o mínimo, e não a última leitura
+   *
+   * Porque avanço é latência de comando pura — cada passo a mais é um passo que
+   * o comando espera na fila antes de valer — e a única folga que se pode cortar
+   * com segurança é a que existiu o tempo **todo** desde o último ajuste. Uma
+   * fila que oscila entre zero e quatro tem média dois e gordura nenhuma: cortar
+   * ali é escolher passar fome no próximo vale.
+   *
+   * ## O defeito que isto substitui
+   *
+   * A versão anterior olhava a última leitura, subia com fila abaixo de dois e
+   * só descia com fila acima de quatro. Entre os dois havia uma faixa morta, e
+   * qualquer engasgo que empurrasse o avanço para cima ficava lá: subir era
+   * fácil, descer exigia uma fila gorda que o próprio avanço alto impedia de
+   * acontecer. Era uma catraca, e ela girava sempre no mesmo sentido — o
+   * jogador que relatou isto estava com avanço 22 (366 ms de atraso em toda
+   * ação que depende do host) numa conexão de 127 ms, que pede 12.
    */
   private adjustLead(): void {
     this.leadTimer++;
     if (this.leadTimer < LEAD_ADJUST_EVERY) return;
     this.leadTimer = 0;
 
-    if (this.depth === 0) this.lead = Math.min(this.lead + 2, LEAD_MAX);
-    else if (this.depth < DEPTH_MIN) this.lead = Math.min(this.lead + 1, LEAD_MAX);
-    else if (this.depth > DEPTH_MAX) this.lead = Math.max(this.lead - 1, LEAD_MIN);
+    const floor = this.minDepthSinceAdjust;
+    this.minDepthSinceAdjust = Number.POSITIVE_INFINITY;
+    // Nenhum instantâneo na janela: não há o que medir, e chutar seria pior.
+    if (!Number.isFinite(floor)) return;
+
+    if (floor === 0) this.lead = Math.min(this.lead + 2, LEAD_MAX);
+    else if (floor > DEPTH_TARGET) this.lead = Math.max(this.lead - 1, LEAD_MIN);
   }
 }

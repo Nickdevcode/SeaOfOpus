@@ -26,7 +26,11 @@
 
 import { createInputFrame, InputBit, type InputFrame } from '../src/core/InputFrame';
 import { InputBuffer } from '../src/net/InputBuffer';
-import { advanceRenderClock, interpolationFactor } from '../src/net/renderClock';
+import {
+  advanceHostEstimate,
+  correctHostEstimate,
+  interpolationFactor,
+} from '../src/net/renderClock';
 import { decodeInput, encodeInput } from '../src/net/snapshotCodec';
 
 export interface TestCase {
@@ -239,6 +243,12 @@ export function runNetClockTests(): TestReport {
   original.moveY = 1;
   original.lookX = 0.0731;
   original.lookY = -0.0244;
+  // O olhar absoluto entrou na versão 2 do formato. O rumo vai perto de meia
+  // volta de propósito: é onde a normalização para −π..π tem de agir, e sem ela
+  // o `i16` desta escala satura em ±3,27 rad e a cabeça do adversário fica presa
+  // num canto assim que ele der algumas voltas.
+  original.yaw = 3.0416;
+  original.pitch = -0.6123;
 
   const decoded = Array.from({ length: 4 }, createInputFrame);
   decodeInput(encodeInput([original]), decoded);
@@ -247,19 +257,47 @@ export function runNetClockTests(): TestReport {
     Math.abs(back.lookX - original.lookX),
     Math.abs(back.lookY - original.lookY),
   );
+  const viewError = Math.max(
+    Math.abs(back.yaw - original.yaw),
+    Math.abs(back.pitch - original.pitch),
+  );
   const exact =
     back.tick === original.tick &&
     back.held === original.held &&
     back.pressed === original.pressed &&
+    back.absoluteView &&
     Math.abs(back.moveX - original.moveX) < 0.01 &&
     Math.abs(back.moveY - original.moveY) < 0.01;
 
   cases.push({
     nome: 'codec · ida e volta preserva o comando',
-    medido: `bits ${exact ? 'exatos' : 'ERRADOS'} · olhar ±${lookError.toExponential(1)} rad`,
-    esperado: 'bits exatos · olhar ±1e-4 rad',
-    erro: exact && lookError < 1e-4 ? '—' : 'o comando chega diferente do que saiu',
-    passou: exact && lookError < 1e-4,
+    medido: `bits ${exact ? 'exatos' : 'ERRADOS'} · delta ±${lookError.toExponential(1)} · olhar ±${viewError.toExponential(1)} rad`,
+    esperado: 'bits exatos · ambos ±1e-4 rad',
+    erro:
+      exact && lookError < 1e-4 && viewError < 1e-4
+        ? '—'
+        : 'o comando chega diferente do que saiu',
+    passou: exact && lookError < 1e-4 && viewError < 1e-4,
+  });
+
+  // --- 4b. uma volta inteira não estoura a escala ------------------------------
+  // O rumo cresce sem limite enquanto o jogador gira sempre para o mesmo lado.
+  // O que tem de chegar do outro lado é o **mesmo apontamento**, e não o mesmo
+  // número: 7 rad e 7 − 2π apontam para o lugar idêntico.
+  const girado = createInputFrame();
+  girado.tick = 7;
+  girado.yaw = 7.4;
+  const voltas = Array.from({ length: 4 }, createInputFrame);
+  decodeInput(encodeInput([girado]), voltas);
+  const equivalente = Math.abs(
+    Math.atan2(Math.sin(voltas[0]!.yaw - girado.yaw), Math.cos(voltas[0]!.yaw - girado.yaw)),
+  );
+  cases.push({
+    nome: 'codec · rumo além de uma volta aponta para o mesmo lado',
+    medido: `${girado.yaw} rad → ${voltas[0]!.yaw.toFixed(4)} rad (${equivalente.toExponential(1)} de diferença angular)`,
+    esperado: '< 1e-4 rad',
+    erro: equivalente < 1e-4 ? '—' : 'o rumo satura e a cabeça do adversário trava num canto',
+    passou: equivalente < 1e-4,
   });
 
   // --- 4. a fome repete direito ------------------------------------------------
@@ -307,19 +345,26 @@ export function runNetClockTests(): TestReport {
  *
  * @param delay atraso de desenho em passos, contado do instantâneo mais novo.
  */
-function simulateRender(delay: number): { congelados: number; maiorSalto: number; total: number } {
+function simulateRender(delay: number): {
+  congelados: number;
+  maiorAvanco: number;
+  menorAvanco: number;
+  total: number;
+} {
   const TICKS = 600;
   const WARMUP = 60;
 
-  let clock = 0;
+  let hostEstimate = 0;
   let fromTick = 0;
   let toTick = 0;
   let hostTick = 0;
   let temPar = false;
+  let comecou = false;
   let anterior = -1;
 
   let congelados = 0;
-  let maiorSalto = 0;
+  let maiorAvanco = 0;
+  let menorAvanco = Number.POSITIVE_INFINITY;
   let total = 0;
 
   for (let step = 0; step < TICKS; step++) {
@@ -333,12 +378,17 @@ function simulateRender(delay: number): { congelados: number; maiorSalto: number
         temPar = true;
       }
       toTick = hostTick;
-      if (clock === 0) clock = hostTick - delay;
+      if (!comecou) {
+        comecou = true;
+        hostEstimate = hostTick;
+      } else {
+        hostEstimate = correctHostEstimate(hostEstimate, hostTick);
+      }
     }
-    if (toTick === 0) continue;
+    if (!comecou) continue;
 
-    clock = advanceRenderClock(clock, toTick - delay);
-    const t = temPar ? interpolationFactor(clock, fromTick, toTick) : 1;
+    hostEstimate = advanceHostEstimate(hostEstimate);
+    const t = temPar ? interpolationFactor(hostEstimate - delay, fromTick, toTick) : 1;
 
     if (step < WARMUP) {
       anterior = t;
@@ -348,13 +398,18 @@ function simulateRender(delay: number): { congelados: number; maiorSalto: number
     total++;
     // O fator anda para trás quando o par troca (o `to` vira `from` e o fator
     // volta ao começo do novo intervalo), e isso é normal — o que se conta como
-    // congelamento é ele não sair do lugar de um passo para o outro.
-    if (Math.abs(t - anterior) < 1e-9) congelados++;
-    else if (t > anterior) maiorSalto = Math.max(maiorSalto, t - anterior);
+    // congelamento é ele não sair do lugar de um passo para o outro, e como
+    // avanço só o que acontece dentro de um mesmo par.
+    const avanco = t - anterior;
+    if (Math.abs(avanco) < 1e-9) congelados++;
+    else if (avanco > 0) {
+      maiorAvanco = Math.max(maiorAvanco, avanco);
+      menorAvanco = Math.min(menorAvanco, avanco);
+    }
     anterior = t;
   }
 
-  return { congelados, maiorSalto, total };
+  return { congelados, maiorAvanco, menorAvanco, total };
 }
 
 function renderClockCases(): TestCase[] {
@@ -379,47 +434,61 @@ function renderClockCases(): TestCase[] {
   //
   // Mesma lógica do caso 2: se este passar, o teste parou de testar.
   //
-  // O número que sai daqui é exatamente metade, e a conta explica o sintoma
-  // melhor que qualquer descrição: com o alvo dois passos antes do instantâneo
-  // mais velho, o relógio gasta os dois primeiros passos de cada intervalo
-  // **antes** do começo dele — fator grampeado em zero, imagem parada — e só nos
-  // dois últimos é que a pose anda, e ainda assim a um quarto da velocidade. O
-  // limiar é um quarto, e não a metade exata, para o caso não virar uma
-  // igualdade disfarçada que quebra ao primeiro ajuste na constante de correção.
+  // A conta explica o sintoma melhor que qualquer descrição: com o alvo antes do
+  // instantâneo mais velho dos dois, o relógio gasta o começo de cada intervalo
+  // à esquerda da janela — fator grampeado em zero, imagem parada — e só depois
+  // a pose anda.
+  //
+  // O limiar é 10%, e a distância entre os dois lados é o que o justifica: o
+  // atraso certo dá **zero** passos parados e o errado dá um quarto deles. Um
+  // corte no meio dessa distância não vira igualdade disfarçada — que foi
+  // exatamente o que aconteceu quando ele ficou colado no valor medido, primeiro
+  // em 50% e depois em 25%, e o caso passou a quebrar a cada ajuste na constante
+  // de correção sem que nada de verdade tivesse mudado.
   const antigo = simulateRender(6);
   const taxaAntiga = antigo.congelados / antigo.total;
   cases.push({
     nome: 'desenho · atraso de seis passos reproduz o bug',
     medido: `${antigo.congelados} passos parados (${(taxaAntiga * 100).toFixed(1)}%)`,
-    esperado: '> 25% — ele tem mesmo de falhar',
-    erro: taxaAntiga > 0.25 ? '—' : 'o teste não está mais reproduzindo o defeito',
-    passou: taxaAntiga > 0.25,
+    esperado: '> 10% — ele tem mesmo de falhar',
+    erro: taxaAntiga > 0.1 ? '—' : 'o teste não está mais reproduzindo o defeito',
+    passou: taxaAntiga > 0.1,
   });
 
-  // --- 7. e anda sem tranco ----------------------------------------------------
-  // Um passo de desenho vale no máximo 1,25 passos de simulação sobre um
-  // intervalo de quatro. Acima disso a correção deixou de ser dilatação e virou
-  // salto, que é o que ela existe para não ser.
-  const tetoSalto = (1 + 0.25) / SNAPSHOT_EVERY + 1e-6;
+  // --- 7. e anda com velocidade constante ---------------------------------------
+  //
+  // **Este é o caso do tremor**, e ele é mais exigente que o anterior de
+  // propósito: uma imagem pode andar em todo passo e ainda assim tremer, se
+  // andar quantidades diferentes a cada um. Era o que acontecia com o relógio
+  // que perseguia `hostTick` por ganho proporcional — como `hostTick` é um
+  // degrau (parado quatro passos, sobe quatro), a perseguição virava um dente de
+  // serra e a velocidade do mundo oscilava 25% a quinze hertz.
+  //
+  // O que se mede é a razão entre o maior e o menor avanço do fator dentro de um
+  // par. Em regime ela tem de ser praticamente 1.
+  const variacao = corrigido.maiorAvanco / corrigido.menorAvanco;
   cases.push({
-    nome: 'desenho · a correção não dá salto',
-    medido: `maior avanço ${corrigido.maiorSalto.toFixed(4)} do intervalo`,
-    esperado: `≤ ${tetoSalto.toFixed(4)}`,
-    erro: corrigido.maiorSalto <= tetoSalto ? '—' : 'o relógio saltou em vez de dilatar',
-    passou: corrigido.maiorSalto <= tetoSalto,
+    nome: 'desenho · a velocidade do mundo não oscila',
+    medido: `avanço entre ${corrigido.menorAvanco.toFixed(4)} e ${corrigido.maiorAvanco.toFixed(4)} (${((variacao - 1) * 100).toFixed(1)}% de oscilação)`,
+    esperado: '< 2% — velocidade constante entre pacotes',
+    erro: variacao < 1.02 ? '—' : 'o mundo acelera e desacelera a cada pacote: é o tremor',
+    passou: variacao < 1.02,
   });
 
-  // --- 8. o tempo nunca anda para trás ------------------------------------------
-  // Uma correção negativa maior que um passo desenharia o navio recuando. O
-  // limite de taxa existe para isso, e o teste o cobra no pior caso possível:
-  // um alvo bem atrás do relógio.
-  const recuo = advanceRenderClock(1000, 980);
+  // --- 8. a estimativa persegue o host sem saltar --------------------------------
+  // Um pacote atrasado não pode puxar a fase de uma vez: o salto entraria como
+  // um solavanco no tempo do mundo. E um desvio grande demais não é deriva —
+  // aí saltar é o certo, porque alcançar de um quinto em um quinto levaria
+  // minutos.
+  const suave = correctHostEstimate(1000, 1002);
+  const salto = correctHostEstimate(1000, 1200);
+  const suaveOk = suave > 1000 && suave < 1000.5;
   cases.push({
-    nome: 'desenho · o relógio não volta atrás',
-    medido: `${(recuo - 1000).toFixed(3)} passo com o alvo 20 atrás`,
-    esperado: '> 0 — sempre para a frente',
-    erro: recuo > 1000 ? '—' : 'o mundo é desenhado recuando durante a correção',
-    passou: recuo > 1000,
+    nome: 'desenho · a fase se corrige aos poucos, e salta só no absurdo',
+    medido: `desvio de 2 → +${(suave - 1000).toFixed(2)} · desvio de 200 → ${salto}`,
+    esperado: 'parcial no pequeno · direto no grande',
+    erro: suaveOk && salto === 1200 ? '—' : 'a correção de fase não está graduada',
+    passou: suaveOk && salto === 1200,
   });
 
   return cases;

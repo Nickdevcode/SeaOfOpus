@@ -230,10 +230,69 @@ export class Weather {
     this.countdown = this.rollDuration(preset);
   }
 
+  /**
+   * Escreve o tempo que veio pronto do outro lado do fio.
+   *
+   * ## Por que receber em vez de simular
+   *
+   * A máquina de estados daqui é semeada e determinística, então em tese os dois
+   * lados de um duelo poderiam rodá-la em paralelo e chegar ao mesmo tempo. Na
+   * prática não podem: ela avança somando `dt` em ponto flutuante, e o cliente
+   * que não simula **perde passos por construção** — o motor descarta o
+   * excedente quando a aba engasga, que é o certo para a física local e fatal
+   * para um relógio compartilhado. Um segundo de deriva num `countdown` de
+   * duzentos é a diferença entre ver a tempestade chegar e continuar num céu
+   * limpo enquanto o adversário já está no meio dela.
+   *
+   * Recebendo, o tempo é o mesmo por construção, e o custo são dez bytes a cada
+   * instantâneo.
+   *
+   * ⚠️ **`baseWind` entra junto, e não é detalhe:** é dele que sai `severity`,
+   * que por sua vez tinge nuvem, névoa e a luz da cena inteira. Sem ele, o guest
+   * receberia a chuva e continuaria com o céu de um dia bonito.
+   *
+   * O que **não** entra é o vento com rajada (`wind`) e o rumo (`direction`):
+   * os dois já viajam no instantâneo como propriedade do mar, porque é o mar que
+   * os consome. Quem chama aqui passa os dois adiante para o HUD ter o que
+   * mostrar.
+   */
+  applyRemote(state: {
+    current: WeatherId;
+    target: WeatherId;
+    baseWind: number;
+    clouds: number;
+    rain: number;
+    visibility: number;
+    flash: number;
+    wind: number;
+    direction: number;
+  }): void {
+    this.current = state.current;
+    this.target = state.target;
+    this.baseWind = state.baseWind;
+    this.clouds = state.clouds;
+    this.rain = state.rain;
+    this.visibility = state.visibility;
+    this.flash = state.flash;
+    this.wind = state.wind;
+    this.direction = state.direction;
+  }
+
   /** Nome do tempo, para o HUD. Diz para onde vai quando está virando. */
   get label(): string {
     if (this.target === this.current) return PRESETS[this.current].label;
     return `${PRESETS[this.current].label} → ${PRESETS[this.target].label}`;
+  }
+
+  /**
+   * O vento **sem** a rajada, que é a grandeza que persegue o preset.
+   *
+   * Exposto em leitura porque o instantâneo o carrega: é dele que sai
+   * `severity`, e sem ele o outro lado receberia a chuva e a nuvem certas sob a
+   * luz de um dia bonito. Ver `applyRemote`.
+   */
+  get windBase(): number {
+    return this.baseWind;
   }
 
   /** Quão severo está o tempo, de 0 (limpo) a 1 (temporal). */

@@ -12,6 +12,7 @@
 
 import type { ServerMessage } from '../../shared/protocol';
 import { MessageType } from '../../shared/protocol';
+import type { WeatherMode } from '../core/Settings';
 import type { InputFrame } from '../core/InputFrame';
 import type { Match } from '../game/Match';
 import { GuestSession } from './GuestSession';
@@ -28,6 +29,17 @@ export interface MatchConfig {
   role: 'host' | 'guest';
   slot: 0 | 1;
   opponent: string;
+  /**
+   * O tempo e a hora com que o duelo abre, ditados pela sala.
+   *
+   * Vinham na mensagem de `start` desde sempre e eram **jogados fora aqui**: o
+   * `MatchConfig` não os carregava, e o jogo seguia com o clima e o relógio que
+   * cada jogador tinha na tela de título — um começando ao meio-dia com céu
+   * limpo e o outro ao entardecer sob chuva. Como o vento entra na força da
+   * vela, isso não era só estranho de ver: era vantagem.
+   */
+  weather: WeatherMode;
+  timeOfDay: number;
 }
 
 export class OnlineSession {
@@ -247,6 +259,8 @@ export class OnlineSession {
           role: this.role,
           slot,
           opponent: this.state.opponent ?? 'Rival',
+          weather: message.weather,
+          timeOfDay: message.timeOfDay,
         });
         return;
       }

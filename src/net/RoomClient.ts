@@ -165,15 +165,28 @@ export class RoomClient {
     }
   }
 
+  /**
+   * Manda uma mensagem de lobby.
+   *
+   * ⚠️ **Também passa pela latência simulada**, e a primeira versão não passava.
+   * O raciocínio de então era que o lobby "não é o que o netcode tem de
+   * aguentar" — e ele deixava de fora justamente o `ping`, que é como o cliente
+   * **mede** a rede. Com a bancada ligada, o duelo rodava com 150 ms de atraso
+   * nos quadros e um `rtt` de zero no medidor, então o avanço nascia calculado
+   * para uma rede que não existia. A ferramenta mentia sobre o único número que
+   * ela deveria ajudar a testar.
+   *
+   * A perda simulada **não** se aplica aqui: o lobby são seis mensagens por
+   * sessão e nenhuma delas tem reenvio, então descartar uma não exercita
+   * netcode nenhum — só trava a entrada na sala.
+   */
   sendLobby(message: ClientMessage): void {
     const socket = this.socket;
     if (socket?.readyState !== WebSocket.OPEN) return;
     const text = JSON.stringify(message);
     this.stats.sent++;
     this.stats.bytesSent += text.length;
-    // Mensagem de lobby não passa pela latência simulada: ela não é o que o
-    // netcode tem de aguentar, e atrasá-la só tornaria o teste chato.
-    socket.send(text);
+    this.afterLag(() => socket.send(text));
   }
 
   /** Manda um quadro de simulação. Passa pela latência simulada em dev. */
@@ -189,13 +202,18 @@ export class RoomClient {
       return;
     }
 
+    this.afterLag(() => socket.send(frame));
+  }
+
+  /** Roda o envio agora, ou depois do atraso simulado quando há um. */
+  private afterLag(send: () => void): void {
     const delay = this.lag.latencyMs + Math.random() * this.lag.jitterMs;
     if (delay <= 0) {
-      socket.send(frame);
+      send();
       return;
     }
     setTimeout(() => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(frame);
+      if (this.socket?.readyState === WebSocket.OPEN) send();
     }, delay);
   }
 

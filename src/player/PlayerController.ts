@@ -1170,7 +1170,35 @@ export class PlayerController {
 
   // -- cabeça ------------------------------------------------------------------
 
+  /**
+   * A cabeça, a partir do que o quadro de entrada traz.
+   *
+   * ## Duas formas de dizer a mesma coisa, e por que as duas existem
+   *
+   * **Localmente**, o olhar é um *delta*: o mouse entrega deslocamento, não
+   * posição, e integrar é o que dá a rotação. É o caminho de sempre, e é o único
+   * no duelo contra a máquina.
+   *
+   * **Pela rede**, o olhar chega *absoluto*, e a diferença é o que decide se o
+   * outro jogador consegue usar as peças do navio dele. Integrando deltas do
+   * outro lado, basta **um** pacote perdido para o ângulo aqui deixar de ser o
+   * ângulo de lá — e o erro nunca mais se fecha, porque não há nada que o traga
+   * de volta. O que se vê quando isso acontece não é a cabeça errada (ninguém
+   * olha para a cabeça do adversário com essa precisão): é o **foco de
+   * interação** divergindo. O jogador do outro lado aponta para o canhão, aperta
+   * o botão, e aqui o marujo dele está olhando três metros ao lado, não tem foco
+   * nenhum e nada acontece. Medido em duelo: yaw 1,571 de um lado e −0,420 do
+   * outro, com a posição batendo na segunda casa.
+   *
+   * Absoluto, o ângulo é o mesmo por construção, e um pacote perdido custa um
+   * quadro de suavidade em vez de uma dessincronização permanente.
+   */
   private applyLook(frame: InputFrame): void {
+    if (frame.absoluteView) {
+      this.yaw = frame.yaw;
+      this.pitch = clamp(frame.pitch, -PITCH_LIMIT, PITCH_LIMIT);
+      return;
+    }
     this.yaw -= frame.lookX;
     this.pitch = clamp(this.pitch - frame.lookY, -PITCH_LIMIT, PITCH_LIMIT);
   }

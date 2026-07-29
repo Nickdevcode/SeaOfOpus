@@ -64,11 +64,41 @@ export interface InputFrame {
   /** Delta de olhar acumulado desde o tick anterior, em radianos. */
   lookX: number;
   lookY: number;
+  /**
+   * O olhar **absoluto** de quem mandou este quadro, em radianos.
+   *
+   * Só vale quando `absoluteView` é `true`, que é o caso dos quadros que vieram
+   * pela rede. Ver `PlayerController.applyLook` para o defeito que isto conserta
+   * — em resumo: delta de olhar não sobrevive a pacote perdido, e o que quebra
+   * quando ele não sobrevive não é a cabeça do outro, é o foco de interação
+   * dele.
+   */
+  yaw: number;
+  pitch: number;
+  /**
+   * `true` quando `yaw`/`pitch` mandam e os deltas devem ser ignorados.
+   *
+   * Uma bandeira explícita, e não um valor sentinela em `yaw`: o quadro é
+   * preenchido em dois lugares muito diferentes (o amostrador local e o
+   * decodificador de rede), e "zero" é um ângulo perfeitamente válido.
+   */
+  absoluteView: boolean;
 }
 
 /** Um `InputFrame` zerado, para preencher pools sem alocar depois. */
 export function createInputFrame(): InputFrame {
-  return { tick: 0, held: 0, pressed: 0, moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
+  return {
+    tick: 0,
+    held: 0,
+    pressed: 0,
+    moveX: 0,
+    moveY: 0,
+    lookX: 0,
+    lookY: 0,
+    yaw: 0,
+    pitch: 0,
+    absoluteView: false,
+  };
 }
 
 export function copyInputFrame(source: InputFrame, target: InputFrame): void {
@@ -79,6 +109,9 @@ export function copyInputFrame(source: InputFrame, target: InputFrame): void {
   target.moveY = source.moveY;
   target.lookX = source.lookX;
   target.lookY = source.lookY;
+  target.yaw = source.yaw;
+  target.pitch = source.pitch;
+  target.absoluteView = source.absoluteView;
 }
 
 export function clearInputFrame(frame: InputFrame): void {
@@ -88,6 +121,10 @@ export function clearInputFrame(frame: InputFrame): void {
   frame.moveY = 0;
   frame.lookX = 0;
   frame.lookY = 0;
+  // `yaw`, `pitch` e `absoluteView` **não** são zerados: um quadro limpo entra
+  // no pool para ser reescrito por inteiro, e zerar o olhar aqui seria a mesma
+  // classe de erro que a política de fome do `InputBuffer` evita — inventar uma
+  // cabeça virada para a frente onde o que se sabe é "nada mudou".
 }
 
 /** A ação está segurada neste passo. */

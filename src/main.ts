@@ -151,7 +151,18 @@ online.onChange((state) => menu.setOnlineState(state));
 online.onStart((config) => {
   // O mundo vem da sala, e não das preferências locais: o mar dos dois lados tem
   // de ser o mesmo mar. Ver a nota sobre o modo de tempo em `DuelRoom.onReady`.
+  //
+  // As três linhas são o mundo inteiro: a semente dita as ondas e a sequência de
+  // viradas de tempo, o modo dita o tempo, e a hora dita a luz. Faltando as duas
+  // últimas — como faltavam —, dois capitães entravam no mesmo mar sob céus
+  // diferentes, cada um com o relógio que a tela de título dele tinha alcançado.
   environment.reseed(config.seed);
+  environment.setWeatherMode(config.weather);
+  environment.dayNight.timeOfDay = config.timeOfDay;
+  // A preferência local de tempo fica de fora enquanto durar o duelo, e a
+  // guarda de `applyPreferences` é que a segura. Aqui só se apaga a memória do
+  // que estava aplicado, para o valor da sala não ser confundido com ele.
+  appliedWeather = null;
   menu.show('none');
   match.startOnline(config.role);
 });
@@ -616,7 +627,13 @@ function applyPreferences(prefs: PlayerPreferences): void {
   // `Weather.set` reinicia rajada, relâmpago e contagem regressiva. Reaplicar o
   // mesmo modo a cada quadro de arraste zerava a rajada antes de ela existir, e o
   // vento travado ficava liso como uma tabela.
-  if (prefs.weather !== appliedWeather) {
+  //
+  // Num duelo em rede o modo é da **sala**, e o menu não manda nele: o vento
+  // entra na força da vela, então um capitão que trocasse para "calmaria" no
+  // meio da partida estaria escolhendo o próprio mar. Quem simula ignora a
+  // preferência; quem não simula recebe o tempo pronto no instantâneo de
+  // qualquer forma.
+  if (prefs.weather !== appliedWeather && match.role === 'solo') {
     appliedWeather = prefs.weather;
     environment.setWeatherMode(prefs.weather);
   }

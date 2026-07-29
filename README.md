@@ -1163,14 +1163,30 @@ duelos por dia, de graça**.
 física dos dois cascos, e uma máquina fraca no comando engasga os dois jogadores.
 Quem abriu a sala tem preferência e só perde o posto para uma diferença clara.
 
+> ⚠️ E "quem abriu" é lido de um **carimbo de chegada**, não da ordem em que a
+> plataforma devolve os sockets — ela não promete ordem nenhuma. Enquanto a regra
+> se apoiava nessa ordem, a preferência era sorteio: um jogador abriu a sala com
+> nota máxima e recebeu o papel de convidado, que é exatamente o que a regra
+> existe para impedir.
+
 ### O que o cliente prevê, e o que ele espera
 
 | Prevê localmente | Espera do host |
 |---|---|
 | O corpo no convés | Pose e rumo dos cascos |
 | A câmera (nunca corrigida) | Dano, rombos, alagamento |
-| **O ângulo da roda do leme** | Trocar de posto |
-| A mira e a barra de recarga | O que cada bala acerta |
+| **O ângulo da roda do leme** | O que cada bala acerta |
+| A mira e a barra de recarga | O tempo, o vento e a hora do dia |
+| **Assumir e largar um posto** | — |
+
+A última linha mudou depois do primeiro teste com gente de verdade. Ela **sempre**
+esteve prevista na prática — `Interaction.press` chama `takeHelm()` nos dois lados,
+porque é o mesmo código —, só que sem reconciliação: o instantâneo seguinte, que
+descreve um instante anterior ao aperto, devolvia o jogador ao convés, e ele
+piscava entre a roda e o chão até o host confirmar. Hoje a predição fica de pé até
+o **recibo** (o `ackTick`) mostrar que o host já viu o comando que a causou. É a
+diferença entre um timão que responde na hora e um que responde em 400 ms — ou
+que parece não responder.
 
 A lista da esquerda tem uma coisa em comum: são todas **integração pura do próprio
 comando**, então os dois lados chegam ao mesmo número sem precisar conversar. É o
@@ -1198,6 +1214,28 @@ O quinto não chegou a se ver, mas estava lá: o instantâneo era decodificado *
 cima** da base da interpolação antes de o tick ser conferido, então um pacote fora de
 ordem destruía essa base para depois ser recusado.
 
+### E a segunda rodada, que só apareceu depois da primeira
+
+Corrigidos os cinco, o duelo voltou ao ar e continuou ruim — **para um dos dois
+lados**. O relato foi "tremendo ao andar, não consigo mexer no timão nem no
+canhão, e os controles parecem se inverter", com o `F3` mostrando `net guest`,
+`starves 0` e `prediction 0.2 cm`. Ou seja: a rede estava saudável e o corpo não
+estava sendo corrigido. O que sobrava eram quatro defeitos que a primeira rodada
+não podia revelar, porque três deles **foram introduzidos ou expostos por ela**:
+
+| O que se via | O que era |
+|---|---|
+| Tremor ao andar | O relógio de desenho perseguia `hostTick` com ganho proporcional — e `hostTick` é um **degrau** (parado quatro passos, sobe quatro). Perseguir degrau com ganho dá dente de serra: o mundo avançava 1,00 · 0,90 · 0,81 · 0,75 tick por passo e recomeçava. Velocidade oscilando 25% a 15 Hz. A média está certa, e é por isso que nenhum contador de quadros acusa |
+| Toda ação demorando ~370 ms | O avanço do relógio de predição estava em **22 passos** numa conexão que pede 12. `estimateLead` nunca rodava (a guarda era `localTick === 0`, e o relógio já tinha andado dezenas de passos quando o primeiro instantâneo chega), então o valor nascia de fábrica e subia por catraca: subia com fila baixa, só descia com fila alta, e estabilizava numa faixa morta onde nada o trazia de volta |
+| Entrar no timão e voltar sozinho | Predição de posto sem reconciliação. Ver a tabela acima |
+| **Interagir simplesmente não funcionar** | O olhar viajava só como **delta**. Um pacote perdido leva embora aquele pedaço de giro, e o ângulo dos dois lados nunca mais se encontra. O que quebra não é a cabeça do adversário — é o **foco de interação** dele: o jogador aponta para o canhão e aperta o botão, e do lado que decide o marujo está olhando três metros ao lado, sem foco nenhum. Medido em duelo: yaw 1,571 aqui e −0,420 lá, com a posição batendo na segunda casa |
+
+O último é o mais instrutivo dos nove. Ele não é um erro de cálculo nem de
+formato: é a diferença entre transmitir **o que mudou** e transmitir **o que é**,
+e ela só cobra quando um pacote se perde. Hoje o olhar vai absoluto ao lado do
+delta — quatro bytes a mais por quadro de entrada, e o ângulo passa a ser o mesmo
+por construção. O delta continua indo porque é dele que a mira do canhão vive.
+
 ### Medindo
 
 `F3` abre um bloco `net` durante um duelo em rede. Os alvos:
@@ -1205,9 +1243,16 @@ ordem destruía essa base para depois ser recusado.
 | Métrica | Saudável |
 |---|---|
 | `rtt` / `jitter` | < 120 ms / < 30 ms no mesmo país |
-| `queue` | 2 a 4 quadros, estável |
+| `queue` | 1 a 3 quadros, estável |
 | `starves` | perto de zero |
+| `lead` | perto de `rtt ÷ 17` **+ 4**, e **não** grudado em 24 |
 | `prediction` | < 5 cm |
+
+O `lead` é o que mais vale olhar quando algo parece lento sem estar travado: ele é
+latência de comando pura, e cada passo dele são 17 ms entre a mão e o convés. Um
+`lead` de 22 com `rtt` de 127 ms — que foi o que apareceu no primeiro duelo de
+verdade — significa 370 ms para o timão responder, e o jogador lê isso como "não
+está funcionando", não como "está devagar".
 
 E para testar sem sair da própria máquina, a bancada tem rede ruim de mentira:
 
@@ -1218,6 +1263,13 @@ __game.setSimulatedLag(150, 40, 3)   // 150 ms, 40 de jitter, 3% de perda
 > ⚠️ **Use isso.** Latência zero esconde tudo que o netcode existe para resolver:
 > o buffer nunca passa fome, a predição nunca erra, a reconciliação nunca roda. Um
 > duelo testado só em `localhost` é um duelo não testado.
+
+A latência simulada vale **também para as mensagens de lobby**, e isso não é
+detalhe: o `ping` é uma delas, e é dele que sai o `rtt` que decide o avanço
+inicial. Enquanto o lobby ficava de fora, a bancada rodava com 150 ms nos quadros
+e `rtt 0` no medidor — mentindo exatamente sobre o número que ela deveria ajudar
+a testar. A **perda** continua sem se aplicar ao lobby: são seis mensagens por
+sessão, nenhuma com reenvio, e descartar uma só trava a entrada na sala.
 
 ### Publicar o servidor de sala
 

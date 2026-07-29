@@ -33,6 +33,7 @@
 
 import type * as THREE from 'three';
 import { MessageType, QUANT, dequantize, quantize } from '../../shared/protocol';
+import { wrapAngle } from '../core/MathUtils';
 import type { InputFrame } from '../core/InputFrame';
 import type { Match } from '../game/Match';
 import type { MatchEvent } from '../game/MatchEvents';
@@ -54,6 +55,16 @@ const CANNON_STATE = ['empty', 'loading', 'loaded'] as const;
 
 /** Estado da âncora, no fio. */
 const ANCHOR_STATE = ['stowed', 'dropping', 'set', 'raising'] as const;
+
+/**
+ * Os tempos, no fio.
+ *
+ * ⚠️ A ordem é o formato de rede — acrescente no fim, nunca reordene. É a mesma
+ * regra de `MessageType` e de `InputBit`, e aqui ela vale duas vezes: reordenar
+ * trocaria temporal por céu limpo entre duas versões do jogo, e o sintoma seria
+ * um adversário navegando numa tempestade que o outro não vê.
+ */
+const WEATHER_ID = ['clear', 'breeze', 'squall', 'storm'] as const;
 
 /**
  * Um escritor sequencial sobre um buffer fixo.
@@ -179,8 +190,20 @@ export function encodeInput(frames: readonly InputFrame[]): ArrayBuffer {
     // com sinal dá 1/127 de resolução, mais fina que a zona morta do controle.
     w.i8(Math.round(Math.max(-1, Math.min(1, frame.moveX)) * 127));
     w.i8(Math.round(Math.max(-1, Math.min(1, frame.moveY)) * 127));
+    // O delta continua indo, e é o que a **mira do canhão** consome: ela é
+    // acumular-e-grampear dos mesmos incrementos dos dois lados.
     w.i16(quantize(frame.lookX, QUANT.angle));
     w.i16(quantize(frame.lookY, QUANT.angle));
+    // E o olhar **absoluto** vai junto, quatro bytes a mais, porque delta não
+    // sobrevive a pacote perdido — ver `PlayerController.applyLook` para o que
+    // quebra quando ele não sobrevive.
+    //
+    // O rumo é normalizado para −π..π antes de quantizar: ele cresce sem limite
+    // enquanto o jogador gira sempre para o mesmo lado, e o `i16` desta escala
+    // satura em ±3,27 rad. Sem normalizar, meia dúzia de voltas grampeariam a
+    // cabeça do adversário num canto para o resto da partida.
+    w.i16(quantize(wrapAngle(frame.yaw), QUANT.angle));
+    w.i16(quantize(frame.pitch, QUANT.angle));
   }
 
   return inputBuffer.slice(0, w.offset);
@@ -201,6 +224,11 @@ export function decodeInput(buffer: ArrayBuffer, out: InputFrame[]): number {
     frame.moveY = r.i8() / 127;
     frame.lookX = dequantize(r.i16(), QUANT.angle);
     frame.lookY = dequantize(r.i16(), QUANT.angle);
+    frame.yaw = dequantize(r.i16(), QUANT.angle);
+    frame.pitch = dequantize(r.i16(), QUANT.angle);
+    // Quem vem do fio manda no ângulo da **cabeça**; o delta segue valendo para
+    // a mira da peça. Ver `PlayerController.applyLook`.
+    frame.absoluteView = true;
   }
 
   return Math.min(count, out.length);
@@ -302,7 +330,8 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   w.u8(flags);
   w.u32(match.tick);
   w.u8(Math.min(options.bufferDepth, 255));
-  w.u16(options.ackTick & 0xffff);
+  // Quatro bytes, e não dois: ver a nota da versão 2 em `PROTOCOL_VERSION`.
+  w.u32(options.ackTick >>> 0);
   w.u8(options.winner);
 
   // Vento e força do mar. Sem isto, o clima de cada lado correria no relógio
@@ -312,6 +341,8 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   w.i16(quantize(waves.windDirection, QUANT.angle));
   w.u8(Math.round(Math.max(0, Math.min(1, waves.windStrength)) * 255));
   w.f32(waves.time);
+
+  writeSky(w, match);
 
   for (const ship of match.ships) writeShip(w, ship, options.includeBreaches);
 
@@ -340,6 +371,50 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   writeEvents(w, match.netEvents);
 
   return snapshotBuffer.slice(0, w.offset);
+}
+
+/**
+ * O céu e o tempo: dez bytes que faltavam.
+ *
+ * ## Por que o instantâneo carrega isto
+ *
+ * Porque o cliente que não simula **não roda nem o relógio do dia nem a máquina
+ * de estados do tempo**, e não pode rodar. `Environment.fixedUpdate` mora dentro
+ * de `Match.fixedUpdate`, que é o caminho de quem simula; o guest segue por
+ * `fixedUpdateRemote`. O efeito é que, no instante em que o duelo começa, o
+ * relógio dele congela na hora em que estava e o tempo dele para no estado em
+ * que estava — enquanto do outro lado o sol anda, a chuva chega e a tempestade
+ * vira. Dois jogadores, dois céus, e nenhum aviso de que é assim.
+ *
+ * Deixar os dois lados **simularem** o tempo em paralelo seria a alternativa —
+ * a máquina de estados é semeada e determinística —, mas ela depende de somar
+ * `dt` em ponto flutuante por dez minutos e de os dois nunca perderem um passo,
+ * e o guest perde passos por construção (o motor descarta o excedente quando a
+ * aba engasga). Uma divergência aqui não é um pixel: é o vento, e vento é força
+ * de vela.
+ *
+ * ## O que vai, e o que se deriva
+ *
+ * Vão os dois estados da transição (`current` e `target`) em vez do rótulo e da
+ * severidade: com eles, `label` e `severity` saem dos mesmos getters que já
+ * existem, e o texto do HUD não precisa atravessar o fio.
+ */
+function writeSky(w: Writer, match: Match): void {
+  const { weather, dayNight } = match.environment;
+
+  w.u16(Math.round(((dayNight.timeOfDay % 1) + 1) % 1 * QUANT.timeOfDay));
+
+  const current = WEATHER_ID.indexOf(weather.current);
+  const target = WEATHER_ID.indexOf(weather.target);
+  w.u8(current < 0 ? 1 : current);
+  w.u8(target < 0 ? 1 : target);
+  w.u8(Math.round(Math.max(0, Math.min(1, weather.windBase)) * 255));
+  w.u8(Math.round(Math.max(0, Math.min(1, weather.clouds)) * 255));
+  w.u8(Math.round(Math.max(0, Math.min(1, weather.rain)) * 255));
+  // Visibilidade em metros cabe folgada em `u16`: o preset mais aberto são
+  // 4.200 m e o `far` da câmera são 12.000.
+  w.u16(Math.min(Math.round(weather.visibility), 65535));
+  w.u8(Math.round(Math.max(0, Math.min(1, weather.flash)) * 255));
 }
 
 /**
@@ -398,18 +473,18 @@ function writeEvents(w: Writer, events: readonly MatchEvent[]): void {
   }
 }
 
-export { SNAPSHOT_FLAG, CANNON_STATE, ANCHOR_STATE, Reader, Writer };
+export { SNAPSHOT_FLAG, CANNON_STATE, ANCHOR_STATE, WEATHER_ID, Reader, Writer };
 
 /** Lê só o cabeçalho, para quem precisa decidir antes de aplicar. */
 export function peekSnapshotHeader(buffer: ArrayBuffer): SnapshotHeader | null {
-  if (buffer.byteLength < 10) return null;
+  if (buffer.byteLength < 12) return null;
   const r = new Reader(new DataView(buffer));
   if (r.u8() !== MessageType.Snapshot) return null;
   const flags = r.u8();
   return {
     tick: r.u32(),
     bufferDepth: r.u8(),
-    ackTick: r.u16(),
+    ackTick: r.u32(),
     over: (flags & SNAPSHOT_FLAG.Over) !== 0,
     winner: (r.u8() === 1 ? 1 : 0) as 0 | 1,
   };

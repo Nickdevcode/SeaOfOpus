@@ -12,54 +12,67 @@
  *
  * O instantâneo chega a cada quatro passos; a tela desenha a cada um. Quem
  * desenha precisa, portanto, de um relógio **próprio**, que ande sozinho entre
- * dois pacotes e seja apenas corrigido por eles. Derivá-lo do tick do host —
- * que é o que se fazia — dá uma pose que fica parada quatro passos e salta no
- * quinto: o mundo inteiro do cliente andando a quinze quadros por segundo,
- * independentemente de a que taxa ele desenhe.
+ * dois pacotes e seja apenas corrigido por eles.
+ *
+ * ## E a armadilha que ele tem
+ *
+ * A primeira versão perseguia `hostTick − atraso` a cada passo, com correção
+ * proporcional ao desvio. Parece a coisa certa e não é, porque **`hostTick` é um
+ * degrau, não uma rampa**: ele fica parado quatro passos e sobe quatro de uma
+ * vez. Perseguir um degrau com ganho proporcional dá exatamente o que a teoria
+ * de controle promete — um dente de serra. Medido: o mundo avançava 1,00 tick no
+ * passo seguinte ao pacote, depois 0,90, 0,81 e 0,75, e recomeçava. A velocidade
+ * de tudo que se vê oscilando 25% a quinze hertz, o que o jogador sente como
+ * **tremor ao andar**, e o que nenhuma média de quadro revela porque a média
+ * está certa.
+ *
+ * A forma correta é a que esta versão usa: manter uma **estimativa do relógio do
+ * host** que anda um por passo (uma rampa, como o original) e cuja *fase* é
+ * corrigida a cada pacote. O relógio de desenho é derivado dela por subtração,
+ * então ele herda a rampa e nunca a dinâmica da correção. É um laço de primeira
+ * ordem, e é o mesmo desenho que um sincronizador de relógio usa.
  */
 
 /**
- * Fração do desvio corrigida por passo.
+ * Fração do desvio de fase absorvida a cada instantâneo.
  *
- * Baixa de propósito: a correção tem de ser um empurrãozinho contínuo, não um
- * puxão. A um décimo, um desvio de meio segundo se fecha em pouco mais de um
- * segundo sem que nada na tela denuncie que houve correção.
+ * Um quinto é o compromisso: alto o bastante para acompanhar a deriva entre dois
+ * cristais de quartzo (que é de partes por milhão, e portanto lenta) e baixo o
+ * bastante para um único pacote atrasado não puxar a fase de forma visível — um
+ * salto de meio passo entraria como um solavanco de oito milissegundos no tempo
+ * do mundo.
  */
-export const RENDER_CATCHUP = 0.1;
-
-/**
- * Teto da correção por passo, em passos.
- *
- * É o quanto o tempo do mundo pode dilatar: no pior caso ele anda a 75% ou a
- * 125% da velocidade normal enquanto alcança o alvo. E o piso importa tanto
- * quanto o teto — com −0,25 sobre um passo inteiro, o relógio **nunca anda para
- * trás**, o que garante que nenhuma correção jamais desenhe o navio recuando.
- */
-export const RENDER_RATE_LIMIT = 0.25;
+export const PHASE_GAIN = 0.2;
 
 /** Desvio que deixa de ser deriva e vira outra coisa. Meio segundo. */
 export const RENDER_SNAP = 30;
 
 /**
- * Anda o relógio de desenho um passo em direção ao alvo.
+ * Anda a estimativa do relógio do host um passo.
  *
- * @param clock onde o desenho está, em passos fracionários.
- * @param target onde ele deveria estar: `hostTick − atraso de interpolação`.
- * @returns a posição nova do relógio.
+ * Um por passo, exatamente — é isto que garante que a velocidade do mundo
+ * desenhado seja constante entre dois pacotes. Toda a correção mora em
+ * `correctHostEstimate`, que roda só quando há informação nova para corrigir.
  */
-export function advanceRenderClock(clock: number, target: number): number {
-  const drift = target - clock;
+export function advanceHostEstimate(estimate: number): number {
+  return estimate + 1;
+}
+
+/**
+ * Corrige a fase da estimativa com o tick que acabou de chegar.
+ *
+ * @param estimate onde se achava que o host estava.
+ * @param observed o tick que veio no instantâneo.
+ */
+export function correctHostEstimate(estimate: number, observed: number): number {
+  const drift = observed - estimate;
 
   // Não é deriva: a aba dormiu, ou a rede sumiu por segundos. Acompanhar de um
   // em um levaria minutos, e o que se vê enquanto isso é um mundo em câmera
   // lenta que não termina nunca.
-  if (Math.abs(drift) > RENDER_SNAP) return target;
+  if (Math.abs(drift) > RENDER_SNAP) return observed;
 
-  const correction = Math.max(
-    -RENDER_RATE_LIMIT,
-    Math.min(drift * RENDER_CATCHUP, RENDER_RATE_LIMIT),
-  );
-  return clock + 1 + correction;
+  return estimate + drift * PHASE_GAIN;
 }
 
 /**

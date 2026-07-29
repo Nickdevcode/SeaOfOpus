@@ -135,6 +135,24 @@ export class Environment {
     this.dayNight.update(dt);
   }
 
+  /**
+   * O passo fixo de quem **não** simula.
+   *
+   * O tempo e a hora do dia chegam prontos pelo instantâneo — ver
+   * `Weather.applyRemote` para o porquê de eles não serem simulados dos dois
+   * lados. O que sobra para fazer aqui é recalcular o que **depende** deles: a
+   * posição do sol e da lua, a intensidade e a cor de cada luz, o fator de noite
+   * e a cor da névoa.
+   *
+   * `dayNight.update(0)` é a chamada que faz isso sem avançar o relógio: com
+   * `dt` zero o `timeOfDay` fica exatamente onde a rede o pôs, e todo o resto é
+   * derivado dele.
+   */
+  fixedUpdateRemote(): void {
+    this.dayNight.overcast = this.weather.severity;
+    this.dayNight.update(0);
+  }
+
   /** Passo de frame: tudo que é visual e pode variar com o frame rate. */
   update(dt: number, cameraPosition: THREE.Vector3): void {
     this.elapsed += dt;

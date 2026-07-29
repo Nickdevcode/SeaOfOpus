@@ -31,8 +31,17 @@
  * da outra ao contrário, que é uma falha silenciosa e horrível de diagnosticar.
  */
 
-/** Sobe a cada mudança de formato. Ver o cabeçalho. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * Sobe a cada mudança de formato. Ver o cabeçalho.
+ *
+ * **2** — o instantâneo passou a carregar o relógio do dia e o estado do tempo
+ * (sem eles, cada lado navegava sob o próprio céu e a própria chuva), e o
+ * `ackTick` virou de 16 para 32 bits. O de 16 dava a volta em dezoito minutos de
+ * duelo, e agora ele não é mais só telemetria: é ele que diz ao cliente quando a
+ * predição de posto foi confirmada. Um `ack` que volta ao zero no meio da
+ * partida travaria o jogador fora do timão até o fim dela.
+ */
+export const PROTOCOL_VERSION = 2;
 
 /** Casas do código de sala. */
 export const CODE_LENGTH = 4;
@@ -146,8 +155,15 @@ export const MessageType = {
  */
 export const INPUT_BATCH = 4;
 
-/** Bytes de um `InputFrame` no fio. */
-export const INPUT_FRAME_BYTES = 14;
+/**
+ * Bytes de um `InputFrame` no fio.
+ *
+ * Dezoito desde a versão 2: os quatro que entraram são o olhar **absoluto**, que
+ * passou a viajar ao lado do delta. Ver `PlayerController.applyLook` — em
+ * resumo, delta de olhar não sobrevive a pacote perdido, e o que quebra quando
+ * ele não sobrevive é o foco de interação do outro jogador.
+ */
+export const INPUT_FRAME_BYTES = 18;
 
 /**
  * Escalas de quantização.
@@ -171,6 +187,16 @@ export const QUANT = {
   local: 256,
   /** Posições de rombo no casco, m. */
   breach: 512,
+  /**
+   * Fração do dia, 0..1.
+   *
+   * Sobre um dia de doze minutos, um passo desta escala é um centésimo de
+   * segundo de jogo — ou seja, o sol nunca salta um pixel por causa da
+   * quantização. É gente demais para dois bytes? Não: a alternativa era um
+   * `f32` de quatro, e o que se ganharia com ele é precisão em casas que nem o
+   * relógio do HUD mostra.
+   */
+  timeOfDay: 65535,
 } as const;
 
 /** Empacota um float numa faixa de `i16`, grampeando nas pontas. */

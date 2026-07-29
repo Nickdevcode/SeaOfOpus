@@ -20,6 +20,7 @@ import {
   CANNON_STATE,
   Reader,
   SNAPSHOT_FLAG,
+  WEATHER_ID,
   type SnapshotHeader,
 } from './snapshotCodec';
 
@@ -70,15 +71,39 @@ export interface CrewState {
   atCapstan: boolean;
 }
 
+/** O céu e o tempo, como eles chegam do lado que simula. Ver `writeSky`. */
+export interface SkyState {
+  /** Fração do dia, 0..1. */
+  timeOfDay: number;
+  /** O tempo que está no ar, e para onde ele está virando. */
+  current: (typeof WEATHER_ID)[number];
+  target: (typeof WEATHER_ID)[number];
+  /** Vento de base, sem a rajada. É dele que sai a severidade. */
+  baseWind: number;
+  clouds: number;
+  rain: number;
+  /** Alcance de visibilidade, em metros. */
+  visibility: number;
+  flash: number;
+}
+
 export interface WorldState {
   tick: number;
   bufferDepth: number;
+  /**
+   * Último tick de entrada que o host consumiu.
+   *
+   * Não é telemetria: é o **recibo**. É por ele que o cliente sabe se o comando
+   * que o fez assumir o timão aqui já foi visto do outro lado — ver
+   * `GuestSession.applyCrew`.
+   */
   ackTick: number;
   over: boolean;
   winner: 0 | 1;
   windDirection: number;
   windStrength: number;
   waveTime: number;
+  readonly sky: SkyState;
   readonly ships: [ShipState, ShipState];
   readonly crew: [CrewState, CrewState];
   /** Eventos deste intervalo. Consumidos uma vez e limpos. */
@@ -120,6 +145,19 @@ function createCrewState(): CrewState {
   };
 }
 
+function createSkyState(): SkyState {
+  return {
+    timeOfDay: 0.68,
+    current: 'breeze',
+    target: 'breeze',
+    baseWind: 0.62,
+    clouds: 0.46,
+    rain: 0,
+    visibility: 3200,
+    flash: 0,
+  };
+}
+
 export function createWorldState(): WorldState {
   return {
     tick: 0,
@@ -130,6 +168,7 @@ export function createWorldState(): WorldState {
     windDirection: 0,
     windStrength: 0,
     waveTime: 0,
+    sky: createSkyState(),
     ships: [createShipState(), createShipState()],
     crew: [createCrewState(), createCrewState()],
     events: [],
@@ -209,6 +248,18 @@ function readShip(r: Reader, target: ShipState, slot: ShipSlot, withBreaches: bo
   target.breaches = list;
 }
 
+/** O céu e o tempo. Ver `writeSky`, do outro lado. */
+function readSky(r: Reader, sky: SkyState): void {
+  sky.timeOfDay = r.u16() / QUANT.timeOfDay;
+  sky.current = WEATHER_ID[r.u8()] ?? 'breeze';
+  sky.target = WEATHER_ID[r.u8()] ?? 'breeze';
+  sky.baseWind = r.u8() / 255;
+  sky.clouds = r.u8() / 255;
+  sky.rain = r.u8() / 255;
+  sky.visibility = r.u16();
+  sky.flash = r.u8() / 255;
+}
+
 function readEvents(r: Reader, out: MatchEvent[]): void {
   out.length = 0;
   const count = r.u8();
@@ -280,13 +331,15 @@ export function decodeSnapshot(buffer: ArrayBuffer, target: WorldState): Snapsho
   const flags = r.u8();
   target.tick = r.u32();
   target.bufferDepth = r.u8();
-  target.ackTick = r.u16();
+  target.ackTick = r.u32();
   target.winner = (r.u8() === 1 ? 1 : 0) as 0 | 1;
   target.over = (flags & SNAPSHOT_FLAG.Over) !== 0;
 
   target.windDirection = dequantize(r.i16(), QUANT.angle);
   target.windStrength = r.u8() / 255;
   target.waveTime = r.f32();
+
+  readSky(r, target.sky);
 
   const withBreaches = (flags & SNAPSHOT_FLAG.Breaches) !== 0;
   readShip(r, target.ships[0], 0, withBreaches);

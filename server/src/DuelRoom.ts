@@ -41,6 +41,16 @@ interface PeerData {
   /** Definido quando o segundo entra. `null` enquanto se está sozinho. */
   role: 'host' | 'guest' | null;
   ready: boolean;
+  /**
+   * Quando o `hello` deste capitão chegou, em milissegundos.
+   *
+   * É o desempate de `pairIfReady`, e ele existe porque a ordem de
+   * `getWebSockets()` **não é** a de chegada — a plataforma não promete ordem
+   * nenhuma. Enquanto a preferência de quem abriu a sala se apoiava nessa ordem,
+   * ela era sorteio: um jogador com a nota máxima abriu a sala e recebeu o papel
+   * de convidado, que é justamente o que a regra deveria impedir.
+   */
+  joinedAt: number;
 }
 
 /** O que se guarda da sala. Sobrevive no `storage`. */
@@ -124,6 +134,7 @@ export class DuelRoom implements DurableObject {
       perfScore: 0,
       role: null,
       ready: false,
+      joinedAt: 0,
     } satisfies PeerData);
 
     // Um relógio para varrer a sala se ela for abandonada com um só capitão.
@@ -233,6 +244,8 @@ export class DuelRoom implements DurableObject {
     peer.perfScore = Number.isFinite(message.perfScore)
       ? Math.max(0, Math.min(100, message.perfScore))
       : 0;
+    // Carimbado uma vez, no `hello`. Ver `PeerData.joinedAt`.
+    if (peer.joinedAt === 0) peer.joinedAt = Date.now();
     this.setPeerData(ws, peer);
 
     this.send(ws, {
@@ -257,10 +270,19 @@ export class DuelRoom implements DurableObject {
     const sockets = this.state.getWebSockets();
     if (sockets.length !== 2) return;
 
-    const [first, second] = sockets as [WebSocket, WebSocket];
-    const a = this.peerData(first);
-    const b = this.peerData(second);
-    if (a.role !== null || b.role !== null) return;
+    const [one, other] = sockets as [WebSocket, WebSocket];
+    const dataOne = this.peerData(one);
+    const dataOther = this.peerData(other);
+    if (dataOne.role !== null || dataOther.role !== null) return;
+
+    // Quem chegou primeiro é o `first`, e isso é lido do carimbo do `hello` —
+    // **não** da ordem em que a plataforma devolve os sockets, que não é
+    // ordenada. Ver `PeerData.joinedAt`.
+    const oneFirst = dataOne.joinedAt <= dataOther.joinedAt;
+    const first = oneFirst ? one : other;
+    const second = oneFirst ? other : one;
+    const a = oneFirst ? dataOne : dataOther;
+    const b = oneFirst ? dataOther : dataOne;
 
     const swap = b.perfScore > a.perfScore + HOST_SWAP_MARGIN;
     a.role = swap ? 'guest' : 'host';
@@ -382,6 +404,7 @@ export class DuelRoom implements DurableObject {
       perfScore: 0,
       role: null,
       ready: false,
+      joinedAt: 0,
     };
   }
 
