@@ -1,0 +1,17 @@
+{
+  "name": "sea-of-opus-rooms",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Servidor de sala do duelo 1v1: pareia dois capitães e retransmite o que eles trocam",
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260728.1",
+    "wrangler": "^4.115.0"
+  }
+}

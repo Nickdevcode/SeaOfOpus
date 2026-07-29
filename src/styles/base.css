@@ -1,0 +1,225 @@
+/**
+ * Tokens de design e reset.
+ *
+ * ## A direção, em uma frase
+ *
+ * **Tudo é um objeto que existiria a bordo.** Não há painéis: há tábuas, chapas
+ * de latão e folhas de pergaminho pregadas nelas. É a diferença entre uma
+ * interface *temática* e uma interface *do lugar* — e é o que o Sea of Thieves
+ * acerta. O retângulo escuro com borda dourada e canto arredondado é o caminho
+ * fácil, e ele produz a mesma tela que qualquer outro jogo de tema náutico.
+ *
+ * Três regras caem daí, e elas mandam no arquivo inteiro:
+ *
+ * 1. **Madeira não tem canto arredondado.** O raio some de tudo que representa
+ *    tábua ou chapa. Sobra só onde o objeto real seria redondo: pastilhas,
+ *    cabeças de prego, o vidro da sonda.
+ * 2. **Toda superfície tem material.** Madeira ganha veio e fibra, pergaminho
+ *    ganha manchas e borda comida, latão ganha o brilho anisotrópico do metal
+ *    escovado. Nenhuma delas é uma cor chapada, e nenhuma é uma imagem — tudo é
+ *    gradiente repetido, que custa zero de banda.
+ * 3. **Ferragem no lugar de borda.** Onde uma folha se prende a alguma coisa, há
+ *    prego. Onde uma chapa termina, há cantoneira. A borda de 1 px uniforme em
+ *    volta de tudo é a assinatura da interface genérica.
+ *
+ * ## Tipografia
+ *
+ * Cinzel só no logotipo — é uma capital romana lapidar, feita para ser gravada,
+ * e ela perde a graça em texto corrido. Todo o resto é IM Fell English, a
+ * digitalização dos tipos da Oxford University Press do século XVII: o traço é
+ * irregular e a tinta borra nas junções, exatamente como numa carta náutica
+ * impressa em prensa. A versão SC (versaletes) fica com rótulos e cabeçalhos.
+ *
+ * Números ficam em monoespaçada, e é a única concessão moderna: rumo, distância
+ * e porcentagem mudam a cada quadro, e fonte proporcional os faz dançar.
+ */
+
+:root {
+  /* --- madeira ---------------------------------------------------------- */
+  /* Do costado alcatroado ao carvalho do convés, na mesma ordem do navio. */
+  --oak-tar: #170e07;
+  --oak-deep: #241708;
+  --oak: #3c2614;
+  --oak-warm: #6a4322;
+  --oak-lit: #97663a;
+
+  /* --- latão ------------------------------------------------------------ */
+  --brass-shadow: #4a3711;
+  --brass-dark: #6f5417;
+  --brass: #b48c2c;
+  --brass-lit: #eccb79;
+  --brass-flare: #fff0c0;
+
+  /* --- pergaminho ------------------------------------------------------- */
+  --parchment: #e7d8b3;
+  --parchment-worn: #cbb98d;
+  --parchment-deep: #b7a175;
+  /* Tinta ferro-galhas: nunca preta, sempre marrom-escura esverdeada. */
+  --ink: #2e2213;
+  --ink-soft: #5c4a2e;
+
+  /* --- mar e sinal ------------------------------------------------------ */
+  --sea-deep: #06202c;
+  --sea: #104b5f;
+  --foam: #d7edf2;
+  --blood: #7d1f12;
+  --blood-lit: #cc4a29;
+
+  /* --- superfícies ------------------------------------------------------ */
+  --panel: rgba(24, 15, 8, 0.9);
+  --panel-deep: rgba(12, 8, 4, 0.94);
+
+  /* Espaçamento — escala de 4px */
+  --espaco-1: 0.25rem;
+  --espaco-2: 0.5rem;
+  --espaco-3: 0.75rem;
+  --espaco-4: 1rem;
+  --espaco-6: 1.5rem;
+  --espaco-8: 2rem;
+  --espaco-12: 3rem;
+
+  /* Tipografia */
+  --fonte-titulo: 'Cinzel', 'Georgia', serif;
+  --fonte-corpo: 'IM Fell English', 'Georgia', serif;
+  --fonte-versalete: 'IM Fell English SC', 'IM Fell English', 'Georgia', serif;
+  --fonte-numero: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+
+  /* Raio: só o que é redondo de verdade. Ver a nota no topo. */
+  --raio-pastilha: 999px;
+  --sombra-texto: 0 2px 5px rgba(0, 0, 0, 0.9);
+
+  /* Movimento */
+  --transicao-rapida: 140ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transicao-media: 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  --transicao-lenta: 620ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  /**
+   * Veio de madeira: fibras finas mais as faixas largas das tábuas.
+   *
+   * Duas camadas de gradiente repetido em vez de uma textura: a primeira dá a
+   * fibra de meio milímetro, a segunda a variação de tom entre tábuas. Sem a
+   * segunda, madeira lê como papel pautado.
+   */
+  --veio-madeira:
+    repeating-linear-gradient(
+      92deg,
+      rgba(0, 0, 0, 0.16) 0 1px,
+      rgba(255, 255, 255, 0.028) 1px 2px,
+      transparent 2px 6px
+    ),
+    repeating-linear-gradient(
+      88deg,
+      rgba(0, 0, 0, 0.22) 0 22px,
+      transparent 22px 26px,
+      rgba(255, 255, 255, 0.03) 26px 48px,
+      transparent 48px 54px
+    );
+
+  /**
+   * Latão escovado: o brilho de metal polido em uma direção só.
+   *
+   * O truque é o gradiente perpendicular às estrias — é ele que faz o olho ler
+   * "metal" em vez de "amarelo". Sem as estrias finas por cima, vira plástico.
+   */
+  --chapa-latao:
+    repeating-linear-gradient(
+      96deg,
+      rgba(255, 255, 255, 0.1) 0 1px,
+      rgba(0, 0, 0, 0.08) 1px 3px
+    ),
+    linear-gradient(178deg, var(--brass-lit) 0%, var(--brass) 42%, var(--brass-dark) 100%);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #05121b;
+  color: var(--parchment);
+  font-family: var(--fonte-corpo);
+  /* O jogo é fullscreen e usa pointer lock: seleção de texto só atrapalha. */
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+#viewport {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#ui-root {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  /* A camada de UI é transparente a cliques por padrão; cada painel reativa. */
+  pointer-events: none;
+}
+
+#ui-root > * {
+  pointer-events: auto;
+}
+
+/* Telemetria de desenvolvimento (F3). Monoespaçada de propósito: os números
+   mudam a cada frame e fonte proporcional faria a coluna dançar. */
+/* Qualificado pelo #ui-root porque a regra genérica de lá reativa os cliques,
+   e ela ganharia por especificidade de ID. */
+#ui-root > .debug-overlay {
+  position: absolute;
+  top: var(--espaco-4);
+  left: var(--espaco-4);
+  margin: 0;
+  padding: var(--espaco-3) var(--espaco-4);
+  font-family: var(--fonte-numero);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--brass-lit);
+  background: var(--panel-deep);
+  border: 1px solid var(--brass-dark);
+  text-shadow: var(--sombra-texto);
+  /* Não deve roubar cliques do canvas. */
+  pointer-events: none;
+}
+
+#ui-root > .debug-overlay[hidden] {
+  display: none;
+}
+
+/* Acessibilidade: foco visível para navegação por teclado no menu. */
+:focus-visible {
+  outline: 2px solid var(--brass-flare);
+  outline-offset: 3px;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Respeita quem pediu menos movimento no sistema. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

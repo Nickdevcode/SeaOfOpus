@@ -1,0 +1,228 @@
+/**
+ * Prompts contextuais e retículo do canhão.
+ *
+ * Tudo posicionado em porcentagem da altura da viewport, e não em pixels: o
+ * prompt tem de cair no mesmo ponto da tela num monitor ultrawide e num
+ * notebook, porque a referência do jogador é o centro da tela, não a borda.
+ */
+
+.prompts {
+  position: absolute;
+  inset: 0;
+  /* A camada nunca recebe clique: o canvas precisa deles para o pointer lock. */
+  pointer-events: none;
+  font-family: var(--fonte-corpo);
+}
+
+#ui-root > .prompts {
+  pointer-events: none;
+}
+
+.prompts[hidden] {
+  display: none;
+}
+
+/* --- ação de interação (F) --------------------------------------------------- */
+
+/**
+ * O prompt de ação é uma **placa de latão parafusada na tábua**, a mesma peça
+ * dos botões do menu, em tamanho de HUD. Repetir o objeto em vez de inventar um
+ * segundo painel é o que faz jogo e menu parecerem o mesmo produto.
+ */
+.prompts__action {
+  position: absolute;
+  left: 50%;
+  bottom: 21%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-3);
+  padding: var(--espaco-2) var(--espaco-4);
+  background:
+    var(--veio-madeira),
+    linear-gradient(176deg, var(--oak) 0%, var(--oak-tar) 100%);
+  border: 1px solid var(--brass-shadow);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 226, 168, 0.1) inset;
+  /* A barra de progresso é filha e se ancora na base do painel. */
+  overflow: hidden;
+  animation: prompt-in var(--transicao-rapida) ease-out;
+}
+
+.prompts__action[hidden] {
+  display: none;
+}
+
+@keyframes prompt-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.prompts__label {
+  font-size: 1.06rem;
+  letter-spacing: 0.01em;
+  color: var(--parchment);
+  text-shadow: var(--sombra-texto);
+  white-space: nowrap;
+}
+
+/* --- tecla ------------------------------------------------------------------- */
+
+.prompts__key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9rem;
+  padding: 0.15rem 0.45rem;
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #2a1f08;
+  background: var(--chapa-latao);
+  border: 1px solid var(--brass-shadow);
+  /* O filete escuro embaixo dá o relevo de tecla sem sombra externa. */
+  box-shadow: 0 2px 0 var(--brass-shadow);
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.4);
+  white-space: nowrap;
+}
+
+.prompts__key--small {
+  min-width: 1.6rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.72rem;
+  color: var(--parchment-worn);
+  background: rgba(180, 140, 44, 0.14);
+  border: 1px solid rgba(180, 140, 44, 0.4);
+  box-shadow: none;
+  text-shadow: none;
+}
+
+/* --- barra de progresso (cabrestante) ---------------------------------------- */
+
+.prompts__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.prompts__bar[hidden] {
+  display: none;
+}
+
+.prompts__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brass-dark), var(--brass-lit));
+  transform-origin: left center;
+  transform: scaleX(0);
+  /* Curto de propósito: acompanha o cabrestante sem parecer que desliza sozinho. */
+  transition: transform 90ms linear;
+}
+
+/* --- estado da peça operada -------------------------------------------------- */
+
+.prompts__status {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  transform: translateX(-50%);
+  font-family: var(--fonte-versalete);
+  font-size: 0.92rem;
+  letter-spacing: 0.12em;
+  color: var(--parchment-worn);
+  text-shadow: var(--sombra-texto);
+  white-space: nowrap;
+}
+
+.prompts__status[hidden] {
+  display: none;
+}
+
+/* --- retículo do canhão ------------------------------------------------------ */
+
+/* Quatro traços com um vão no meio: a bala cai, e um ponto cheio no centro
+   mentiria sobre onde ela vai bater. O vão obriga o olho a mirar o alvo. */
+.prompts__reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+}
+
+.prompts__reticle[hidden] {
+  display: none;
+}
+
+.prompts__reticle::before,
+.prompts__reticle::after {
+  content: '';
+  position: absolute;
+  background: var(--brass-lit);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+}
+
+.prompts__reticle::before {
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  transform: translateX(-50%);
+  /* O vão central sai de um gradiente, não de mais dois elementos. */
+  background: linear-gradient(
+    180deg,
+    var(--brass-lit) 0 34%,
+    transparent 34% 66%,
+    var(--brass-lit) 66% 100%
+  );
+}
+
+.prompts__reticle::after {
+  top: 50%;
+  left: 0;
+  height: 1px;
+  width: 100%;
+  transform: translateY(-50%);
+  background: linear-gradient(
+    90deg,
+    var(--brass-lit) 0 34%,
+    transparent 34% 66%,
+    var(--brass-lit) 66% 100%
+  );
+}
+
+/* --- dicas de comando -------------------------------------------------------- */
+
+.prompts__hints {
+  position: absolute;
+  left: var(--espaco-6);
+  bottom: var(--espaco-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-1);
+  opacity: 0.72;
+}
+
+.prompts__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-2);
+  font-size: 0.86rem;
+  color: var(--parchment-worn);
+  text-shadow: var(--sombra-texto);
+}
+
+@media (max-width: 900px) {
+  .prompts__hints {
+    display: none;
+  }
+}

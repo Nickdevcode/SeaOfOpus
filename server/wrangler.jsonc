@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sea-of-opus-rooms",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+
+  // ⚠️ Porta **fixa**, e **fora da 8787 padrão do wrangler**. As duas coisas por
+  // motivos diferentes, e as duas custaram uma sessão de depuração.
+  //
+  // Fixa, porque sem isso o `wrangler dev` sobe na 8788 quando a 8787 está
+  // ocupada e avisa numa linha de log que ninguém lê. O jogo segue procurando no
+  // lugar de sempre, não acha, e o jogador recebe um "connection dropped" que não
+  // tem relação nenhuma com a causa.
+  //
+  // Fora da 8787, porque no Windows **dois processos podem escutar a mesma
+  // porta** quando o primeiro liga com `SO_REUSEADDR` — que é o padrão do
+  // `python -m http.server`. Nesse caso o wrangler sobe anunciando sucesso, e as
+  // conexões vão para o outro processo. Não há erro para detectar, de nenhum dos
+  // lados: só um servidor de sala que responde HTML de listagem de diretório.
+  //
+  // 8930 não é sagrada — é só improvável. Mudou aqui, muda no `.env.development`.
+  "dev": { "port": 8930 },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "DUEL_ROOM", "class_name": "DuelRoom" },
+      { "name": "MATCHMAKER", "class_name": "Matchmaker" }
+    ]
+  },
+
+  // ⚠️ `new_sqlite_classes`, e **não** `new_classes`.
+  //
+  // Durable Objects só existem no plano gratuito com armazenamento SQLite. Com
+  // `new_classes` o deploy falha dizendo que "Durable Objects requires a paid
+  // plan" — uma mensagem que manda procurar no lugar errado, porque o problema
+  // não é o plano, é o tipo de migração.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DuelRoom", "Matchmaker"] }
+  ],
+
+  // De onde o jogo pode se conectar. Sem esta lista, qualquer página na internet
+  // abre salas neste Worker e queima a cota de requests que é sua.
+  //
+  // Em produção, troque pelo domínio real da hospedagem. As entradas de
+  // localhost são o `vite dev` e o `vite preview`.
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173"
+  },
+
+  "observability": { "enabled": true }
+}

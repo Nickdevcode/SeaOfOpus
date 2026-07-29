@@ -1,0 +1,27 @@
+{
+  "name": "sea-of-opus",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Jogo web 3D de combate naval numa chalupa, inspirado em Sea of Thieves",
+  "workspaces": [
+    "server"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit",
+    "check:all": "npm run check && npm -w server run check",
+    "dev:server": "npm -w server run dev"
+  },
+  "dependencies": {
+    "postprocessing": "^6.39.3",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  }
+}

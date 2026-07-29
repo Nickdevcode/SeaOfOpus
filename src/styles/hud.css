@@ -1,0 +1,451 @@
+/**
+ * HUD de combate: o que o jogador precisa saber sem tirar os olhos do mar.
+ *
+ * ## O princípio que ordena o arquivo
+ *
+ * Nada aqui é uma barra de vida, porque o jogo não tem uma. O estado do navio é
+ * a água no porão, e o do inimigo é onde ele está e a que distância. Tudo o mais
+ * é ruído sobre a tela.
+ *
+ * ## E o que os elementos são
+ *
+ * Cada peça do HUD é **um instrumento que existiria a bordo**, e não um widget:
+ *
+ * - a bússola é uma fita de latão gravada correndo sob um pino de agulha;
+ * - o poço de porão é uma **sonda de vidro**, o tubo graduado que se lê para
+ *   saber quanta água entrou;
+ * - o estado das peças são as próprias balas: vazia é o círculo do calibre,
+ *   carregada é a bala dentro dele.
+ *
+ * A diferença não é decorativa. Um instrumento tem uma escala e uma leitura, e o
+ * jogador aprende a lê-lo uma vez; um widget precisa de rótulo toda vez. É por
+ * isso que a sonda tem marcas gravadas em vez de um número grande do lado.
+ *
+ * Posicionado em porcentagem e `vmin`, nunca em pixels: a referência do jogador é
+ * a proporção da tela dele.
+ */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  /* Nunca recebe clique: o canvas precisa deles para o pointer lock. */
+  pointer-events: none;
+  font-family: var(--fonte-corpo);
+}
+
+.hud[hidden] {
+  display: none;
+}
+
+/* --- rosa dos ventos --------------------------------------------------------- */
+
+/**
+ * A fita de bússola: uma chapa de latão gravada correndo por trás de uma janela.
+ *
+ * A máscara nas bordas não é enfeite — sem ela os rumos aparecem e somem num
+ * corte seco, e o corte denuncia a fita como um `div` deslizando. Com o
+ * desvanecimento, ela lê como uma fita metálica passando por dentro de uma
+ * caixa, que é o que uma bússola de fita realmente é.
+ */
+.compass {
+  position: absolute;
+  left: 50%;
+  top: var(--espaco-4);
+  width: min(34rem, 62vw);
+  height: 2.5rem;
+  transform: translateX(-50%);
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(20, 13, 6, 0.66), rgba(10, 6, 3, 0.32));
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+
+.compass__strip {
+  position: absolute;
+  inset: 0;
+  /* `will-change` porque esta é a única coisa do HUD que se move todo quadro. */
+  will-change: transform;
+}
+
+.compass__tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  text-align: center;
+  font-family: var(--fonte-versalete);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--parchment-worn);
+  text-shadow: var(--sombra-texto);
+}
+
+.compass__tick::before {
+  content: '';
+  display: block;
+  width: 1px;
+  height: 7px;
+  margin: 0 auto 4px;
+  background: var(--parchment-worn);
+}
+
+.compass__tick--cardinal {
+  font-size: 1.02rem;
+  color: var(--brass-lit);
+  text-shadow: 0 0 6px rgba(180, 140, 44, 0.45), var(--sombra-texto);
+}
+
+.compass__tick--cardinal::before {
+  height: 11px;
+  background: var(--brass-lit);
+}
+
+/* Seta do vento: cor diferente e maior, porque é informação tática, não geográfica.
+   Saber de onde sopra o vento é saber quem consegue fugir. */
+.compass__wind {
+  position: absolute;
+  top: 0.05rem;
+  transform: translateX(-50%);
+  font-size: 0.95rem;
+  color: var(--brass-flare);
+  text-shadow: 0 0 9px rgba(236, 203, 121, 0.75), var(--sombra-texto);
+}
+
+/**
+ * O pino da agulha: a marca fixa do rumo atual.
+ *
+ * Desenhado como uma ponta de latão apontando para baixo, e não como um traço.
+ * Um traço vertical no meio de uma fita de marcas verticais some dentro delas;
+ * a ponta é a única forma diferente na região, então ela se lê de imediato.
+ */
+.compass__lubber {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--espaco-4) - 0.35rem);
+  width: 0.75rem;
+  height: 0.75rem;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, var(--brass-flare), var(--brass));
+  clip-path: polygon(50% 100%, 0% 0%, 100% 0%);
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9));
+}
+
+.compass__heading {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--espaco-4) + 2.6rem);
+  transform: translateX(-50%);
+  font-family: var(--fonte-numero);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+  color: var(--brass-lit);
+  text-shadow: var(--sombra-texto);
+}
+
+/* --- marcador do inimigo ----------------------------------------------------- */
+
+.target {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  /* `translate(-50%, -50%)` sai no script junto com a posição projetada. */
+  will-change: transform;
+  transition: opacity var(--transicao-rapida);
+}
+
+.target[hidden] {
+  display: none;
+}
+
+/* Losango vazado, não um retículo cheio: o inimigo tem 16 m e a marca precisa
+   emoldurá-lo sem tapar o costado onde se está tentando acertar. */
+.target__mark {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid var(--blood-lit);
+  transform: rotate(45deg);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.8), 0 0 6px rgba(204, 74, 41, 0.5);
+}
+
+/* Pastilha escura em vez de texto solto com sombra.
+   A captura mostrou por quê: o marcador cai em cima de qualquer coisa — céu claro,
+   espuma branca, o timão de madeira —, e sombra de texto não salva número pequeno
+   contra fundo de brilho médio. Com o próprio fundo, a distância é legível sobre
+   tudo, que é o requisito de um número que se lê no meio de uma manobra. */
+.target__range {
+  padding: 0.05rem 0.3rem;
+  font-family: var(--fonte-numero);
+  font-size: 0.74rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--foam);
+  background: rgba(8, 5, 4, 0.72);
+  white-space: nowrap;
+}
+
+/* Fora de campo, a marca vira seta na borda. O `--angle` vem do script. */
+.target--offscreen .target__mark {
+  width: 0;
+  height: 0;
+  border: 0;
+  border-left: 0.55rem solid transparent;
+  border-right: 0.55rem solid transparent;
+  border-bottom: 0.95rem solid var(--blood-lit);
+  transform: rotate(var(--angle, 0rad));
+  box-shadow: none;
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.9));
+}
+
+.target--offscreen .target__range {
+  display: none;
+}
+
+/* --- sonda do porão ---------------------------------------------------------- */
+
+/**
+ * O poço de porão é uma **sonda**: um tubo de vidro num aro de latão.
+ *
+ * Antes era um painel retangular com uma barra dentro — correto e anônimo. A
+ * sonda é o instrumento que um navio de verdade usa para essa exata pergunta, e
+ * ela traz de graça o que a barra precisava explicar: o vidro tem marcas
+ * gravadas, então "quanta água" vira uma leitura de escala em vez de um
+ * percentual que precisa de rótulo.
+ */
+.bilge {
+  position: absolute;
+  right: var(--espaco-6);
+  bottom: var(--espaco-6);
+  width: 6.2rem;
+  padding: var(--espaco-2) var(--espaco-3) var(--espaco-3);
+  background:
+    var(--veio-madeira),
+    linear-gradient(176deg, var(--oak) 0%, var(--oak-tar) 100%);
+  border: 1px solid var(--brass-shadow);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 226, 168, 0.1) inset;
+}
+
+.bilge__label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--fonte-versalete);
+  font-size: 0.76rem;
+  letter-spacing: 0.14em;
+  color: var(--parchment-worn);
+}
+
+.bilge__value {
+  font-family: var(--fonte-numero);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--foam);
+}
+
+/**
+ * O tubo. As marcas gravadas saem de um gradiente repetido — cinco divisões,
+ * uma a cada 20% — e ficam **atrás** da água, então elas continuam legíveis por
+ * transparência conforme o nível sobe.
+ */
+.bilge__well {
+  position: relative;
+  height: 4.2rem;
+  margin-top: var(--espaco-2);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(236, 203, 121, 0.42) 0 1px,
+      transparent 1px 20%
+    ),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.72), rgba(40, 50, 55, 0.5) 40%, rgba(0, 0, 0, 0.72));
+  border: 1px solid var(--brass-dark);
+  overflow: hidden;
+}
+
+/* Enche de baixo para cima, como água. Uma barra horizontal aqui seria a
+   metáfora errada — o jogador está olhando um porão alagando. */
+.bilge__water {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 100%;
+  background: linear-gradient(180deg, #1d6b7d, #06202e);
+  transform-origin: bottom center;
+  transform: scaleY(0);
+  transition: transform 220ms linear;
+}
+
+/* Menisco claro no topo da lâmina: é o que faz ler como superfície de água em vez
+   de preenchimento de barra. */
+.bilge__water::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--foam);
+  opacity: 0.75;
+}
+
+.bilge--warn .bilge__water {
+  background: linear-gradient(180deg, #a8641f, #3a1a06);
+}
+
+.bilge--critical .bilge__water {
+  background: linear-gradient(180deg, var(--blood-lit), #3a0c04);
+}
+
+.bilge--critical .bilge__value {
+  color: var(--blood-lit);
+}
+
+/* --- peças e paiol ----------------------------------------------------------- */
+
+/* Coluna única, ancorada **acima** das dicas de comando de `prompts.css`.
+   Antes eram dois blocos com deslocamentos próprios (`+5.5rem` e `+3.4rem`), e a
+   captura mostrou o resultado: "PAIOL 80" atravessava a linha "W A S D — Andar". Um
+   contêiner só com `flex` resolve por construção, e sobra um único número para
+   manter em pé — a altura das três dicas. */
+.crew-status {
+  position: absolute;
+  left: var(--espaco-6);
+  bottom: calc(var(--espaco-6) + 5.2rem);
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-2);
+}
+
+.pieces {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-2);
+}
+
+.piece {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-2);
+  font-family: var(--fonte-versalete);
+  font-size: 0.82rem;
+  letter-spacing: 0.1em;
+  color: var(--parchment-worn);
+  text-shadow: var(--sombra-texto);
+}
+
+/**
+ * O estado da peça é **a própria bala**: o círculo vazio é o calibre da alma,
+ * meia esfera é a carga descendo, a bala cheia é a peça pronta.
+ *
+ * Três estados distinguíveis sem cor (contorno, meia, cheia), então quem não
+ * separa vermelho de verde continua lendo. A pastilha é o único lugar do HUD que
+ * mantém raio: uma bala é redonda.
+ */
+.piece__pip {
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 1px solid var(--parchment-worn);
+  border-radius: var(--raio-pastilha);
+  background: transparent;
+  transition: background var(--transicao-rapida), border-color var(--transicao-rapida);
+}
+
+.piece--loading .piece__pip {
+  background: linear-gradient(180deg, transparent 50%, var(--brass) 50%);
+  border-color: var(--brass);
+}
+
+.piece--loaded .piece__pip {
+  background: radial-gradient(circle at 32% 28%, #6a6f74, #16191c 78%);
+  border-color: var(--brass-lit);
+  box-shadow: 0 0 8px rgba(236, 203, 121, 0.5);
+}
+
+.magazine {
+  font-family: var(--fonte-versalete);
+  font-size: 0.82rem;
+  letter-spacing: 0.1em;
+  color: var(--parchment-worn);
+  text-shadow: var(--sombra-texto);
+}
+
+.magazine__count {
+  font-family: var(--fonte-numero);
+  font-variant-numeric: tabular-nums;
+  color: var(--brass-lit);
+}
+
+/* --- aviso de alagamento ----------------------------------------------------- */
+
+/* Moldura vermelha pulsando nas bordas. É o único elemento que ocupa a tela toda,
+   e ocupa porque afundar é a única coisa que o jogador precisa saber mesmo estando
+   de olho no canhão. A opacidade vem do script, proporcional ao alagamento. */
+.drown {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(125, 31, 18, 0.62) 100%);
+  transition: opacity var(--transicao-media);
+  animation: drown-pulse 2.1s ease-in-out infinite;
+}
+
+@keyframes drown-pulse {
+  0%,
+  100% {
+    filter: brightness(0.82);
+  }
+  50% {
+    filter: brightness(1.18);
+  }
+}
+
+.drown__word {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  font-family: var(--fonte-versalete);
+  font-size: clamp(1.05rem, 2.3vw, 1.6rem);
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  color: #ffd9c8;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95), 0 0 18px rgba(125, 31, 18, 0.8);
+  white-space: nowrap;
+}
+
+/* --- aviso de estado do inimigo ---------------------------------------------- */
+
+/* Linha discreta sob a bússola: o que o capitão inimigo está fazendo. Existe
+   porque a IA tem intenção legível, e esconder isso desperdiça o trabalho dela —
+   ver o inimigo "PATCHING HOLES" é a recompensa de ter acertado. */
+.foe-state {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--espaco-4) + 4.1rem);
+  transform: translateX(-50%);
+  padding: 0.12rem var(--espaco-3);
+  font-family: var(--fonte-versalete);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  color: var(--parchment-worn);
+  background: rgba(10, 7, 5, 0.6);
+  border-top: 1px solid rgba(180, 140, 44, 0.28);
+  border-bottom: 1px solid rgba(180, 140, 44, 0.28);
+  white-space: nowrap;
+  text-shadow: var(--sombra-texto);
+}
+
+.foe-state[hidden] {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .compass {
+    width: 78vw;
+  }
+
+  .crew-status {
+    display: none;
+  }
+}

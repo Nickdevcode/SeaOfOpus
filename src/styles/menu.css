@@ -1,0 +1,1122 @@
+/**
+ * Painéis de tela cheia: menu, ajustes, controles e fim de partida.
+ *
+ * ## O elemento que carrega a tela
+ *
+ * A folha do menu é **um pergaminho pregado numa tábua**. Não é uma metáfora
+ * solta: o pergaminho tem borda comida e manchas de água, a tábua tem veio, e
+ * onde os dois se encontram há quatro pregos de latão com cabeça martelada. É o
+ * único lugar da interface em que gastamos ornamento, e por isso ele pode ser
+ * elaborado — tudo em volta fica quieto.
+ *
+ * A alternativa era o retângulo escuro translúcido com borda dourada de 1 px,
+ * que é o que todo menu de jogo náutico faz. Ele funciona, é legível e não diz
+ * nada. Um pergaminho pregado numa tábua diz onde a gente está.
+ *
+ * ## A borda comida, e por que ela é máscara
+ *
+ * A irregularidade do papel sai de uma `mask-image` com um punhado de gradientes
+ * radiais mordendo as quatro bordas. Máscara, e não `clip-path`: o clip mudaria
+ * a caixa de layout e levaria o texto junto, e o que se quer é o papel rasgado
+ * **por cima** de um bloco de texto que continua alinhado.
+ *
+ * ## A regra tipográfica
+ *
+ * Cinzel só no logotipo. Cabeçalhos e rótulos em IM Fell English SC — versaletes
+ * de gravura, que dão hierarquia sem precisar de peso nem de cor. Texto corrido
+ * em IM Fell English. Números em monoespaçada. Nada de uma quinta escolha.
+ */
+
+/* --- véu e folha ------------------------------------------------------------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--espaco-8);
+  /* Mais escuro embaixo: a folha se apoia no peso e o horizonte fica respirando no
+     topo, o que mantém a cena legível como plano de fundo.
+
+     Os valores foram medidos numa captura, não escolhidos: a primeira tentativa
+     tinha 0,9 de opacidade na borda e 0,55 no centro, e o resultado foi um menu
+     bonito sobre um retângulo preto — a Chalupa navegando atrás simplesmente
+     desaparecia, o que joga fora a melhor coisa que a tela de título tem. Com 0,74
+     na borda e 0,28 no centro o casco e o mar voltam a aparecer, e o texto continua
+     legível porque a folha traz o próprio fundo claro. */
+  background:
+    radial-gradient(ellipse at 50% 34%, rgba(4, 12, 18, 0.28) 0%, rgba(3, 9, 14, 0.74) 72%),
+    linear-gradient(180deg, rgba(3, 9, 14, 0.3), rgba(2, 6, 10, 0.84));
+  backdrop-filter: blur(2px) saturate(0.92);
+  animation: overlay-in var(--transicao-media) ease-out;
+  overflow-y: auto;
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sheet {
+  position: relative;
+  width: min(70rem, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--espaco-6);
+  padding: clamp(var(--espaco-8), 4.5vw, 3.6rem) clamp(var(--espaco-8), 5vw, 4.4rem);
+
+  /* A tábua: veio de carvalho escuro por baixo de tudo. */
+  background:
+    var(--veio-madeira),
+    linear-gradient(174deg, var(--oak) 0%, var(--oak-deep) 55%, var(--oak-tar) 100%);
+  box-shadow:
+    0 26px 70px rgba(0, 0, 0, 0.72),
+    0 2px 0 rgba(255, 226, 168, 0.07) inset,
+    0 -30px 60px rgba(0, 0, 0, 0.5) inset;
+  animation: sheet-in var(--transicao-lenta) both;
+}
+
+/**
+ * A folha estreita, para as telas cuja informação é uma coluna só.
+ *
+ * As setenta rem de largura padrão existem para as telas que **preenchem** a
+ * folha: quatro cartas de capitão, três colunas de comandos, uma grade de
+ * ajustes. Nas telas de rede o conteúdo é um campo e três botões, e a folha larga
+ * virava uma moldura enorme em volta de uma tira de texto no meio — o olho lê a
+ * madeira antes de achar o que clicar.
+ */
+.sheet--narrow {
+  width: min(42rem, 100%);
+}
+
+/**
+ * O pergaminho: uma folha creme por cima da tábua, com as bordas comidas.
+ *
+ * O recuo é maior em cima e embaixo que nos lados, de propósito — a folha sobra
+ * da tábua em proporções diferentes nos dois eixos, como papel cortado à mão. É
+ * esse desalinho que impede a leitura de "duas caixas empilhadas".
+ */
+.sheet::before {
+  content: '';
+  position: absolute;
+  inset: 1.6rem 1.3rem;
+  z-index: 0;
+  background:
+    /* Manchas de água e sujeira de uso, mais densas nas bordas. */
+    radial-gradient(ellipse at 12% 18%, rgba(120, 92, 44, 0.26), transparent 42%),
+    radial-gradient(ellipse at 88% 74%, rgba(120, 92, 44, 0.22), transparent 46%),
+    radial-gradient(ellipse at 62% 8%, rgba(92, 68, 30, 0.2), transparent 34%),
+    radial-gradient(
+      ellipse at 50% 50%,
+      var(--parchment) 32%,
+      var(--parchment-worn) 78%,
+      var(--parchment-deep) 100%
+    );
+  /**
+   * A borda irregular do papel.
+   *
+   * Um `clip-path` de dezesseis pontos, e não uma máscara com mordidas
+   * circulares. A primeira tentativa foi essa — radiais transparentes
+   * compostas por interseção — e o resultado na tela foram quatro discos
+   * pretos do tamanho de uma moeda flutuando **dentro** da folha: o
+   * `mask-composite` combina camadas em pares, então cada mordida virou um
+   * buraco em vez de uma reentrância de contorno.
+   *
+   * O polígono não tem esse problema porque descreve o contorno diretamente, e
+   * a irregularidade fica onde tem de ficar: nas bordas. Os desvios são de
+   * menos de meio por cento, o suficiente para o olho registrar "cortado à mão"
+   * sem que o texto perto da margem corra risco de ser cortado junto.
+   */
+  clip-path: polygon(
+    0.4% 1.2%, 18% 0.2%, 37% 1.4%, 58% 0.3%, 79% 1.5%, 99.4% 0.6%,
+    99.8% 21%, 98.8% 43%, 99.7% 64%, 98.9% 85%, 99.5% 98.8%,
+    77% 99.6%, 55% 98.6%, 33% 99.7%, 12% 98.8%, 0.6% 99.4%,
+    0.2% 78%, 1.2% 56%, 0.3% 34%, 1.1% 16%
+  );
+  pointer-events: none;
+}
+
+/**
+ * Os quatro pregos que prendem a folha.
+ *
+ * Dois pseudoelementos não bastariam para quatro cabeças, então elas vêm de um
+ * único `background` com quatro gradientes radiais posicionados nos cantos. Cada
+ * cabeça tem um realce no alto à esquerda e uma sombra embaixo à direita: é a
+ * leitura mínima de "metal martelado" e ela sobrevive em qualquer tamanho.
+ */
+.sheet::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background:
+    radial-gradient(circle 0.42rem at 2.1rem 2.1rem, var(--brass-lit) 0 38%, var(--brass) 38% 62%, var(--brass-shadow) 62% 100%, transparent 100%),
+    radial-gradient(circle 0.42rem at calc(100% - 2.1rem) 2.1rem, var(--brass-lit) 0 38%, var(--brass) 38% 62%, var(--brass-shadow) 62% 100%, transparent 100%),
+    radial-gradient(circle 0.42rem at 2.1rem calc(100% - 2.1rem), var(--brass-lit) 0 38%, var(--brass) 38% 62%, var(--brass-shadow) 62% 100%, transparent 100%),
+    radial-gradient(circle 0.42rem at calc(100% - 2.1rem) calc(100% - 2.1rem), var(--brass-lit) 0 38%, var(--brass) 38% 62%, var(--brass-shadow) 62% 100%, transparent 100%);
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.65));
+  pointer-events: none;
+}
+
+/* O conteúdo fica acima do pergaminho, abaixo dos pregos. */
+.sheet > * {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- cabeçalho --------------------------------------------------------------- */
+
+.brand {
+  text-align: center;
+}
+
+.brand__title {
+  margin: 0;
+  font-family: var(--fonte-titulo);
+  font-weight: 900;
+  /* Escala fluida: o título é o objeto mais pesado da tela e precisa dominar num
+     ultrawide sem estourar num notebook. */
+  font-size: clamp(2.2rem, 6.4vw, 5rem);
+  line-height: 1.02;
+  letter-spacing: 0.14em;
+  /* Recuo do último caractere: entreletra larga acrescenta um vão à direita que
+     desalinha o título do centro óptico. */
+  text-indent: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  /* Letra **gravada no pergaminho**, e não em relevo dourado.
+     O texto vazado com gradiente de latão é o efeito de título mais copiado que
+     existe, e sobre papel ele é errado duas vezes: papel não é metal, e a folha
+     já traz a cor quente que o dourado tentaria dar. Tinta escura com um filete
+     claro embaixo lê como sulco no papel — que é o que uma prensa faz. */
+  text-shadow:
+    0 1px 0 rgba(255, 246, 214, 0.55),
+    0 -1px 0 rgba(0, 0, 0, 0.25);
+}
+
+/**
+ * A régua sob o título: uma rosa dos ventos entre dois filetes.
+ *
+ * O losango genérico virou a rosa porque ela **é** o assunto: o jogo inteiro
+ * gira em torno de rumo e vento, e a mesma marca aparece na fita da bússola do
+ * HUD. Duas aparições da mesma forma amarram menu e jogo.
+ */
+.brand__rule {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--espaco-3);
+  margin: var(--espaco-3) 0 var(--espaco-2);
+}
+
+.brand__rule::before,
+.brand__rule::after {
+  content: '';
+  width: min(14rem, 24vw);
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brass-dark) 45%, var(--brass) 90%, transparent);
+}
+
+.brand__rule::after {
+  transform: scaleX(-1);
+}
+
+.brand__diamond {
+  width: 1.1rem;
+  height: 1.1rem;
+  background: var(--brass-dark);
+  /* Estrela de quatro pontas: a rosa dos ventos reduzida ao essencial. */
+  clip-path: polygon(
+    50% 0%, 60% 40%, 100% 50%, 60% 60%,
+    50% 100%, 40% 60%, 0% 50%, 40% 40%
+  );
+}
+
+.brand__subtitle {
+  margin: 0;
+  font-family: var(--fonte-versalete);
+  font-size: clamp(0.86rem, 1.4vw, 1.02rem);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink-soft);
+}
+
+/* --- seções ------------------------------------------------------------------ */
+
+.section {
+  width: 100%;
+}
+
+.section__label {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-4);
+  margin: 0 0 var(--espaco-4);
+  font-family: var(--fonte-versalete);
+  font-size: 1rem;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  color: var(--ink-soft);
+}
+
+.section__label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(92, 74, 46, 0.5), transparent);
+}
+
+/* --- cartas de modo (tela de título) ----------------------------------------- */
+
+/**
+ * As duas cartas da primeira tela.
+ *
+ * `auto-fit` com base larga, e não duas colunas fixas: em telefone deitado as duas
+ * empilham sozinhas, e a de cima continua sendo a principal — que é a ordem em que
+ * elas já estão no DOM. Hierarquia por posição sobrevive a qualquer largura;
+ * hierarquia por coluna, não.
+ */
+.modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: var(--espaco-4);
+}
+
+/**
+ * Uma carta de modo, no mesmo papel das cartas de capitão — mas com a tarja.
+ *
+ * A tarja é o elemento que faz esta tela funcionar. "Online" e "Offline" gravados
+ * em latão respondem, antes do nome e da frase, a única pergunta que trava alguém
+ * na tela de título: isto aqui precisa de internet e de outra pessoa? Sem ela, o
+ * jogador tem de ler duas frases inteiras para descobrir em qual dos dois clicar.
+ */
+.mode {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--espaco-2);
+  padding: var(--espaco-6) var(--espaco-4) var(--espaco-4);
+  text-align: left;
+  color: var(--ink);
+  background:
+    linear-gradient(179deg, rgba(255, 250, 232, 0.5), rgba(160, 138, 96, 0.16)),
+    var(--parchment);
+  border: 1px solid rgba(92, 74, 46, 0.35);
+  box-shadow: 0 3px 10px rgba(40, 26, 10, 0.32);
+  transition:
+    transform var(--transicao-rapida),
+    border-color var(--transicao-rapida),
+    box-shadow var(--transicao-rapida);
+}
+
+.mode:hover,
+.mode:focus-visible {
+  transform: translateY(-3px);
+  border-color: var(--brass-dark);
+  box-shadow: 0 12px 24px rgba(20, 12, 4, 0.45);
+}
+
+/* A principal é a mesma carta com o filete de latão no alto — não uma cor nova.
+   Mesma regra do `.button--primary`: destaque por acabamento, não por paleta. */
+.mode--primary {
+  box-shadow:
+    0 3px 10px rgba(40, 26, 10, 0.32),
+    0 3px 0 var(--brass-dark) inset;
+}
+
+/* Modo indisponível (sem servidor de sala configurado): a carta fica de papel
+   velho e o cursor diz que não há o que clicar. Continua legível — é ela que
+   carrega o motivo. */
+.mode:disabled {
+  filter: grayscale(0.55) brightness(0.94);
+  opacity: 0.72;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 3px 10px rgba(40, 26, 10, 0.22);
+}
+
+.mode__badge {
+  align-self: flex-start;
+  padding: 0.1rem 0.6rem;
+  font-family: var(--fonte-versalete);
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  text-transform: uppercase;
+  color: #2a1f08;
+  background: var(--chapa-latao);
+  border: 1px solid var(--brass-shadow);
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.4);
+}
+
+/* A tarja do modo sem rede é tinta sobre papel, e não latão: latão é o metal que
+   este menu usa para o que está ativo, e gastá-lo nos dois apagaria a diferença. */
+.mode:not(.mode--primary) .mode__badge {
+  color: var(--ink-soft);
+  background: rgba(255, 250, 232, 0.55);
+  border-color: rgba(92, 74, 46, 0.35);
+  text-shadow: none;
+}
+
+.mode__name {
+  font-family: var(--fonte-versalete);
+  font-size: 1.42rem;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+.mode__blurb {
+  font-size: 0.98rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+/* --- cartões de dificuldade -------------------------------------------------- */
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--espaco-4);
+}
+
+/**
+ * Cada capitão é uma **carta de bordo**: papel mais claro, tinta, e um vinco de
+ * dobra no alto. O cartão escuro com borda dourada foi trocado por isto porque
+ * ele estava competindo com o pergaminho embaixo — dois materiais diferentes na
+ * mesma folha, um dentro do outro, sem motivo.
+ */
+.choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-2);
+  padding: var(--espaco-4);
+  text-align: left;
+  color: var(--ink);
+  background:
+    linear-gradient(179deg, rgba(255, 250, 232, 0.5), rgba(160, 138, 96, 0.16)),
+    var(--parchment);
+  border: 1px solid rgba(92, 74, 46, 0.35);
+  box-shadow: 0 3px 10px rgba(40, 26, 10, 0.32);
+  transition:
+    transform var(--transicao-rapida),
+    border-color var(--transicao-rapida),
+    box-shadow var(--transicao-rapida);
+}
+
+/* O vinco de dobra: uma linha clara com sombra logo abaixo, no terço superior. */
+.choice::before {
+  content: '';
+  position: absolute;
+  inset: 32% 0 auto 0;
+  height: 2px;
+  background: linear-gradient(180deg, rgba(255, 252, 238, 0.7), rgba(92, 74, 46, 0.18));
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/**
+ * A marca de seleção: um **carimbo de lacre** no canto.
+ *
+ * Existe porque foco e seleção são estados diferentes e precisam de marcas
+ * diferentes — o foco é o anel do navegador, a seleção é este lacre. Ele não
+ * depende de cor para ser lido (é uma forma que aparece do nada) e não entra na
+ * árvore de acessibilidade, porque `aria-checked` já anuncia a escolha e um
+ * glifo em `::after` viraria parte do nome acessível do botão.
+ */
+.choice::after {
+  content: '';
+  position: absolute;
+  top: -0.55rem;
+  right: -0.55rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  background:
+    radial-gradient(circle at 38% 32%, rgba(255, 255, 255, 0.32), transparent 52%),
+    radial-gradient(circle, var(--blood-lit) 0 58%, var(--blood) 58% 100%);
+  clip-path: polygon(
+    50% 0%, 66% 12%, 86% 10%, 90% 30%, 100% 48%,
+    88% 66%, 90% 86%, 68% 90%, 50% 100%, 32% 90%,
+    10% 88%, 12% 66%, 0% 48%, 12% 30%, 14% 10%, 34% 12%
+  );
+  opacity: 0;
+  transform: scale(0.4) rotate(-18deg);
+  transition: opacity var(--transicao-media), transform var(--transicao-media);
+  pointer-events: none;
+}
+
+.choice[aria-checked='true']::after {
+  opacity: 1;
+  transform: scale(1) rotate(-8deg);
+}
+
+.choice:hover,
+.choice:focus-visible {
+  transform: translateY(-3px);
+  border-color: var(--brass-dark);
+  box-shadow: 0 12px 24px rgba(20, 12, 4, 0.45);
+}
+
+.choice[aria-checked='true'] {
+  border-color: var(--blood);
+  box-shadow:
+    0 12px 24px rgba(20, 12, 4, 0.45),
+    0 0 0 2px rgba(125, 31, 18, 0.28) inset;
+}
+
+.choice__name {
+  font-family: var(--fonte-versalete);
+  font-size: 1.3rem;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+}
+
+/* As não escolhidas recuam meio tom. Contraste por subtração: em vez de gritar na
+   selecionada, cala nas outras. */
+.choice[aria-checked='false'] .choice__name {
+  color: var(--ink-soft);
+}
+
+.choice__blurb {
+  font-size: 0.98rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+/* Barrinhas de aferição do capitão. Comunicam a diferença sem números — três
+   valores comparáveis lado a lado dizem mais que "sigma 0,018 rad". */
+.choice__meters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-1);
+  margin-top: var(--espaco-2);
+}
+
+.meter {
+  display: grid;
+  grid-template-columns: 4.6rem 1fr;
+  align-items: center;
+  gap: var(--espaco-2);
+  font-family: var(--fonte-versalete);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+
+/* Trilho de tinta sobre papel, não de vidro sobre preto: a barra vive dentro da
+   carta, e uma pista escura ali seria um buraco na folha. */
+.meter__track {
+  height: 5px;
+  background: rgba(92, 74, 46, 0.22);
+  box-shadow: 0 1px 0 rgba(255, 252, 238, 0.6);
+  overflow: hidden;
+}
+
+.meter__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brass-dark), var(--brass));
+  transform-origin: left center;
+  transition: transform var(--transicao-media);
+}
+
+/* --- botões ------------------------------------------------------------------ */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--espaco-4);
+}
+
+/**
+ * Os botões são **placas de latão parafusadas na tábua**.
+ *
+ * Daí vêm as três coisas que os distinguem de um botão comum: chapa escovada em
+ * vez de gradiente liso, dois parafusos nas pontas, e texto gravado (tinta
+ * escura com filete claro embaixo) em vez de texto claro sobre fundo escuro.
+ * Apertar afunda a placa e apaga o brilho de cima — que é literalmente o que
+ * acontece quando se aperta uma peça de metal contra madeira.
+ */
+.button {
+  position: relative;
+  padding: var(--espaco-3) var(--espaco-8);
+  font-family: var(--fonte-versalete);
+  font-size: 1rem;
+  letter-spacing: 0.18em;
+  text-indent: 0.18em;
+  color: #2a1f08;
+  background: var(--chapa-latao);
+  border: 1px solid var(--brass-shadow);
+  box-shadow:
+    0 4px 0 var(--brass-shadow),
+    0 8px 16px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(255, 246, 214, 0.55) inset;
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.45);
+  transition:
+    transform var(--transicao-rapida),
+    filter var(--transicao-rapida),
+    box-shadow var(--transicao-rapida);
+}
+
+/* Os dois parafusos. Mesmo desenho da cabeça dos pregos da folha, menores. */
+.button::before,
+.button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-top: -0.21rem;
+  border-radius: var(--raio-pastilha);
+  background: radial-gradient(circle at 34% 30%, var(--brass-flare), var(--brass-shadow) 90%);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+
+.button::before {
+  left: 0.55rem;
+}
+
+.button::after {
+  right: 0.55rem;
+}
+
+.button:hover,
+.button:focus-visible {
+  transform: translateY(-2px);
+  filter: brightness(1.12);
+  box-shadow:
+    0 6px 0 var(--brass-shadow),
+    0 12px 22px rgba(0, 0, 0, 0.55),
+    0 1px 0 rgba(255, 246, 214, 0.6) inset;
+}
+
+.button:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 1px 0 var(--brass-shadow),
+    0 3px 8px rgba(0, 0, 0, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.4) inset;
+}
+
+/* O botão principal é a mesma placa, maior e mais quente — não uma cor nova. */
+.button--primary {
+  font-size: 1.15rem;
+  padding: var(--espaco-4) var(--espaco-12);
+  filter: saturate(1.15) brightness(1.06);
+}
+
+.button--primary:hover,
+.button--primary:focus-visible {
+  filter: saturate(1.2) brightness(1.2);
+}
+
+/**
+ * Fileira de botões empilhada, para telas em que cada ação é uma escolha de rumo
+ * e não uma confirmação.
+ *
+ * Na tela de rede as três saídas são alternativas de peso parecido, e lado a lado
+ * elas viravam uma barra de ferramentas: o olho varre e não decide. Empilhadas e
+ * com a mesma largura, viram uma lista — que é o que elas são.
+ */
+.actions--stacked {
+  flex-direction: column;
+  gap: var(--espaco-3);
+}
+
+.actions--stacked .button {
+  width: min(26rem, 100%);
+}
+
+/* --- campo de apelido -------------------------------------------------------- */
+
+.nickname {
+  /* A mesma largura dos botões empilhados logo abaixo: o campo e as três saídas
+     formam uma coluna só, e é isso que faz a tela ser lida de cima para baixo em
+     vez de como duas regiões soltas. Esticado na folha inteira, um campo de
+     dezesseis caracteres parecia caber num parágrafo. */
+  display: block;
+  width: min(26rem, 100%);
+  margin: 0 auto;
+  padding: var(--espaco-2) var(--espaco-3);
+  font-family: var(--fonte-versalete);
+  font-size: 1.15rem;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  /* Papel um tom mais claro que a folha, com o vinco de tinta embaixo: a mesma
+     leitura de "linha para escrever" que uma ficha de bordo tem. */
+  background: rgba(255, 250, 232, 0.55);
+  border: 1px solid rgba(92, 74, 46, 0.35);
+  border-bottom-color: var(--brass-dark);
+}
+
+.nickname:focus-visible {
+  background: rgba(255, 252, 238, 0.85);
+  border-color: var(--brass-dark);
+}
+
+/* --- código de sala ---------------------------------------------------------- */
+
+.code {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--espaco-3);
+}
+
+/**
+ * Uma casa do código.
+ *
+ * É uma **placa de latão gravada**, do mesmo material dos botões, porque é isso
+ * que ela é: um controle que se aperta. Monoespaçada e larga o bastante para o
+ * caractere não dançar quando ele troca — com fonte proporcional, um `W` no lugar
+ * de um `J` empurraria as três casas seguintes a cada passo do d-pad.
+ */
+.code__slot {
+  width: 4.2rem;
+  padding: var(--espaco-3) 0;
+  font-family: var(--fonte-numero);
+  font-size: 2rem;
+  font-weight: 700;
+  text-align: center;
+  color: #2a1f08;
+  background: var(--chapa-latao);
+  border: 1px solid var(--brass-shadow);
+  box-shadow:
+    0 3px 0 var(--brass-shadow),
+    0 1px 0 rgba(255, 246, 214, 0.55) inset;
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.45);
+  transition: transform var(--transicao-rapida), filter var(--transicao-rapida);
+}
+
+/* A casa focada sobe e acende: com quatro placas idênticas, saber em qual delas o
+   d-pad vai bater é a única informação que a tela precisa dar. O anel de foco do
+   navegador continua vindo por cima — isto se soma a ele, não o substitui. */
+.code__slot:focus-visible {
+  transform: translateY(-3px);
+  filter: brightness(1.18);
+}
+
+/* --- sala de espera ---------------------------------------------------------- */
+
+/**
+ * O título da sala de espera.
+ *
+ * Versalete de 1,9 rem, e **não** o corpo do título de fim de partida. A diferença
+ * importa porque esta linha carrega um nome que outra pessoa escolheu: em caixa
+ * alta de 3 rem, um apelido de dezesseis caracteres quebrava em três linhas e
+ * empurrava o resto da tela para fora da folha. O versalete já dá a formalidade
+ * sem depender do tamanho.
+ */
+.room__title {
+  margin: 0;
+  font-family: var(--fonte-versalete);
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  text-align: center;
+  text-wrap: balance;
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.5);
+}
+
+.room__blurb {
+  margin: 0;
+  font-size: 1rem;
+  font-style: italic;
+  text-align: center;
+  text-wrap: pretty;
+  color: var(--ink-soft);
+}
+
+.code-display {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--espaco-4);
+}
+
+.code-display[hidden] {
+  display: none;
+}
+
+/**
+ * O código, do tamanho de quem vai ditá-lo por voz.
+ *
+ * Entreletra larga porque o número existe para ser **lido em voz alta** para
+ * outra pessoa: junto, `AB` e `48` viram um borrão numa chamada de voz. Cada
+ * caractere separado é um caractere ditado.
+ */
+.code-display__value {
+  font-family: var(--fonte-numero);
+  font-size: clamp(2.6rem, 8vw, 4.2rem);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.5);
+}
+
+.code-display__copy {
+  /* Fixa a largura no rótulo mais longo ("Copy failed"): sem isso, a confirmação
+     empurra o código para o lado no instante em que alguém está copiando ele. */
+  min-width: 9.5rem;
+  padding: var(--espaco-2) var(--espaco-4);
+  font-size: 0.86rem;
+}
+
+/* O relógio da espera. Tabular para os dígitos não dançarem a cada segundo. */
+.code-display__timer {
+  font-family: var(--fonte-numero);
+  font-size: 1.1rem;
+  text-align: center;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-display__timer[hidden] {
+  display: none;
+}
+
+/* --- ajustes ----------------------------------------------------------------- */
+
+.settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: var(--espaco-2) var(--espaco-8);
+  width: 100%;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--espaco-2) var(--espaco-4);
+  padding: var(--espaco-2) 0;
+  border-bottom: 1px solid rgba(92, 74, 46, 0.28);
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.field__value {
+  font-family: var(--fonte-numero);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  /* Tabular para o número não empurrar o rótulo enquanto o cursor arrasta. */
+  font-variant-numeric: tabular-nums;
+}
+
+.field__control {
+  grid-column: 1 / -1;
+}
+
+/* Range com trilho gravado no papel e cursor de latão. `appearance: none` é
+   obrigatório: sem ele o Chrome ignora o fundo e mantém o azul do sistema, que
+   destrói a paleta. */
+.field input[type='range'] {
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  background: linear-gradient(90deg, var(--brass-dark), rgba(92, 74, 46, 0.22));
+  box-shadow: 0 1px 0 rgba(255, 252, 238, 0.6);
+  cursor: pointer;
+}
+
+.field input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  background: radial-gradient(circle at 34% 28%, var(--brass-flare), var(--brass) 55%, var(--brass-shadow));
+  border: 1px solid rgba(40, 26, 6, 0.85);
+  border-radius: var(--raio-pastilha);
+  box-shadow: 0 2px 4px rgba(40, 26, 10, 0.55);
+}
+
+.field input[type='range']::-moz-range-thumb {
+  width: 17px;
+  height: 17px;
+  background: radial-gradient(circle at 34% 28%, var(--brass-flare), var(--brass) 55%, var(--brass-shadow));
+  border: 1px solid rgba(40, 26, 6, 0.85);
+  border-radius: var(--raio-pastilha);
+}
+
+/**
+ * Grupo de opções mutuamente exclusivas (preset gráfico, tempo).
+ *
+ * `flex-wrap` não é preciosismo: a barra de tempo tem **cinco** opções contra as
+ * quatro do preset gráfico, e numa coluna de 19 rem os botões não cabiam. Sem
+ * quebrar linha, o flex estourava a caixa — "Storm" saía para fora da moldura,
+ * com fundo próprio, encostado no campo vizinho. Era o defeito mais visível da
+ * tela de ajustes, e ele aparece em qualquer largura de janela.
+ *
+ * A quebra resolve por construção, e para qualquer número de opções que venha a
+ * existir depois: o grupo vira duas fileiras dentro da mesma moldura.
+ */
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding: 2px;
+  background: rgba(92, 74, 46, 0.28);
+  border: 1px solid rgba(92, 74, 46, 0.4);
+}
+
+.segmented__option {
+  /* `1 1 auto` com base zero na largura: os botões repartem a linha por igual e
+     encolhem até o texto, em vez de exigir a largura do rótulo mais longo. */
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--espaco-2) var(--espaco-2);
+  font-family: var(--fonte-versalete);
+  font-size: 0.86rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--ink-soft);
+  background: rgba(255, 250, 232, 0.5);
+  border: 0;
+  transition: background var(--transicao-rapida), color var(--transicao-rapida);
+}
+
+.segmented__option:hover {
+  background: rgba(255, 250, 232, 0.85);
+  color: var(--ink);
+}
+
+.segmented__option[aria-pressed='true'] {
+  color: #2a1f08;
+  background: var(--chapa-latao);
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.4);
+}
+
+/* Interruptor de duas posições (inverter Y). */
+.toggle {
+  width: 3.2rem;
+  height: 1.5rem;
+  padding: 2px;
+  background: rgba(92, 74, 46, 0.3);
+  border: 1px solid rgba(92, 74, 46, 0.45);
+  border-radius: var(--raio-pastilha);
+  transition: background var(--transicao-rapida);
+}
+
+.toggle__knob {
+  display: block;
+  width: 1.15rem;
+  height: 1.15rem;
+  background: radial-gradient(circle at 34% 28%, #fffaf0, var(--parchment-deep));
+  border-radius: var(--raio-pastilha);
+  box-shadow: 0 1px 3px rgba(40, 26, 10, 0.6);
+  transition: transform var(--transicao-media), background var(--transicao-rapida);
+}
+
+.toggle[aria-pressed='true'] {
+  background: rgba(180, 140, 44, 0.4);
+}
+
+.toggle[aria-pressed='true'] .toggle__knob {
+  background: radial-gradient(circle at 34% 28%, var(--brass-flare), var(--brass));
+  transform: translateX(1.65rem);
+}
+
+/* --- tabela de controles ----------------------------------------------------- */
+
+/* Colunas de texto, e **não** grid.
+   A diferença é a ordem de preenchimento, e a captura mostrou que ela importa: um
+   grid flui por linha, e com três colunas o "andar para frente / esquerda / trás"
+   caía um em cada coluna, separando o WASD em três lugares da tela. Multi-coluna
+   flui para baixo, então cada coluna preserva a ordem da lista e os comandos
+   relacionados ficam vizinhos — que é a única razão de a lista ter uma ordem. */
+.controls-grid {
+  column-count: 3;
+  column-gap: var(--espaco-8);
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .controls-grid {
+    column-count: 2;
+  }
+}
+
+@media (max-width: 700px) {
+  .controls-grid {
+    column-count: 1;
+  }
+}
+
+.controls-row {
+  /* Sem isto uma linha pode ser cortada no pé da coluna, com o rótulo numa e o
+     glifo na seguinte. */
+  break-inside: avoid;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--espaco-4);
+  padding: var(--espaco-2) 0;
+  border-bottom: 1px solid rgba(92, 74, 46, 0.22);
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+.controls-row__keys {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-2);
+}
+
+/**
+ * O glifo do aparelho que **não** está em uso desbota em vez de sumir: some é
+ * perda de informação, e o jogador de teclado ainda quer saber o botão do
+ * controle quando pega ele.
+ */
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 0.14rem 0.5rem;
+  font-family: var(--fonte-numero);
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: rgba(255, 250, 232, 0.55);
+  border: 1px solid rgba(92, 74, 46, 0.35);
+  white-space: nowrap;
+  transition: opacity var(--transicao-rapida), background var(--transicao-rapida);
+  opacity: 0.45;
+}
+
+.glyph--active {
+  opacity: 1;
+  color: #2a1f08;
+  background: var(--chapa-latao);
+  border-color: var(--brass-shadow);
+  box-shadow: 0 2px 0 var(--brass-shadow);
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.4);
+}
+
+/* --- fim de partida ---------------------------------------------------------- */
+
+.outcome__title {
+  margin: 0;
+  font-family: var(--fonte-titulo);
+  font-size: clamp(1.8rem, 4.2vw, 3.1rem);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.5);
+}
+
+.outcome--won .outcome__title {
+  color: var(--ink);
+}
+
+.outcome--lost .outcome__title {
+  color: var(--blood);
+}
+
+.outcome__blurb {
+  margin: var(--espaco-3) 0 0;
+  font-size: 1.05rem;
+  font-style: italic;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.tally {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--espaco-3);
+  width: 100%;
+}
+
+/* Cada número é uma **entrada de diário de bordo**: filete de tinta em cima, o
+   valor grande, o rótulo em versalete embaixo. Sem caixa em volta — a folha já
+   é a caixa, e uma segunda moldura aqui viraria papel dentro de papel. */
+.tally__item {
+  padding: var(--espaco-3) var(--espaco-2);
+  text-align: center;
+  border-top: 1px solid rgba(92, 74, 46, 0.4);
+}
+
+.tally__value {
+  font-family: var(--fonte-titulo);
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.tally__label {
+  margin-top: var(--espaco-1);
+  font-family: var(--fonte-versalete);
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+/* --- rodapé ------------------------------------------------------------------ */
+
+.hint-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--espaco-2) var(--espaco-6);
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+
+.hint-line__item {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-2);
+}
+
+/* Uma dica sem botão no aparelho em uso é escondida pelo `Menu` (ver `syncGlyphs`).
+   A regra é obrigatória: o `display: flex` acima é de folha de autor e vence o
+   `display: none` que o navegador aplica a `[hidden]`, então sem esta linha o
+   elemento continuaria na tela — que é o mesmo motivo de `.overlay[hidden]`. */
+.hint-line__item[hidden] {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .overlay {
+    padding: var(--espaco-2);
+  }
+
+  .sheet {
+    gap: var(--espaco-4);
+  }
+
+  .button--primary {
+    padding: var(--espaco-3) var(--espaco-6);
+  }
+}

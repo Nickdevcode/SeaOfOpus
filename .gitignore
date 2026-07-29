@@ -1,0 +1,33 @@
+# Dependências e build
+node_modules/
+dist/
+# Estado local do wrangler: banco do Durable Object, cache e credenciais da
+# sessão de desenvolvimento. Regenerável, e nada disso é do projeto.
+.wrangler/
+
+# Capturas de inspeção: são geradas pela bancada de dev e não valem versão.
+screenshots/
+.playwright-mcp/
+
+# Ferramentas locais
+.impeccable/
+**/.impeccable/
+*.local
+
+# Subprodutos da bancada do personagem: bytecode dos scripts de Blender e o
+# backup que o próprio Blender escreve ao salvar. Regeneráveis os dois.
+__pycache__/
+*.py[cod]
+*.blend1
+
+# Segredos — nunca entram, e é por isso que a linha existe mesmo sem arquivo hoje.
+.env
+.env.*
+# Exceto o de desenvolvimento, que só aponta para o servidor de sala em localhost.
+# Sem versionar, quem clona o projeto abre com o modo online apagado e sem pista do
+# porquê — e o arquivo não tem nada que já não esteja no README.
+!.env.development
+
+# Sistema operacional
+Thumbs.db
+.DS_Store
