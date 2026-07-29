@@ -35,18 +35,42 @@ import type { Ship } from '../ship/Ship';
 import { BALL_MASS, BALL_RADIUS, MUZZLE_SPEED } from '../ship/Cannon';
 import { INPUT_BATCH } from '../../shared/protocol';
 import { encodeInput } from './snapshotCodec';
+import { advanceRenderClock, interpolationFactor } from './renderClock';
 import { createWorldState, decodeSnapshot, type WorldState } from './WorldState';
 import type { RoomClient } from './RoomClient';
 
 /**
+ * Passos entre instantâneos. É o `SNAPSHOT_EVERY` de `HostSession`, visto daqui.
+ *
+ * Duplicado de propósito: quem simula decide a taxa e quem desenha precisa
+ * saber dela para se atrasar exatamente o necessário. Se um dia a taxa mudar,
+ * mudam os dois.
+ */
+const SNAPSHOT_INTERVAL = 4;
+
+/**
  * Atraso de desenho, em passos.
  *
- * Seis passos são 100 ms — uma vez e meia o intervalo entre instantâneos. A folga
- * de meio intervalo é o que absorve o jitter: com exatamente um intervalo, todo
- * pacote que atrasasse um milissegundo deixaria o cliente sem o próximo ponto
- * para onde ir, e ele extrapolaria.
+ * ⚠️ **Um intervalo exato, e não mais.** Era seis — uma vez e meia o intervalo,
+ * pensando em folga para o jitter —, e o resultado era o oposto do pretendido:
+ * com dois instantâneos em mão, o mais antigo está `SNAPSHOT_INTERVAL` passos
+ * atrás do mais novo, então um alvo seis passos atrás cai **antes do primeiro
+ * dos dois**. O fator de interpolação vivia grampeado em zero, a pose ficava
+ * congelada no instantâneo anterior e só saltava quando chegava o seguinte. Ou
+ * seja: o mundo inteiro do guest — o casco dele, o convés sob os pés dele e a
+ * câmera junto — andava a quinze quadros por segundo, aos trancos, num jogo que
+ * desenhava a cento e quarenta e quatro.
+ *
+ * Com um intervalo exato, o relógio de desenho entra em `from` no instante em
+ * que o par é montado e chega a `to` bem quando o próximo par chega. A folga de
+ * jitter não vem mais de atrasar o desenho: vem do grampo em 1, que **congela**
+ * na última pose conhecida enquanto o pacote atrasado não chega, em vez de
+ * extrapolar. Congelar por vinte milissegundos não se vê; extrapolar, sim.
  */
-const INTERP_DELAY = 6;
+const INTERP_DELAY = SNAPSHOT_INTERVAL;
+
+// A aritmética do relógio de desenho mora em `renderClock`, onde ela pode ser
+// provada sem arrastar Three.js e o `Match` para dentro de um teste.
 
 /** Um lote de entrada a cada dois passos: 30 mensagens por segundo. */
 const SEND_EVERY = 2;
@@ -54,6 +78,17 @@ const SEND_EVERY = 2;
 /** Faixa saudável da fila do host. Ver `adjustLead`. */
 const DEPTH_MIN = 2;
 const DEPTH_MAX = 4;
+
+/**
+ * Limites do avanço, em passos.
+ *
+ * O piso não é zero porque um avanço nulo significa carimbar o comando com o
+ * tick que o host já consumiu — ele nasceria descartado. O teto existe porque
+ * avanço é latência de comando: vinte e quatro passos são 400 ms entre a mão e o
+ * convés, e daí em diante o problema já não é de sincronia, é de conexão.
+ */
+const LEAD_MIN = 3;
+const LEAD_MAX = 24;
 
 /**
  * Intervalo entre ajustes do avanço, em passos. Meio segundo.
@@ -105,6 +140,17 @@ export class GuestSession {
    */
   private from = createWorldState();
   private to = createWorldState();
+  /**
+   * O terceiro, onde todo instantâneo é lido antes de valer.
+   *
+   * Existe porque a decisão de aceitar um instantâneo depende do que vem dentro
+   * dele: o tick só se conhece depois de decodificar. Decodificando direto sobre
+   * o `from` — que era o que se fazia —, um pacote que chegasse fora de ordem
+   * destruía a base da interpolação **antes** de ser recusado, e o navio passava
+   * a ser desenhado entre uma pose velha e a atual. Um terceiro buffer custa
+   * alguns quilobytes uma vez na vida e fecha a porta inteira.
+   */
+  private spare = createWorldState();
   private hasFrom = false;
   private hasTo = false;
 
@@ -126,6 +172,17 @@ export class GuestSession {
    * Ver `syncClock`.
    */
   private localTick = 0;
+
+  /**
+   * O relógio de **desenho**, em passos fracionários.
+   *
+   * Anda sozinho, um por passo, e o instantâneo só o corrige — a mesma regra de
+   * `localTick`, e pelo mesmo motivo: derivado de `hostTick`, ele ficaria parado
+   * três passos e pularia quatro, que é exatamente o tranco que este arquivo
+   * existe para não ter. É fracionário porque é dele que sai o fator de
+   * interpolação entre os dois instantâneos. Ver `advanceRenderClock`.
+   */
+  private renderClock = 0;
 
   /** Quanto o corpo local corre à frente do host, em passos. */
   lead = 4;
@@ -170,6 +227,7 @@ export class GuestSession {
     this.hasTo = false;
     this.hostTick = 0;
     this.localTick = 0;
+    this.renderClock = 0;
     this.lead = 4;
     this.visualOffset.set(0, 0, 0);
     this.releaseHistory(Number.POSITIVE_INFINITY);
@@ -179,31 +237,36 @@ export class GuestSession {
 
   /** Um instantâneo chegou. */
   onFrame(frame: ArrayBuffer): void {
-    // Troca de papéis entre os dois buffers: o "para onde" vira o "de onde".
-    // Copiar campo a campo custaria mais do que uma partida inteira de rede.
-    const incoming = this.hasTo ? this.from : this.to;
-    const header = decodeSnapshot(frame, incoming);
+    // Lido no reserva, sempre. Ver a nota em `spare`.
+    const header = decodeSnapshot(frame, this.spare);
     if (!header) return;
 
-    // Instantâneo fora de ordem: a rede entregou um pacote velho depois de um
+    // Fora de ordem ou repetido: a rede entregou um pacote velho depois de um
     // novo. Aplicá-lo faria o mundo andar para trás.
-    if (this.hasTo && header.tick <= this.to.tick && this.hasFrom) return;
+    if (this.hasTo && header.tick <= this.to.tick) return;
 
+    // Rodízio de três, por troca de referência: copiar o mundo campo a campo
+    // quinze vezes por segundo seria trabalho por nada. O que sai de circulação
+    // é o `from` antigo — ou o `to` antigo, enquanto ainda não há um par.
+    const freed = this.hasTo ? this.from : this.to;
     if (this.hasTo) {
-      // `incoming` era o `from`; agora os dois trocam de papel.
-      this.swap();
+      this.from = this.to;
       this.hasFrom = true;
     }
+    this.to = this.spare;
+    this.spare = freed;
+
     this.hasTo = true;
     this.hostTick = this.to.tick;
     this.depth = this.to.bufferDepth;
     this.stalled = false;
 
-    // Primeiro instantâneo: o avanço nasce medido, e o relógio já nasce alinhado
-    // a ele. Ver `estimateLead`.
+    // Primeiro instantâneo: o avanço nasce medido, e os dois relógios já nascem
+    // alinhados a ele. Ver `estimateLead` e `advanceRenderClock`.
     if (this.localTick === 0) {
       this.lead = this.estimateLead();
       this.localTick = this.hostTick + this.lead;
+      this.renderClock = this.hostTick - INTERP_DELAY;
     } else {
       this.syncClock();
     }
@@ -251,10 +314,21 @@ export class GuestSession {
   fixedUpdate(frame: InputFrame): void {
     if (!this.hasTo) return;
 
+    this.advanceRenderClock();
     this.applyWorld();
     this.rememberPrediction(frame.tick);
     this.queueOutgoing(frame);
     this.adjustLead();
+  }
+
+  /**
+   * Anda o relógio de desenho um passo, perseguindo o instantâneo mais recente.
+   *
+   * O alvo é `hostTick − INTERP_DELAY`, que é onde a pose está pronta para ser
+   * interpolada — um instantâneo atrás do mais novo, com o outro já em mão.
+   */
+  private advanceRenderClock(): void {
+    this.renderClock = advanceRenderClock(this.renderClock, this.hostTick - INTERP_DELAY);
   }
 
   /**
@@ -310,9 +384,10 @@ export class GuestSession {
    * antes de existir rede, para a tela de 144 Hz não ver a simulação de 60.
    */
   private applyWorld(): void {
-    const renderTick = this.hostTick - INTERP_DELAY;
-    const span = this.hasFrom ? this.to.tick - this.from.tick : 0;
-    const t = span > 0 ? Math.max(0, Math.min(1, (renderTick - this.from.tick) / span)) : 1;
+    // Sem par ainda: só há uma pose, e ela é a de agora.
+    const t = this.hasFrom
+      ? interpolationFactor(this.renderClock, this.from.tick, this.to.tick)
+      : 1;
 
     for (let local = 0; local < 2; local++) {
       // ⚠️ **Os índices se invertem aqui, e é a linha mais importante do arquivo.**
@@ -533,35 +608,53 @@ export class GuestSession {
   /**
    * O avanço inicial, a partir do tempo de ida e volta já medido.
    *
-   * Sem isto o avanço começava em quatro passos e subia **um a cada dois
-   * segundos** até a fila do host ficar saudável. Numa conexão de 150 ms isso são
-   * uns vinte segundos em que o comando chega tarde e o host repete o último —
-   * ou seja, os vinte primeiros segundos de todo duelo em rede seriam um
-   * adversário emperrado.
+   * ## A conta é a ida e volta **inteira**, e não a metade
    *
-   * A conta é a do plano: metade da ida e volta (o caminho de ida é o que
-   * interessa) convertida em passos, mais dois de folga para o jitter. O ajuste
-   * fino continua existindo para a deriva; o que ele não precisa mais fazer é a
-   * descoberta.
+   * Era metade, com o raciocínio de que "só o caminho de ida interessa", e a
+   * conta está errada por um fator de dois. O relógio contra o qual o guest se
+   * carimba é `hostTick`, e `hostTick` é o número que veio **dentro** de um
+   * instantâneo: quando ele chega aqui, o host já andou meia volta além dele. O
+   * comando carimbado agora ainda vai levar a outra meia volta para chegar lá.
+   * Somadas, é a volta inteira que separa o `hostTick` que se conhece do
+   * instante em que o comando será consumido.
+   *
+   * Com metade, o comando chegava sistematicamente atrasado e era **descartado**
+   * — `InputBuffer.push` recusa tick que já passou. O host então repetia o
+   * último quadro conhecido: os `pressed` sumiam (interagir, atirar e pular
+   * simplesmente não aconteciam), o `held` continuava valendo e a posição
+   * autoritativa se afastava da prevista até estourar `ERROR_SNAP`. O que o
+   * jogador via era um marujo que anda mas não obedece, e que a cada segundo é
+   * puxado de volta para onde estava.
+   *
+   * O jitter entra somado porque ele é assimétrico no que importa: o pacote que
+   * chega adiantado só engorda a fila, o que chega atrasado é perdido. E a folga
+   * de quatro passos cobre a granularidade do instantâneo — ele sai a cada
+   * quatro passos, então o `hostTick` que se lê pode já ter até um intervalo
+   * inteiro de idade além da rede.
    */
   private estimateLead(): number {
-    const oneWayMs = this.client.rtt / 2;
-    const ticks = Math.ceil(oneWayMs / (FIXED_TIMESTEP * 1000));
-    return Math.max(4, Math.min(ticks + 2, 20));
+    const stepMs = FIXED_TIMESTEP * 1000;
+    const ticks = Math.ceil((this.client.rtt + this.client.jitter) / stepMs);
+    return Math.max(LEAD_MIN, Math.min(ticks + SNAPSHOT_INTERVAL, LEAD_MAX));
   }
 
+  /**
+   * Ajusta o quanto o corpo corre à frente, pela fila do host.
+   *
+   * Fila vazia significa entrada chegando tarde: adiantar mais. Fila cheia
+   * significa entrada chegando cedo demais e envelhecendo na espera, o que é
+   * latência de comando pura: recuar. A assimetria é de propósito — a fila
+   * **zerada** sobe dois de uma vez, porque ali já se está perdendo comando, e
+   * perder comando é muito pior que jogar com trinta milissegundos a mais de
+   * atraso. Para baixo, sempre de um em um.
+   */
   private adjustLead(): void {
     this.leadTimer++;
     if (this.leadTimer < LEAD_ADJUST_EVERY) return;
     this.leadTimer = 0;
 
-    if (this.depth < DEPTH_MIN) this.lead = Math.min(this.lead + 1, 20);
-    else if (this.depth > DEPTH_MAX) this.lead = Math.max(this.lead - 1, 2);
-  }
-
-  private swap(): void {
-    const previous = this.from;
-    this.from = this.to;
-    this.to = previous;
+    if (this.depth === 0) this.lead = Math.min(this.lead + 2, LEAD_MAX);
+    else if (this.depth < DEPTH_MIN) this.lead = Math.min(this.lead + 1, LEAD_MAX);
+    else if (this.depth > DEPTH_MAX) this.lead = Math.max(this.lead - 1, LEAD_MIN);
   }
 }

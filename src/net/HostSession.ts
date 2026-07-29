@@ -97,6 +97,10 @@ export class HostSession {
       }),
     );
 
+    // A fila de eventos é esvaziada **aqui**, e só aqui: ela existe justamente
+    // para acumular entre um instantâneo e o próximo. Ver `Match.netEvents`.
+    this.match.netEvents.length = 0;
+
     // O resultado sobe uma vez só, pelo lobby: é ele que encerra a sala dos dois
     // lados. O instantâneo carrega a mesma notícia para o caso de a mensagem de
     // lobby chegar depois — quem vê primeiro encerra.

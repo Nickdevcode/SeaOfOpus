@@ -23,6 +23,13 @@ import {
 
 import { settings, type QualitySettings } from './Settings';
 
+/**
+ * Teto de pixels desenhados por quadro, antes do `renderScale` do preset.
+ *
+ * 2560×1440 ≈ 3,7 milhões. Ver `pixelRatioFor` para o porquê de existir um teto.
+ */
+const MAX_DRAWN_PIXELS = 2560 * 1440;
+
 export class Renderer {
   readonly webgl: THREE.WebGLRenderer;
   readonly canvas: HTMLCanvasElement;
@@ -94,7 +101,7 @@ export class Renderer {
         decay: 0.93,
         weight: 0.4,
         exposure: 0.55,
-        samples: 48,
+        samples: quality.godRaySamples,
         clampMax: 1,
         kernelSize: KernelSize.SMALL,
       });
@@ -148,8 +155,7 @@ export class Renderer {
 
   applyQuality(quality: QualitySettings): void {
     this.webgl.shadowMap.enabled = quality.shadowMapSize > 0;
-    const pixelRatio = Math.min(window.devicePixelRatio, 2) * quality.renderScale;
-    this.webgl.setPixelRatio(pixelRatio);
+    this.webgl.setPixelRatio(this.pixelRatioFor(quality));
 
     // Bloom, god rays e SMAA são decididos na construção dos efeitos, então
     // trocar de preset em tempo real exige remontar a cadeia. Só vale a pena
@@ -162,10 +168,44 @@ export class Renderer {
     this.resize();
   }
 
+  /**
+   * Quantos pixels reais desenhar por pixel de CSS.
+   *
+   * ## Por que há um orçamento, e não só o `devicePixelRatio`
+   *
+   * Porque o custo de tudo que este renderizador faz — oceano, sombras, bloom,
+   * god rays, SMAA — é proporcional ao **número de pixels**, e esse número
+   * cresce com o quadrado da razão. Uma tela de notebook 1440×900 com razão 2
+   * são 5,2 milhões de pixels por quadro; a mesma cena num monitor 1080p de
+   * mesa são 2,1 milhões. A máquina do notebook é a mais fraca das duas e estava
+   * recebendo duas vezes e meia o trabalho, e o jogador não tinha como saber:
+   * o menu de qualidade não fala de resolução, fala de sombra e reflexo.
+   *
+   * O teto é o de uma tela 1440p. Acima dele a razão é reduzida até caber, o que
+   * na prática só acontece em telas HiDPI e 4K — exatamente onde a densidade
+   * sobrando é a que menos se enxerga. Abaixo, nada muda.
+   *
+   * `renderScale` continua entrando por cima: ele é a escolha do preset, este
+   * teto é o limite físico. O preset Baixo num 4K quer os dois.
+   */
+  private pixelRatioFor(quality: QualitySettings): number {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const requested = Math.min(window.devicePixelRatio || 1, 2) * quality.renderScale;
+
+    const cssPixels = Math.max(width * height, 1);
+    const budgeted = Math.sqrt(MAX_DRAWN_PIXELS / cssPixels);
+    return Math.max(0.5, Math.min(requested, budgeted));
+  }
+
   resize(): void {
     const width = window.innerWidth;
     const height = window.innerHeight;
 
+    // A razão é reavaliada aqui porque ela depende do tamanho da janela: quem
+    // arrasta o jogo de um monitor 4K para um 1080p (ou só redimensiona a aba)
+    // muda o orçamento, e sem isto continuaria com a razão do tamanho anterior.
+    this.webgl.setPixelRatio(this.pixelRatioFor(settings.quality));
     this.webgl.setSize(width, height, false);
     this.composer?.setSize(width, height);
 

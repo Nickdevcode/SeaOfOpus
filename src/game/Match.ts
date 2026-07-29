@@ -135,6 +135,9 @@ export interface MatchListener {
 /** Lista vazia de navios, para o passo do guest. Ver `fixedUpdateRemote`. */
 const EMPTY_SHIPS: readonly Ship[] = [];
 
+/** Teto da fila de eventos à espera de instantâneo. Ver `collectNetEvents`. */
+const MAX_NET_EVENTS = 64;
+
 const _muzzleDirection = new THREE.Vector3();
 const _impactNormal = new THREE.Vector3();
 const _jetPosition = new THREE.Vector3();
@@ -158,6 +161,25 @@ export class Match {
    * O que aconteceu neste passo. Drenado em `update`. Ver `MatchEvents`.
    */
   readonly events: MatchEvent[] = [];
+
+  /**
+   * Os eventos que ainda não foram pelo fio, quando este é o lado que simula.
+   *
+   * ⚠️ **Existe porque os dois relógios não batem, e isso custou o duelo em rede
+   * inteiro.** `events` é do **quadro**: `drainEvents` o esvazia em toda chamada
+   * de `update`, que roda uma vez por quadro do monitor. O instantâneo, ao
+   * contrário, sai a cada **quatro passos**. A 60 fps são quatro esvaziamentos
+   * para cada instantâneo, e o instantâneo só encontrava na lista o que tinha
+   * acontecido depois do último deles — três de cada quatro tiros, respingos e
+   * impactos nunca chegavam ao outro lado. Como é do evento de tiro que nasce a
+   * bala do guest, o efeito era um adversário que atirava sem bala, sem estrondo
+   * e sem fumaça, três vezes em cada quatro.
+   *
+   * Esta lista é do **instantâneo**: quem a esvazia é `HostSession`, depois de
+   * escrevê-la no fio. Guardar a mesma referência nas duas é seguro — todo vetor
+   * que entra num evento já é clonado por quem o cria.
+   */
+  readonly netEvents: MatchEvent[] = [];
 
   readonly assets: ShipAssets;
   readonly playerShip: Ship;
@@ -330,6 +352,7 @@ export class Match {
     this.cannonballs.clear();
     this.effects.clear();
     this.events.length = 0;
+    this.netEvents.length = 0;
     this.ai?.reset();
     this.tick = 0;
 
@@ -355,6 +378,11 @@ export class Match {
 
   fixedUpdate(dt: number, inputs: MatchInputs): void {
     const waves = this.environment.waveField;
+    // Onde a lista está **antes** deste passo. O que for empilhado daqui para a
+    // frente é deste passo, e é o que precisa ser copiado para `netEvents` — ver
+    // a nota lá. Ler o comprimento em vez de zerar a lista mantém intacto o que
+    // um passo anterior do mesmo quadro deixou para o `drainEvents` desenhar.
+    const eventsBefore = this.events.length;
     this.environment.fixedUpdate(dt);
 
     // A pose das peças móveis antes que alguém mire ou gire a roda. Ver
@@ -399,6 +427,23 @@ export class Match {
 
     this.countNewBreaches();
     this.checkOutcome();
+
+    if (this.role === 'host') this.collectNetEvents(eventsBefore);
+  }
+
+  /**
+   * Copia os eventos deste passo para a fila do instantâneo.
+   *
+   * O teto é uma rede de segurança, não um orçamento: `HostSession` esvazia a
+   * fila a cada quatro passos, então ela nunca passa de uma dúzia num duelo
+   * saudável. Se um dia alguém parar de esvaziá-la, o que se quer é um evento
+   * antigo perdido, e não memória crescendo até a aba morrer.
+   */
+  private collectNetEvents(from: number): void {
+    for (let i = from; i < this.events.length; i++) {
+      if (this.netEvents.length >= MAX_NET_EVENTS) return;
+      this.netEvents.push(this.events[i]!);
+    }
   }
 
   /**

@@ -333,7 +333,11 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
     );
   }
 
-  writeEvents(w, match.events);
+  // `netEvents`, e **não** `events`: a segunda é esvaziada uma vez por quadro
+  // pelo desenho, e o instantâneo sai a cada quatro passos. Ver a nota em
+  // `Match.netEvents` — é a diferença entre o guest ver todos os tiros e ver um
+  // em cada quatro.
+  writeEvents(w, match.netEvents);
 
   return snapshotBuffer.slice(0, w.offset);
 }
@@ -346,10 +350,12 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
  * as balas, que nascem do evento de tiro.
  */
 function writeEvents(w: Writer, events: readonly MatchEvent[]): void {
-  // O teto protege o buffer num passo excepcional (dois bordos cheios num tique
-  // com abalroamento). Perder o vigésimo estrondo de um instante desses não é
-  // perda que alguém note; estourar o buffer derruba a partida.
-  const count = Math.min(events.length, 24);
+  // O teto protege o buffer num intervalo excepcional — quatro passos com dois
+  // bordos cheios e um abalroamento no meio. Trinta e dois eventos são uns 600
+  // bytes num quadro que raramente passa de 900, então a folga continua enorme;
+  // perder o trigésimo terceiro estrondo de um instante desses não é perda que
+  // alguém note, e estourar o buffer derruba a partida.
+  const count = Math.min(events.length, 32);
   w.u8(count);
 
   for (let i = 0; i < count; i++) {

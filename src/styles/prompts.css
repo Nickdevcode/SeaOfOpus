@@ -226,3 +226,53 @@
     display: none;
   }
 }
+
+/* --- ponteiro solto ---------------------------------------------------------- */
+
+/**
+ * O aviso de que a câmera espera um clique.
+ *
+ * Fica na base da tela, longe do centro: ele aparece **enquanto se joga**, e um
+ * cartaz no meio da vista atrapalharia justamente quem já sabe do que se trata e
+ * está prestes a clicar. A pulsação lenta é o que o distingue do resto do HUD,
+ * que é todo estático — o olho encontra o que se move sem que ele precise ser
+ * grande.
+ */
+.prompts__resume {
+  position: absolute;
+  left: 50%;
+  bottom: 14%;
+  transform: translateX(-50%);
+  padding: var(--espaco-2) var(--espaco-4);
+  font-family: var(--fonte-versalete);
+  font-size: 0.86rem;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  color: var(--parchment);
+  background: var(--panel-deep);
+  border: 1px solid var(--brass-dark);
+  text-shadow: var(--sombra-texto);
+  animation: prompts-resume-pulse 2.4s ease-in-out infinite;
+}
+
+.prompts__resume[hidden] {
+  display: none;
+}
+
+@keyframes prompts-resume-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+/* Quem pediu menos movimento não recebe um cartaz piscando por dois minutos. */
+@media (prefers-reduced-motion: reduce) {
+  .prompts__resume {
+    animation: none;
+    opacity: 0.85;
+  }
+}

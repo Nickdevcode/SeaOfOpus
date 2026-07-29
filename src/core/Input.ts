@@ -248,11 +248,23 @@ export class Input {
   requestPointerLock(): void {
     const canvas = this.canvas;
     if (!canvas?.requestPointerLock) return;
+    // Já travado: pedir de novo não é erro, mas gasta uma promessa e um evento
+    // de `pointerlockchange` que reinicia a carência de `lockSettleFrames` — e
+    // aí o primeiro movimento depois de cada clique some.
+    if (document.pointerLockElement === canvas) return;
 
+    // As duas chamadas podem ser recusadas, e a recusa é normal: o navegador
+    // impõe uma carência de pouco mais de um segundo depois de o jogador sair do
+    // lock com `Esc`. Uma promessa rejeitada sem `catch` vira um erro vermelho no
+    // console a cada clique dentro dessa janela, o que faz procurar defeito onde
+    // não há — quem devolve o ponteiro é o clique seguinte.
     const request = canvas.requestPointerLock({ unadjustedMovement: true }) as
       | Promise<void>
       | undefined;
-    request?.catch(() => canvas.requestPointerLock());
+    request?.catch(() => {
+      const fallback = canvas.requestPointerLock() as Promise<void> | undefined;
+      fallback?.catch(() => {});
+    });
   }
 
   exitPointerLock(): void {

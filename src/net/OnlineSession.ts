@@ -19,6 +19,9 @@ import { HostSession } from './HostSession';
 import { RoomClient, measurePerformance } from './RoomClient';
 import type { OnlinePhase, OnlineViewState } from '../ui/OnlineMenu';
 
+/** O quadro de "minha janela saiu de foco". Um byte, montado uma vez. */
+const STALL_FRAME = new Uint8Array([MessageType.Stall]).buffer;
+
 /** O que o jogo precisa saber quando o duelo começa. */
 export interface MatchConfig {
   seed: number;
@@ -55,7 +58,29 @@ export class OnlineSession {
   constructor(
     private readonly serverUrl: string | undefined,
     private readonly match: Match,
-  ) {}
+  ) {
+    // Ver `announceStall`. O ouvinte é do documento e não do jogo: ele precisa
+    // disparar justamente quando o laço de quadros para.
+    document.addEventListener('visibilitychange', () => this.announceStall());
+  }
+
+  /**
+   * Avisa o outro lado quando a janela de quem simula sai de foco.
+   *
+   * `requestAnimationFrame` é congelado numa aba em segundo plano, e com ele
+   * param a física, os instantâneos e tudo o mais. Do lado de lá isso é
+   * indistinguível de uma queda de rede: o mundo simplesmente para. O quadro de
+   * `Stall` é a diferença entre "o adversário minimizou o jogo" e "a partida
+   * quebrou" — e é a última coisa que este lado consegue mandar, porque o evento
+   * de visibilidade ainda roda quando o laço já não roda.
+   *
+   * Só o host manda: o guest que sai de foco não interrompe simulação nenhuma.
+   */
+  private announceStall(): void {
+    if (!this.host || !this.client) return;
+    if (document.visibilityState !== 'hidden') return;
+    this.client.sendFrame(STALL_FRAME);
+  }
 
   get available(): boolean {
     return Boolean(this.serverUrl);
@@ -78,6 +103,8 @@ export class OnlineSession {
     starves: number;
     error: number;
     lead: number;
+    /** `true` quando o host avisou que a janela dele saiu de foco. */
+    stalled: boolean;
   } | null {
     if (!this.client) return null;
     return {
@@ -87,6 +114,7 @@ export class OnlineSession {
       starves: this.host?.starves ?? 0,
       error: this.guest?.predictionError ?? 0,
       lead: this.guest?.lead ?? 0,
+      stalled: this.guest?.stalled ?? false,
     };
   }
 
@@ -200,6 +228,9 @@ export class OnlineSession {
       case 'peer':
         this.role = message.role;
         this.set({ phase: 'ready', opponent: message.nickname });
+        // Uma medida de latência fresca antes de começar: o duelo arranca daqui
+        // a menos de um segundo, e é dela que sai o avanço inicial do guest.
+        this.client?.measureLatency();
         // Assets já estão em memória: o navio e o corpo são construídos no boot.
         this.client?.sendLobby({ t: 'ready' });
         return;

@@ -26,6 +26,7 @@
 
 import { createInputFrame, InputBit, type InputFrame } from '../src/core/InputFrame';
 import { InputBuffer } from '../src/net/InputBuffer';
+import { advanceRenderClock, interpolationFactor } from '../src/net/renderClock';
 import { decodeInput, encodeInput } from '../src/net/snapshotCodec';
 
 export interface TestCase {
@@ -288,6 +289,138 @@ export function runNetClockTests(): TestReport {
     passou: politicaOk,
   });
 
+  cases.push(...renderClockCases());
+
   const falhas = cases.filter((c) => !c.passou).length;
   return { passou: falhas === 0, total: cases.length, falhas, cases };
+}
+
+// --- o relógio de desenho ------------------------------------------------------
+
+/**
+ * Simula o desenho de dez segundos e devolve o que se vê da pose.
+ *
+ * O que interessa medir não é o relógio em si, é o **fator de interpolação**:
+ * ele é o que decide a pose desenhada, e um fator que não anda é uma imagem que
+ * não anda. Daí as duas medidas: quantos passos o fator ficou parado (a imagem
+ * congelada) e o maior salto que ele deu de um passo para o outro (o tranco).
+ *
+ * @param delay atraso de desenho em passos, contado do instantâneo mais novo.
+ */
+function simulateRender(delay: number): { congelados: number; maiorSalto: number; total: number } {
+  const TICKS = 600;
+  const WARMUP = 60;
+
+  let clock = 0;
+  let fromTick = 0;
+  let toTick = 0;
+  let hostTick = 0;
+  let temPar = false;
+  let anterior = -1;
+
+  let congelados = 0;
+  let maiorSalto = 0;
+  let total = 0;
+
+  for (let step = 0; step < TICKS; step++) {
+    hostTick++;
+
+    // O host manda um instantâneo a cada quatro passos; aqui ele chega no mesmo
+    // passo, porque o que está sob teste é a interpolação e não a rede.
+    if (hostTick % SNAPSHOT_EVERY === 0) {
+      if (toTick > 0) {
+        fromTick = toTick;
+        temPar = true;
+      }
+      toTick = hostTick;
+      if (clock === 0) clock = hostTick - delay;
+    }
+    if (toTick === 0) continue;
+
+    clock = advanceRenderClock(clock, toTick - delay);
+    const t = temPar ? interpolationFactor(clock, fromTick, toTick) : 1;
+
+    if (step < WARMUP) {
+      anterior = t;
+      continue;
+    }
+
+    total++;
+    // O fator anda para trás quando o par troca (o `to` vira `from` e o fator
+    // volta ao começo do novo intervalo), e isso é normal — o que se conta como
+    // congelamento é ele não sair do lugar de um passo para o outro.
+    if (Math.abs(t - anterior) < 1e-9) congelados++;
+    else if (t > anterior) maiorSalto = Math.max(maiorSalto, t - anterior);
+    anterior = t;
+  }
+
+  return { congelados, maiorSalto, total };
+}
+
+function renderClockCases(): TestCase[] {
+  const cases: TestCase[] = [];
+
+  // --- 5. o desenho anda a cada passo -----------------------------------------
+  // O defeito que este caso guarda: com o atraso maior que o intervalo entre
+  // instantâneos, o alvo do desenho cai **antes** do mais velho dos dois que se
+  // tem em mão, o fator vive grampeado em zero e a pose só muda quando chega
+  // pacote. O mundo do cliente passa a andar a quinze quadros por segundo.
+  const corrigido = simulateRender(SNAPSHOT_EVERY);
+  const taxaCongelada = corrigido.congelados / corrigido.total;
+  cases.push({
+    nome: 'desenho · a pose anda em todo passo',
+    medido: `${corrigido.congelados} passos parados em ${corrigido.total} (${(taxaCongelada * 100).toFixed(1)}%)`,
+    esperado: '< 5% — a imagem não congela entre instantâneos',
+    erro: taxaCongelada < 0.05 ? '—' : 'o mundo do cliente anda na taxa dos pacotes, aos trancos',
+    passou: taxaCongelada < 0.05,
+  });
+
+  // --- 6. o atraso antigo tem de falhar ----------------------------------------
+  //
+  // Mesma lógica do caso 2: se este passar, o teste parou de testar.
+  //
+  // O número que sai daqui é exatamente metade, e a conta explica o sintoma
+  // melhor que qualquer descrição: com o alvo dois passos antes do instantâneo
+  // mais velho, o relógio gasta os dois primeiros passos de cada intervalo
+  // **antes** do começo dele — fator grampeado em zero, imagem parada — e só nos
+  // dois últimos é que a pose anda, e ainda assim a um quarto da velocidade. O
+  // limiar é um quarto, e não a metade exata, para o caso não virar uma
+  // igualdade disfarçada que quebra ao primeiro ajuste na constante de correção.
+  const antigo = simulateRender(6);
+  const taxaAntiga = antigo.congelados / antigo.total;
+  cases.push({
+    nome: 'desenho · atraso de seis passos reproduz o bug',
+    medido: `${antigo.congelados} passos parados (${(taxaAntiga * 100).toFixed(1)}%)`,
+    esperado: '> 25% — ele tem mesmo de falhar',
+    erro: taxaAntiga > 0.25 ? '—' : 'o teste não está mais reproduzindo o defeito',
+    passou: taxaAntiga > 0.25,
+  });
+
+  // --- 7. e anda sem tranco ----------------------------------------------------
+  // Um passo de desenho vale no máximo 1,25 passos de simulação sobre um
+  // intervalo de quatro. Acima disso a correção deixou de ser dilatação e virou
+  // salto, que é o que ela existe para não ser.
+  const tetoSalto = (1 + 0.25) / SNAPSHOT_EVERY + 1e-6;
+  cases.push({
+    nome: 'desenho · a correção não dá salto',
+    medido: `maior avanço ${corrigido.maiorSalto.toFixed(4)} do intervalo`,
+    esperado: `≤ ${tetoSalto.toFixed(4)}`,
+    erro: corrigido.maiorSalto <= tetoSalto ? '—' : 'o relógio saltou em vez de dilatar',
+    passou: corrigido.maiorSalto <= tetoSalto,
+  });
+
+  // --- 8. o tempo nunca anda para trás ------------------------------------------
+  // Uma correção negativa maior que um passo desenharia o navio recuando. O
+  // limite de taxa existe para isso, e o teste o cobra no pior caso possível:
+  // um alvo bem atrás do relógio.
+  const recuo = advanceRenderClock(1000, 980);
+  cases.push({
+    nome: 'desenho · o relógio não volta atrás',
+    medido: `${(recuo - 1000).toFixed(3)} passo com o alvo 20 atrás`,
+    esperado: '> 0 — sempre para a frente',
+    erro: recuo > 1000 ? '—' : 'o mundo é desenhado recuando durante a correção',
+    passou: recuo > 1000,
+  });
+
+  return cases;
 }

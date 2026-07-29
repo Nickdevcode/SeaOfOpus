@@ -103,7 +103,15 @@ export class RoomClient {
     socket.onopen = () => {
       opened = true;
       this.sendLobby({ t: 'hello', v: PROTOCOL_VERSION, nickname, intent, perfScore });
-      this.pingTimer = setInterval(() => this.ping(), PING_INTERVAL_MS);
+      // A primeira medida sai **agora**, e não daqui a dois segundos.
+      //
+      // Com o `setInterval` sozinho, o duelo de quem entrava numa sala já cheia
+      // começava com `rtt` em zero — e é do `rtt` que sai o avanço inicial do
+      // guest (ver `GuestSession.estimateLead`). Avanço calculado sobre zero é
+      // avanço nenhum: os primeiros segundos de todo duelo eram jogados com o
+      // comando chegando atrasado ao host e sendo descartado.
+      this.measureLatency();
+      this.pingTimer = setInterval(() => this.measureLatency(), PING_INTERVAL_MS);
     };
 
     socket.onmessage = (event) => {
@@ -218,7 +226,15 @@ export class RoomClient {
     return `No room server at ${this.serverUrl}. Is it running?`;
   }
 
-  private ping(): void {
+  /**
+   * Dispara uma medida de ida e volta agora.
+   *
+   * Pública porque há um instante em que a medida vale muito mais do que na
+   * cadência normal: quando o adversário entra na sala. Dali a menos de um
+   * segundo o duelo começa, e é a medida mais fresca que decide com quanto
+   * avanço o guest nasce.
+   */
+  measureLatency(): void {
     if (!this.connected) return;
     this.pingSentAt = performance.now();
     this.sendLobby({ t: 'ping' });

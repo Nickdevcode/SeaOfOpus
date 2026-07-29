@@ -19,6 +19,7 @@ import { InputSampler } from './core/InputSampler';
 import { createInputFrame, type InputFrame } from './core/InputFrame';
 import { Renderer } from './core/Renderer';
 import {
+  QUALITY_ORDER,
   settings,
   type PlayerPreferences,
   type QualityPreset,
@@ -163,9 +164,19 @@ online.onOver((won, reason) => {
   void reason;
 });
 
-// Clicar na cena pede o ponteiro — mas só quando se está de fato jogando, senão o
-// menu perderia o cursor no primeiro clique de botão.
-renderer.canvas.addEventListener('click', () => {
+/**
+ * Clicar em qualquer lugar pede o ponteiro — mas só quando se está de fato
+ * jogando, senão o menu perderia o cursor no primeiro clique de botão.
+ *
+ * O ouvinte fica na **janela**, e não no canvas, e a diferença já custou uma
+ * sessão inteira de teste: as camadas de interface cobrem a tela toda, e basta
+ * uma delas esquecer o `pointer-events: none` para o canvas parar de receber
+ * clique — o jogo continua desenhando, o teclado continua andando, e só a câmera
+ * do mouse morre, que é o sintoma mais difícil de ligar à causa. Na janela, o
+ * clique chega por borbulhamento venha ele de onde vier. (A camada culpada era o
+ * HUD; ver a nota em `hud.css`.)
+ */
+window.addEventListener('click', () => {
   if (!menu.open && match.running) input.requestPointerLock();
 });
 
@@ -361,7 +372,7 @@ function updateDebug(dt: number): void {
     ...(net
       ? [
           '',
-          `net ${match.role}  ·  rtt ${net.rtt.toFixed(0)} ms  ·  jitter ${net.jitter.toFixed(0)} ms`,
+          `net ${match.role}  ·  rtt ${net.rtt.toFixed(0)} ms  ·  jitter ${net.jitter.toFixed(0)} ms${net.stalled ? '  ·  HOST IN BACKGROUND' : ''}`,
           `queue ${net.depth} frames  ·  starves ${net.starves}  ·  lead ${net.lead}  ·  prediction ${(net.error * 100).toFixed(1)} cm`,
         ]
       : []),
@@ -375,6 +386,72 @@ function updateDebug(dt: number): void {
     `preset ${settings.preferences.quality}  ·  ${renderer.getGpuInfo()}`,
     input.gamepad.connected ? `gamepad: ${input.gamepad.deviceName}` : 'gamepad: none',
   ].join('\n');
+}
+
+// --- guarda de desempenho ----------------------------------------------------
+
+/**
+ * O preset desce sozinho quando a máquina não sustenta o que ela pediu.
+ *
+ * A detecção por nome de GPU (ver `detectPreset`) acerta a ordem de grandeza e
+ * erra o resto: ela não sabe a resolução do monitor, não sabe se há um navegador
+ * com quarenta abas do lado, e não sabe que este jogador está **hospedando** um
+ * duelo, o que põe a física de dois cascos na mesma máquina. Quando erra, o
+ * jogador fica com um jogo a vinte quadros e nenhuma pista de que a solução está
+ * a dois cliques de distância no menu.
+ *
+ * Três decisões que valem por si:
+ *
+ * - **Só desce.** Subir de volta ao primeiro trecho tranquilo daria um jogo que
+ *   oscila entre dois presets, e o pior momento de uma queda de quadros é o
+ *   combate, que é exatamente quando ela voltaria.
+ * - **Precisa de uma janela inteira abaixo do alvo.** Um engasgo de meio segundo
+ *   ao carregar uma textura não é uma máquina fraca; seis segundos seguidos são.
+ * - **Vale o que ficou gravado.** A escolha persiste, então quem abriu o jogo
+ *   numa máquina modesta já começa a próxima sessão no preset que funcionou.
+ */
+const AUTO_QUALITY_FPS = 40;
+const AUTO_QUALITY_WINDOW = 6;
+/** Carência depois de descer um degrau: dá tempo de o preset novo se assentar. */
+const AUTO_QUALITY_COOLDOWN = 10;
+
+let lowFrameRateTime = 0;
+let autoQualityCooldown = AUTO_QUALITY_COOLDOWN;
+
+function guardPerformance(dt: number): void {
+  // Só durante a partida: o menu tem órbita cinematográfica e transições, e é
+  // onde a taxa de quadros diz menos sobre o que a máquina aguenta jogando.
+  if (menu.open || !match.running) {
+    lowFrameRateTime = 0;
+    return;
+  }
+
+  if (autoQualityCooldown > 0) {
+    autoQualityCooldown -= dt;
+    return;
+  }
+
+  const index = QUALITY_ORDER.indexOf(settings.preferences.quality);
+  if (index <= 0) return;
+
+  if (engine.fps >= AUTO_QUALITY_FPS) {
+    // Decai em vez de zerar: uma máquina que oscila em volta do alvo ainda
+    // acumula, só que mais devagar. Zerar deixaria o caso mais comum de todos —
+    // o que passa de 40 de vez em quando — nunca disparar.
+    lowFrameRateTime = Math.max(0, lowFrameRateTime - dt);
+    return;
+  }
+
+  lowFrameRateTime += dt;
+  if (lowFrameRateTime < AUTO_QUALITY_WINDOW) return;
+
+  lowFrameRateTime = 0;
+  autoQualityCooldown = AUTO_QUALITY_COOLDOWN;
+  const next = QUALITY_ORDER[index - 1]!;
+  console.info(
+    `[sea-of-opus] ${engine.fps.toFixed(0)} fps sustained below ${AUTO_QUALITY_FPS}: quality lowered to "${next}".`,
+  );
+  settings.update({ quality: next });
 }
 
 // --- loop --------------------------------------------------------------------
@@ -485,6 +562,7 @@ engine.start({
     for (const ship of match.ships) {
       ship.model.setLanternIntensity(environment.dayNight.nightFactor);
     }
+    guardPerformance(dt);
     updateDebug(dt);
     input.endFrame();
   },

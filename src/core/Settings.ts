@@ -51,6 +51,17 @@ export interface QualitySettings {
   wakeResolution: number;
   bloom: boolean;
   godRays: boolean;
+  /**
+   * Amostras do raio de sol, por pixel.
+   *
+   * É o parâmetro mais caro da cadeia de pós-processamento: cada amostra é uma
+   * leitura de textura por pixel, e o passe roda em resolução cheia. A diferença
+   * entre 32 e 48 amostras é um bandeamento levíssimo nas franjas do sol —
+   * visível numa comparação lado a lado e em nenhuma outra situação —, e custa
+   * um terço do custo do efeito. Por isso o preset Alto ficou em 32 e só o Ultra
+   * paga os 48.
+   */
+  godRaySamples: number;
   /** Antialiasing por SMAA no composer. */
   smaa: boolean;
   /**
@@ -74,6 +85,7 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     wakeResolution: 256,
     bloom: false,
     godRays: false,
+    godRaySamples: 0,
     smaa: false,
     skyEnvironment: false,
     particleBudget: 24,
@@ -86,6 +98,7 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     wakeResolution: 512,
     bloom: true,
     godRays: false,
+    godRaySamples: 0,
     smaa: true,
     skyEnvironment: true,
     particleBudget: 48,
@@ -98,6 +111,7 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     wakeResolution: 512,
     bloom: true,
     godRays: true,
+    godRaySamples: 32,
     smaa: true,
     skyEnvironment: true,
     particleBudget: 96,
@@ -110,6 +124,7 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
     wakeResolution: 1024,
     bloom: true,
     godRays: true,
+    godRaySamples: 48,
     smaa: true,
     skyEnvironment: true,
     particleBudget: 160,

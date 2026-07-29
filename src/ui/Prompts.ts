@@ -45,6 +45,7 @@ export class Prompts {
   private readonly hints: HTMLDivElement;
   private readonly reticle: HTMLDivElement;
   private readonly status: HTMLDivElement;
+  private readonly resume: HTMLDivElement;
 
   private lastLabel = '';
   private lastKey = '';
@@ -82,7 +83,12 @@ export class Prompts {
     this.hints = document.createElement('div');
     this.hints.className = 'prompts__hints';
 
-    this.root.append(this.reticle, this.status, this.prompt, this.hints);
+    this.resume = document.createElement('div');
+    this.resume.className = 'prompts__resume';
+    this.resume.textContent = 'Click to look around';
+    this.resume.hidden = true;
+
+    this.root.append(this.reticle, this.status, this.prompt, this.hints, this.resume);
     parent.appendChild(this.root);
   }
 
@@ -90,6 +96,25 @@ export class Prompts {
     this.updateAction(interaction, input);
     this.updateStation(player, ship);
     this.updateHints(player, input);
+    this.updatePointerHint(input);
+  }
+
+  /**
+   * O aviso de que a câmera está solta.
+   *
+   * O navegador só entrega movimento de mouse cru para quem travou o ponteiro, e
+   * travar exige um clique — não há como fazê-lo pelo jogo quando a partida
+   * começa, porque o `start` chega do servidor e não de um gesto do jogador.
+   * Quem não sabe disso vê um jogo em que o WASD anda e a cabeça não vira, e a
+   * conclusão razoável é que o mouse não funciona. Uma linha resolve.
+   *
+   * Some no controle porque lá não há o que resolver: o analógico direito olha
+   * em volta sem ponteiro travado nenhum.
+   */
+  private updatePointerHint(input: Input): void {
+    const show = !input.pointerLocked && !input.usingGamepad;
+    if (this.resume.hidden === !show) return;
+    this.resume.hidden = !show;
   }
 
   /** Esconde tudo — usado ao voltar para o menu. */

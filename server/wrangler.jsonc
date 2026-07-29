@@ -41,10 +41,20 @@
   // De onde o jogo pode se conectar. Sem esta lista, qualquer página na internet
   // abre salas neste Worker e queima a cota de requests que é sua.
   //
-  // Em produção, troque pelo domínio real da hospedagem. As entradas de
-  // localhost são o `vite dev` e o `vite preview`.
+  // ⚠️ **Origem é `esquema://host[:porta]`, e nada mais** — sem barra no fim, sem
+  // caminho. `https://sopgame.vercel.app/` com a barra **não** casa com o que o
+  // navegador manda, e o efeito é uma recusa silenciosa que parece problema de
+  // rede. É a comparação de texto mais fácil de errar deste projeto.
+  //
+  // As três primeiras são o desenvolvimento local (`vite dev` e `vite preview`);
+  // a última é a publicação.
+  //
+  // As URLs de pré-visualização da Vercel (`sopgame-git-<branch>-….vercel.app`)
+  // não estão aqui de propósito: elas mudam a cada ramo e não dá para prever o
+  // texto. Quem precisar testar um preview com rede acrescenta a origem daquele
+  // deploy e publica de novo.
   "vars": {
-    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173"
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,https://sopgame.vercel.app"
   },
 
   "observability": { "enabled": true }

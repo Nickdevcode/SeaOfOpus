@@ -77,6 +77,14 @@ cursor está solto, é preciso uma tecla ou um clique).
 Num controle da Sony os rótulos saem no layout de lá: `✕ ○ □ △`, `L1/L2`, `Create` e
 `Options`. Os botões são os mesmos — só o que está gravado neles muda.
 
+> 🖱️ **No mouse, dê um clique na tela ao entrar na partida.** O navegador só
+> entrega movimento cru de mouse para quem *travou o ponteiro*, e travar exige um
+> gesto — não há como o jogo fazer isso sozinho quando a partida começa, ainda
+> mais em rede, onde o começo vem do servidor e não da sua mão. Enquanto o
+> ponteiro está solto, o jogo escreve **"Click to look around"** na base da tela.
+> Quem joga de controle nunca vê esse aviso: o analógico direito olha em volta
+> sem depender de trava nenhuma.
+
 | Ação | Teclado | Controle |
 |---|---|---|
 | Andar / correr / pular | `W A S D` · `Shift` · `Espaço` | Analógico esq. · `L3` · `A` |
@@ -937,9 +945,36 @@ src/
 ├── audio/      síntese de todo o som
 ├── shaders/    GLSL compartilhado (ruído, atmosfera, recorte de casco e de cabeça)
 ├── textures/   geração procedural de mapas
+├── net/        sessão de sala, relógios, codec binário e estado interpolado
 └── styles/     tokens de design e folhas por módulo
-tests/          balística, IA, avaria e locomoção, rodáveis no navegador
+server/         o Worker da sala: rotas, pareamento e o Durable Object do duelo
+shared/         o contrato entre os dois — tipos e funções puras, sem DOM nem Three
+tests/          balística, IA, avaria, locomoção, relógio de rede e determinismo
 ```
+
+---
+
+## ⚙️ Desempenho
+
+Há quatro presets no menu (Baixo, Médio, Alto, Ultra) e um palpite inicial pelo nome
+da GPU. Por cima deles, duas coisas acontecem sozinhas:
+
+- 🖥️ **Teto de resolução.** O custo de tudo que o renderizador faz cresce com o
+  **quadrado** da densidade de pixels, e a tela de notebook é justamente onde ela é
+  maior: 1440×900 com razão 2 são 5,2 milhões de pixels por quadro, contra 2,1
+  milhões de um monitor 1080p de mesa — a máquina mais fraca das duas recebendo duas
+  vezes e meia o trabalho. O teto é o de uma tela 1440p, e só morde em telas HiDPI e
+  4K, que é onde a densidade sobrando é a que menos se enxerga.
+- 📉 **O preset desce sozinho** se a taxa de quadros ficar seis segundos seguidos
+  abaixo de 40, e a escolha fica gravada. Só desce, nunca sobe: um preset que
+  oscilasse voltaria a subir no primeiro trecho calmo e cairia de novo no combate,
+  que é o pior momento possível para uma queda de quadros. O motivo de existir é
+  que hospedar um duelo põe a física de **dois** cascos na mesma máquina, e o
+  palpite pelo nome da GPU não sabe nada disso.
+
+Quem quiser mandar na própria máquina continua mandando: escolher um preset no menu
+manda no teto de detalhe, e a queda automática só age a partir do que estiver
+escolhido.
 
 ---
 
@@ -961,6 +996,12 @@ console.table(d.runDamageTests().cases);
 
 const l = await import('/tests/locomotion.ts');
 console.table(l.runLocomotionTests().cases);
+
+const n = await import('/tests/netclock.ts');
+console.table(n.runNetClockTests().cases);
+
+const s = await import('/tests/determinism.ts');
+console.table(s.runDeterminismTests().cases);
 ```
 
 **Balística** prova o caso limite: com arrasto zero a integração *tem* que reproduzir
@@ -1012,6 +1053,22 @@ jogador enxerga a si mesmo: que a câmera sobe exatamente o que o clipe sobe (e
 não um exagero afinado no olho), e que a dobra das pernas para andar de ré não
 oscila no strafe puro — ali o desvio fica cravado nos 90°, e sem histerese o
 corpo daria meia-volta a cada quadro.
+
+**Relógio de rede** é o único que roda **fora** do navegador também — ele não toca em
+Three.js. São dois relógios diferentes, e cada um já quebrou de um jeito próprio:
+
+- O de **comando**, que carimba a entrada. Ele tem de andar sozinho e ser apenas
+  corrigido pelo instantâneo; derivado dele, o carimbo ficava parado três passos e
+  pulava quatro, e três de cada quatro comandos morriam como duplicata.
+- O de **desenho**, que decide a pose mostrada entre dois instantâneos. Ele tem de
+  ficar **exatamente um intervalo** atrás do mais novo: mais que isso e o alvo cai
+  antes do mais velho dos dois que se tem em mão, a interpolação vive grampeada no
+  começo e o mundo inteiro do cliente passa a andar a 15 quadros por segundo,
+  independentemente de a que taxa ele desenhe.
+
+Cada um tem, ao lado do caso que prova o conserto, um caso que **reproduz o defeito**
+— o relógio velho continua no arquivo só para falhar. Se ele parar de falhar, o teste
+deixou de testar o que existe para testar, e é isso que o caso denuncia.
 
 ### Bancada de inspeção
 
@@ -1124,6 +1181,23 @@ E nada disso precisa de rollback, por uma razão que já estava no projeto muito
 antes de existir rede: **o jogador vive em coordenadas locais do navio**. O convés
 é um chão parado, e andar nele não depende de onda, vela nem leme.
 
+### O primeiro teste com gente de verdade, e os quatro defeitos que ele revelou
+
+Tudo acima já estava escrito e passando nos testes quando o duelo foi ao ar pela
+primeira vez com duas pessoas. Ele estava injogável, e por quatro motivos que só
+aparecem quando existe uma segunda máquina do outro lado do mundo:
+
+| O que se via | O que era |
+|---|---|
+| O mundo do convidado andando **aos trancos**, a ~15 Hz | O atraso de desenho era de seis passos, e os instantâneos vêm de quatro em quatro: o alvo caía **antes** do mais velho dos dois instantâneos em mão, e a interpolação vivia grampeada no começo. A pose só mudava quando chegava pacote |
+| O adversário **atirando sem bala**, sem estrondo e sem fumaça | A lista de eventos é esvaziada pelo desenho a cada quadro, e o instantâneo sai a cada quatro passos — três de cada quatro tiros, respingos e impactos nunca chegavam ao outro lado. E é do evento de tiro que nasce a bala do convidado |
+| O marujo **andando mas não obedecendo**, e puxado de volta a cada segundo | O avanço do relógio de comando era calculado com **metade** da ida e volta, quando a conta pede ela inteira: o `hostTick` que se lê já vem meia volta atrasado, e o comando ainda leva a outra meia para chegar. Ele nascia atrasado, era descartado, e a posição prevista se afastava até estourar o limite de correção |
+| Tudo isso **pior nos primeiros segundos** | A primeira medição de latência só saía dois segundos depois de conectar, então o duelo começava com ida e volta valendo zero — e um avanço calculado sobre zero é avanço nenhum |
+
+O quinto não chegou a se ver, mas estava lá: o instantâneo era decodificado **por
+cima** da base da interpolação antes de o tick ser conferido, então um pacote fora de
+ordem destruía essa base para depois ser recusado.
+
 ### Medindo
 
 `F3` abre um bloco `net` durante um duelo em rede. Os alvos:
@@ -1168,7 +1242,8 @@ sem isso, qualquer página da internet abre salas na sua conta.
 | Botão de online apagado | Falta `VITE_ROOM_SERVER` | Local: o `.env.development` existe? Publicado: refaça o build **sem cache** |
 | Preso em "Casting off" | Servidor de sala fora do ar | `npm run dev:server` |
 | "Room is full" | Já há dois na sala | Abra outra |
-| Duelo congela ao trocar de janela | O navegador desacelerou a janela de quem hospeda | Deixe as duas visíveis lado a lado |
+| Duelo congela ao trocar de janela | O navegador **congela** a janela de quem hospeda, e com ela a simulação inteira | Deixe as duas visíveis lado a lado. Quem hospeda avisa o outro lado ao sair de foco, e o `F3` do convidado passa a mostrar `HOST IN BACKGROUND` — é a diferença entre "o adversário minimizou" e "a partida quebrou" |
+| Câmera não gira no mouse (mas gira no controle) | O ponteiro não está travado | Clique uma vez na tela. Se o aviso **"Click to look around"** não sumir depois do clique, alguma camada de interface está comendo o clique: toda camada que cobre a tela sem ser clicável precisa de um `#ui-root > .classe { pointer-events: none }`, porque a regra genérica de `base.css` ganha delas por especificidade |
 
 ---
 

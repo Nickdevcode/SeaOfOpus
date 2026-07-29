@@ -28,9 +28,24 @@
 .hud {
   position: absolute;
   inset: 0;
-  /* Nunca recebe clique: o canvas precisa deles para o pointer lock. */
-  pointer-events: none;
   font-family: var(--fonte-corpo);
+}
+
+/**
+ * ⚠️ Qualificado pelo `#ui-root`, e **não** é estilo: é o que faz o mouse
+ * funcionar.
+ *
+ * `base.css` traz `#ui-root > * { pointer-events: auto }`, e um seletor com id
+ * ganha de `.hud` por especificidade. Sem esta linha, a camada do HUD — que é
+ * `inset: 0`, a tela inteira — passa a receber os cliques no instante em que ela
+ * aparece, que é o instante em que a partida começa. O canvas nunca vê o clique,
+ * `requestPointerLock` nunca é chamado, e o resultado é um jogo em que a câmera
+ * não responde ao mouse e só o controle funciona. As mesmas linhas existem em
+ * `prompts.css` e no `.debug-overlay` de `base.css`, pelo mesmo motivo: toda
+ * camada que cobre a tela sem ser clicável precisa se declarar aqui.
+ */
+#ui-root > .hud {
+  pointer-events: none;
 }
 
 .hud[hidden] {
