@@ -109,6 +109,23 @@ async function expect(socket, kind) {
   }
 }
 
+/**
+ * Um código de sala que quase certamente ninguém abriu.
+ *
+ * O alfabeto é o mesmo de `CODE_ALPHABET` — o servidor recusa qualquer coisa
+ * fora dele antes de instanciar sala nenhuma. Um milhão de combinações contra
+ * as poucas salas que existem num instante qualquer faz "quase certamente" ser
+ * bom o bastante para um teste.
+ */
+function unusedCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return code;
+}
+
 const send = (socket, message) => socket.send(JSON.stringify(message));
 const hello = (socket, nickname, intent, perfScore = 70) =>
   send(socket, { t: 'hello', v: PROTOCOL_VERSION, nickname, intent, perfScore });
@@ -255,7 +272,12 @@ await test('a sala por código pareia e retransmite quadro', async (keep) => {
 });
 
 await test('um código que ninguém abriu é recusado com motivo', async (keep) => {
-  const lost = open('/room/ZZZZ');
+  // ⚠️ Sorteado, e **não** um `ZZZZ` cravado. Este teste também roda contra o
+  // servidor publicado, onde as salas são globais e sobrevivem à corrida: um
+  // código fixo passa na primeira vez e reprova em todas as seguintes, porque a
+  // primeira o criou. Foi o que aconteceu — e o que o teste denunciou não foi o
+  // servidor, foi ele mesmo.
+  const lost = open(`/room/${unusedCode()}`);
   keep.push(lost);
   await opened(lost);
   hello(lost, 'Ana', 'join');
