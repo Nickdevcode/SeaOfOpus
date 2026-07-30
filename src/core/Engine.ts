@@ -1,55 +1,55 @@
 /**
- * Loop principal do jogo.
+ * The game's main loop.
  *
- * Física roda em passo fixo de 60 Hz com acumulador; render roda livre. Passo
- * fixo não é preciosismo: empuxo e molas Verlet ficam instáveis se o `dt`
- * varia, e o navio começa a tremer ou explodir quando o FPS oscila.
+ * Physics runs on a fixed 60 Hz step with an accumulator; rendering runs free. The
+ * fixed step is not fussiness: buoyancy and Verlet springs go unstable if `dt` varies,
+ * and the ship starts shaking or exploding when the FPS oscillates.
  *
- * O acumulador tem teto ("spiral of death guard"): se a aba ficou em segundo
- * plano por 10 s, o jogo não tenta simular 600 passos de uma vez.
+ * The accumulator has a ceiling (the "spiral of death guard"): if the tab spent 10 s
+ * in the background, the game does not try to simulate 600 steps at once.
  */
 
 export const FIXED_TIMESTEP = 1 / 60;
-/** Máximo de tempo simulado por frame, em segundos. */
+/** Maximum simulated time per frame, in seconds. */
 const MAX_FRAME_TIME = 0.25;
-/** Teto de sub-passos por frame para não travar a thread. */
+/** Ceiling of sub-steps per frame, so the thread does not lock up. */
 const MAX_SUBSTEPS = 5;
 
 export interface EngineCallbacks {
   /**
-   * Amostragem de entrada, **antes** de qualquer passo fixo.
+   * Input sampling, **before** any fixed step.
    *
-   * A ordem é o ponto. Enquanto a leitura do teclado acontecia dentro de
-   * `update`, ela rodava *depois* dos passos fixos do mesmo quadro — e com o
-   * jogador simulado no passo fixo, cada tecla valeria só no quadro seguinte.
-   * Um quadro inteiro de latência, de graça, e ele não some com ajuste nenhum
-   * do outro lado. Aqui, o passo fixo lê a entrada que acabou de chegar.
+   * The order is the point. While the keyboard was read inside `update`, it ran
+   * *after* the same frame's fixed steps — and with the player simulated on the fixed
+   * step, every key would only apply on the next frame. A whole frame of latency, for
+   * free, and it does not go away with any tuning on the other side. Here, the fixed
+   * step reads the input that has just arrived.
    */
   beginFrame?(dt: number): void;
-  /** Simulação determinística. Recebe sempre exatamente FIXED_TIMESTEP. */
+  /** Deterministic simulation. It always receives exactly FIXED_TIMESTEP. */
   fixedUpdate(dt: number, tick: number): void;
-  /** Lógica visual e de entrada. Recebe o dt real do frame. */
+  /** Visual and input logic. It receives the frame's real dt. */
   update(dt: number, alpha: number): void;
-  /** Desenho. */
+  /** Drawing. */
   render(dt: number): void;
 }
 
 export class Engine {
-  /** Tempo total de simulação decorrido, em segundos. */
+  /** Total simulated time elapsed, in seconds. */
   elapsed = 0;
   /**
-   * Passos fixos desde `start()`. Monotônico e inteiro.
+   * Fixed steps since `start()`. Monotonic and integer.
    *
-   * Existe ao lado de `elapsed` porque os dois respondem perguntas diferentes, e
-   * a de rede só o inteiro responde: `elapsed` é uma soma de `1/60` em ponto
-   * flutuante, que **deriva** — dez minutos de jogo somam 36.000 arredondamentos.
-   * Um contador inteiro é o mesmo número nas duas pontas de um duelo para
-   * sempre, e é o que carimba entrada, instantâneo e evento.
+   * It exists alongside `elapsed` because the two answer different questions, and only
+   * the integer answers the network's: `elapsed` is a sum of `1/60` in floating point,
+   * which **drifts** — ten minutes of play add up 36,000 roundings. An integer counter
+   * is the same number at both ends of a duel forever, and it is what stamps input,
+   * snapshot and event.
    */
   tick = 0;
   running = false;
 
-  /** Média móvel do frametime em ms, para o overlay de debug. */
+  /** Moving average of the frame time in ms, for the debug overlay. */
   frameTimeMs = 0;
   fps = 0;
 
@@ -73,7 +73,7 @@ export class Engine {
     cancelAnimationFrame(this.frameHandle);
   }
 
-  /** Um quadro do navegador. O nome não é `tick` porque `tick` agora é o contador. */
+  /** One browser frame. The name is not `tick` because `tick` is now the counter. */
   private advance = (now: number): void => {
     if (!this.running || !this.callbacks) return;
     this.frameHandle = requestAnimationFrame(this.advance);
@@ -81,17 +81,18 @@ export class Engine {
     let frameTime = (now - this.lastTime) / 1000;
     this.lastTime = now;
 
-    // Média móvel exponencial: número estável no HUD sem tremer a cada frame.
+    // Exponential moving average: a stable number in the HUD without flickering every
+    // frame.
     this.frameTimeMs += ((frameTime * 1000) - this.frameTimeMs) * 0.1;
     this.fps = this.frameTimeMs > 0 ? 1000 / this.frameTimeMs : 0;
 
-    // Aba em segundo plano ou stutter grande: descartar o excedente em vez de
-    // tentar recuperar, que só piora o engasgo.
+    // Tab in the background or a big stutter: discard the excess instead of trying to
+    // catch up, which only makes the hitch worse.
     if (frameTime > MAX_FRAME_TIME) frameTime = MAX_FRAME_TIME;
 
     this.accumulator += frameTime;
 
-    // Antes do acumulador, e não dentro de `update`. Ver `EngineCallbacks`.
+    // Before the accumulator, and not inside `update`. See `EngineCallbacks`.
     this.callbacks.beginFrame?.(frameTime);
 
     let steps = 0;
@@ -103,11 +104,11 @@ export class Engine {
       steps++;
     }
 
-    // Se estourou o teto de sub-passos, zerar o resto evita acumular dívida.
+    // If the sub-step ceiling was hit, zeroing the remainder avoids accumulating debt.
     if (steps >= MAX_SUBSTEPS) this.accumulator = 0;
 
-    // Fração do passo fixo já consumida: usada para interpolar a pose visual
-    // do navio e evitar tremor quando o FPS não é múltiplo de 60.
+    // Fraction of the fixed step already consumed: used to interpolate the ship's
+    // visual pose and avoid jitter when the FPS is not a multiple of 60.
     const alpha = this.accumulator / FIXED_TIMESTEP;
 
     this.callbacks.update(frameTime, alpha);

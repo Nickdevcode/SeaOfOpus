@@ -1,55 +1,55 @@
 /**
- * O que aconteceu num passo de simulação, para quem precisa reagir depois.
+ * What happened in one simulation step, for whoever has to react afterwards.
  *
- * ## Por que uma fila e não as chamadas diretas
+ * ## Why a queue and not direct calls
  *
- * Antes, `Match.fixedUpdate` chamava `effects.muzzleBlast` e `listener.onShot`
- * de dentro do passo. Funcionava, e trazia três problemas de uma vez:
+ * `Match.fixedUpdate` used to call `effects.muzzleBlast` and `listener.onShot` from
+ * inside the step. It worked, and it brought three problems at once:
  *
- * 1. **Sujava o passo.** `Effects` sorteia a rotação de cada partícula com
- *    `Math.random()`, então o passo "determinístico" consumia aleatoriedade não
- *    semeada. Não quebrava nada enquanto o jogo era de um jogador só, e quebraria
- *    tudo no instante em que duas máquinas tivessem de concordar.
- * 2. **Dobrava o trabalho a 144 fps.** Um quadro pode conter até cinco passos, e
- *    cada um deles disparava a sua fumaça — o rastro ficava mais denso conforme a
- *    taxa de quadros.
- * 3. **Não atravessava a rede.** Um estrondo é um instante, não um estado: ele não
- *    cabe num instantâneo, e sem fila não havia o que enviar.
+ * 1. **It dirtied the step.** `Effects` draws each particle's rotation with
+ *    `Math.random()`, so the "deterministic" step consumed unseeded randomness. It
+ *    broke nothing while the game was single-player, and it would break everything the
+ *    instant two machines had to agree.
+ * 2. **It doubled the work at 144 fps.** One frame can contain up to five steps, and
+ *    each of them fired its own smoke — the trail got denser with the frame rate.
+ * 3. **It did not cross the network.** A bang is an instant, not a state: it does not
+ *    fit in a snapshot, and without a queue there was nothing to send.
  *
- * Com a fila, quem simula só **anota**. Quem desenha e quem toca drenam depois, no
- * quadro. E o cliente que recebe estes mesmos eventos pela rede os empilha no mesmo
- * array e chama o mesmo código de sempre — um caminho, dois papéis.
+ * With the queue, the simulating side only **notes things down**. Whoever draws and
+ * whoever plays sound drain it afterwards, on the frame. And the client that receives
+ * these same events over the network stacks them into the same array and calls the
+ * same code as ever — one path, two roles.
  *
- * ⚠️ Os vetores são **rascunhos do passo**: a fila é esvaziada em todo `update`, e
- * quem quiser guardar um deles copia.
+ * ⚠️ The vectors are **the step's scratch values**: the queue is emptied on every
+ * `update`, and whoever wants to keep one of them copies it.
  */
 
 import type * as THREE from 'three';
 
-/** Índice do navio na partida. 0 é sempre o do jogador local. */
+/** Index of the ship in the match. 0 is always the local player's. */
 export type ShipSlot = 0 | 1;
 
 export type MatchEvent =
-  /** Um canhão cuspiu. `position` e `direction` são a boca no instante do tiro. */
+  /** A cannon spat. `position` and `direction` are the muzzle at the instant of the shot. */
   | {
       kind: 'shot';
       ship: ShipSlot;
       position: THREE.Vector3;
       direction: THREE.Vector3;
     }
-  /** Bala na água. */
+  /** Ball into the water. */
   | { kind: 'splash'; position: THREE.Vector3; speed: number }
-  /** Bala na madeira. `flooded` quando o rombo fica abaixo da linha d'água. */
+  /** Ball into the wood. `flooded` when the breach ends up below the waterline. */
   | {
       kind: 'hull';
       ship: ShipSlot;
       position: THREE.Vector3;
-      /** Normal do casco no ponto, **em coordenadas do mundo**. */
+      /** Hull normal at the point, **in world coordinates**. */
       normal: THREE.Vector3;
       speed: number;
       flooded: boolean;
     }
-  /** Bala no mastro. */
+  /** Ball into the mast. */
   | { kind: 'mast'; ship: ShipSlot; position: THREE.Vector3; speed: number }
-  /** Os dois cascos se encostaram. */
+  /** The two hulls touched. */
   | { kind: 'collision'; position: THREE.Vector3; speed: number };

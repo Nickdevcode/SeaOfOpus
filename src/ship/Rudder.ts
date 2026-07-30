@@ -1,17 +1,16 @@
 /**
- * Leme e roda do timão.
+ * Rudder and steering wheel.
  *
- * A roda do Sea of Thieves não é um volante de carro: ela não volta ao centro
- * sozinha, e segurar `A`/`D` (ou o analógico) a gira continuamente até o batente.
- * Por isso a entrada aqui é **taxa**, não posição — o ângulo é estado, e quem
- * larga o timão deixa o navio na guinada em que estava. É essa inércia que
- * obriga a antecipar a curva, e é ela que dá o peso do navio grande.
+ * The Sea of Thieves wheel is not a car's steering wheel: it does not self-center, and
+ * holding `A`/`D` (or the stick) turns it continuously to the stop. That is why the
+ * input here is a **rate**, not a position — the angle is state, and whoever lets go
+ * of the helm leaves the ship in whatever turn it was in. It is that inertia that
+ * forces you to anticipate the turn, and it is what gives a big ship its weight.
  *
- * A força é hidrodinâmica de verdade, não um torque de guinada aplicado à mão:
- * uma placa inclinada num escoamento gera força normal proporcional a `u²`, e o
- * torque nasce do braço até a popa. Duas consequências que o jogo precisa e que
- * saem de graça: **navio parado não esterça**, e **navio de ré esterça ao
- * contrário**.
+ * The force is real hydrodynamics, not a yaw torque applied by hand: a plate inclined
+ * in a flow generates a normal force proportional to `u²`, and the torque is born from
+ * the lever arm to the stern. Two consequences the game needs and that come for free:
+ * **a stopped ship does not steer**, and **a ship going astern steers backwards**.
  */
 
 import * as THREE from 'three';
@@ -19,29 +18,30 @@ import { WATER_DENSITY, clamp } from '../core/MathUtils';
 import { measureRudderBlade } from './ShipDimensions';
 import type { ShipBody } from './ShipBody';
 
-/** Ângulo máximo do leme, em radianos (35°) — o batente clássico. */
+/** Maximum rudder angle, in radians (35°) — the classic stop. */
 export const MAX_RUDDER = 0.611;
-/** Volta completa da roda de um batente ao outro: meia volta para cada lado. */
+/** Full travel of the wheel from stop to stop: half a turn each way. */
 export const MAX_WHEEL = Math.PI;
 /**
- * Velocidade angular da roda com a entrada no máximo, em rad/s.
+ * Angular speed of the wheel at full input, in rad/s.
  *
- * Exportada porque o timoneiro bot comanda um *ângulo* de roda e precisa saber
- * quanto dele cabe num passo para converter isso na taxa que esta classe aceita.
- * Duplicar o número lá seria deixar as duas descrições da mesma roda divergirem.
+ * Exported because the bot helmsman commands a wheel *angle* and needs to know how
+ * much of it fits in one step to convert that into the rate this class accepts.
+ * Duplicating the number over there would let the two descriptions of the same wheel
+ * diverge.
  */
 export const WHEEL_RATE = 2.1;
 
 /**
- * Coeficiente de força normal de uma placa, na formulação de Hoerner. Vale até
- * bem depois do estol, que é o regime em que um leme a 35° realmente trabalha.
+ * Normal force coefficient of a plate, in Hoerner's formulation. It holds well past
+ * the stall, which is the regime a rudder at 35° actually works in.
  */
 const RUDDER_CN = 1.9;
 
 /**
- * Área e centro de pressão da pá, **medidos da geometria que o modelo desenha**
- * (`RUDDER_BLADE` em `ShipDimensions`) e não escolhidos aqui. Antes eram
- * constantes soltas, e as duas descrições da mesma pá divergiram quatro vezes.
+ * Area and center of pressure of the blade, **measured from the geometry the model
+ * draws** (`RUDDER_BLADE` in `ShipDimensions`) and not chosen here. They used to be
+ * loose constants, and the two descriptions of the same blade diverged fourfold.
  */
 const BLADE = measureRudderBlade();
 const RUDDER_AREA = BLADE.area;
@@ -54,32 +54,32 @@ const _pointVelocity = new THREE.Vector3();
 const _force = new THREE.Vector3();
 
 export class Rudder {
-  /** Ângulo da roda, em radianos. Positivo é boreste (navio vira à direita). */
+  /** Wheel angle, in radians. Positive is starboard (the ship turns right). */
   wheelAngle = 0;
-  /** Ângulo do leme, derivado da roda. */
+  /** Rudder angle, derived from the wheel. */
   rudderAngle = 0;
 
-  /** Última força lateral gerada, em newtons. Só telemetria. */
+  /** Last side force generated, in newtons. Telemetry only. */
   lastSideForce = 0;
 
   /**
-   * Os dois ângulos no passo anterior, para o desenho interpolar.
+   * The two angles on the previous step, for the render to interpolate.
    *
-   * A roda é a peça que o timoneiro tem na mão, e a única do navio cujo
-   * movimento ele mede olhando: um degrau de 60 Hz aqui é lido como "a roda
-   * enroscou", e não como taxa de quadros. Ver `Cannon.beginStep`.
+   * The wheel is the part the helmsman has in his hands, and the only one on the ship
+   * whose movement he measures by looking: a 60 Hz step here reads as "the wheel
+   * jammed", and not as a frame rate. See `Cannon.beginStep`.
    */
   previousWheelAngle = 0;
   previousRudderAngle = 0;
 
-  /** Guarda a pose deste instante como a anterior. Ver `Cannon.beginStep`. */
+  /** Saves this instant's pose as the previous one. See `Cannon.beginStep`. */
   beginStep(): void {
     this.previousWheelAngle = this.wheelAngle;
     this.previousRudderAngle = this.rudderAngle;
   }
 
   /**
-   * @param input -1 (bombordo) a +1 (boreste). É taxa de giro, não posição.
+   * @param input -1 (port) to +1 (starboard). It is a rate of turn, not a position.
    */
   update(input: number, dt: number): void {
     this.wheelAngle = clamp(this.wheelAngle + clamp(input, -1, 1) * WHEEL_RATE * dt, -MAX_WHEEL, MAX_WHEEL);
@@ -87,19 +87,19 @@ export class Rudder {
   }
 
   /**
-   * Põe a roda num ângulo dado, derivando o leme.
+   * Sets the wheel to a given angle, deriving the rudder.
    *
-   * Existe para quem recebe a pose pronta em vez de integrá-la — o cliente que
-   * não simula. Escrever `wheelAngle` direto deixaria o leme com o valor do
-   * passo anterior, e a pá desenhada apontando para um lado enquanto o navio
-   * vira para o outro.
+   * It exists for whoever receives the pose ready-made instead of integrating it — the
+   * client that does not simulate. Writing `wheelAngle` directly would leave the rudder
+   * at the previous step's value, and the drawn blade pointing one way while the ship
+   * turns the other.
    */
   setWheel(angle: number): void {
     this.wheelAngle = clamp(angle, -MAX_WHEEL, MAX_WHEEL);
     this.rudderAngle = (this.wheelAngle / MAX_WHEEL) * MAX_RUDDER;
   }
 
-  /** Centra a roda de uma vez — usado ao largar o timão numa transição. */
+  /** Centers the wheel at once — used when letting go of the helm in a transition. */
   center(): void {
     this.wheelAngle = 0;
     this.rudderAngle = 0;
@@ -108,7 +108,7 @@ export class Rudder {
   }
 
   /**
-   * @param submersion fração submersa; leme fora d'água não faz força.
+   * @param submersion the submerged fraction; a rudder out of the water makes no force.
    */
   apply(body: ShipBody, submersion: number): void {
     const wetted = Math.min(submersion, 1);
@@ -122,9 +122,9 @@ export class Rudder {
     body.pointVelocity(_worldArm, _pointVelocity);
     body.worldDirToLocal(_pointVelocity, _localVelocity);
 
-    // Escoamento sobre a pá. `-z` porque a proa aponta para -Z, então avançar é
-    // ter z negativo; `x` é a deriva, e como o ponto é a popa ele já traz junto
-    // o ω×r da guinada.
+    // Flow over the blade. `-z` because the bow points at -Z, so moving ahead means
+    // having negative z; `x` is the sway, and since the point is the stern it already
+    // brings the yaw's ω×r along with it.
     const axial = -_localVelocity.z;
     const lateral = _localVelocity.x;
     const speed = Math.hypot(axial, lateral);
@@ -133,38 +133,41 @@ export class Rudder {
       return;
     }
 
-    // **O ângulo de ataque não é o ângulo do leme.** É o ângulo do leme menos o
-    // ângulo com que a água chega. Duas consequências, e as duas são o navio:
+    // **The angle of attack is not the rudder's angle.** It is the rudder's angle
+    // minus the angle the water arrives at. Two consequences, and both of them are the
+    // ship:
     //
-    // - Com o leme no meio e o navio em deriva, a pá ainda faz força — e é ela
-    //   que traz a proa de volta. É daqui que sai a estabilidade de rumo; sem
-    //   este termo o casco não segurava a proa e espiralava sozinho.
-    // - Em curva fechada a deriva come o ângulo do leme, então o leme perde
-    //   autoridade justamente quando está todo carregado. É o que impede a
-    //   guinada de crescer sem fim.
+    // - With the rudder amidships and the ship sliding sideways, the blade still makes
+    //   force — and it is what brings the bow back. This is where course stability
+    //   comes from; without this term the hull did not hold its bow and spiraled on its
+    //   own.
+    // - In a tight turn the sideslip eats the rudder's angle, so the rudder loses
+    //   authority exactly when it is hard over. It is what keeps the yaw from growing
+    //   without end.
     //
-    // O sinal **soma**, e é fácil errar: a água chegando por boreste deixa o
-    // bordo de fuga a boreste da linha do escoamento, que é a mesma coisa que
-    // meter leme a boreste. Com o sinal trocado o leme empurrava a deriva em vez
-    // de fechá-la, e o navio espiralava com 30° de caranguejo permanente.
+    // The sign **adds**, and it is easy to get wrong: water arriving from starboard
+    // leaves the trailing edge to starboard of the flow line, which is the same thing
+    // as putting the rudder to starboard. With the sign flipped the rudder pushed the
+    // sideslip instead of closing it, and the ship spiraled with a permanent 30° of
+    // crab.
     const inflow = Math.atan2(lateral, axial);
     const alpha = this.rudderAngle + inflow;
 
     const q = 0.5 * WATER_DENSITY * RUDDER_AREA * speed * speed * wetted;
     const normal = q * RUDDER_CN * Math.sin(alpha);
 
-    // A força nasce perpendicular ao **escoamento**, não à quilha: `travel` é a
-    // direção em que a pá caminha na água e `side` é a normal a ela, positiva
-    // para boreste.
+    // The force is born perpendicular to the **flow**, not to the keel: `travel` is
+    // the direction the blade moves through the water and `side` is the normal to it,
+    // positive to starboard.
     const travelX = lateral / speed;
     const travelZ = -axial / speed;
     const sideX = axial / speed;
     const sideZ = lateral / speed;
 
-    // Decomposição clássica da placa: a força normal `N` se abre em sustentação
-    // perpendicular ao escoamento (`N·cos α`) e arrasto ao longo dele
-    // (`N·sen α`). Sem o cosseno o leme de ré esterçaria para o lado errado, e
-    // sem o arrasto o navio não perderia velocidade em curva fechada.
+    // The classic plate decomposition: the normal force `N` opens into lift
+    // perpendicular to the flow (`N·cos α`) and drag along it (`N·sin α`). Without the
+    // cosine the rudder would steer the wrong way going astern, and without the drag
+    // the ship would not lose speed in a tight turn.
     const lift = normal * Math.cos(alpha);
     const induced = Math.abs(normal * Math.sin(alpha));
 

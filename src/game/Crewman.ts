@@ -1,16 +1,16 @@
 /**
- * Um par de mãos a bordo: o corpo, o foco de interação e o navio a que pertencem.
+ * A pair of hands aboard: the body, the interaction focus and the ship they belong to.
  *
- * Existe porque a partida passou a ter **dois**. Enquanto o inimigo era a máquina,
- * o `PlayerController` e a `Interaction` podiam viver soltos no `Match` — havia um
- * de cada, e eram do jogador. Com um humano do outro lado, o navio inimigo precisa
- * de um marujo igual: mesmo corpo, mesma lista de peças, mesmas regras. Juntá-los
- * aqui é o que torna "o outro jogador" uma segunda instância em vez de um segundo
- * caminho de código.
+ * It exists because the match now has **two**. While the enemy was the machine,
+ * `PlayerController` and `Interaction` could live loose in the `Match` — there was one
+ * of each, and they were the player's. With a human on the other side, the enemy ship
+ * needs an identical sailor: same body, same list of parts, same rules. Putting them
+ * together here is what makes "the other player" a second instance instead of a second
+ * code path.
  *
- * O `ShipAI` continua sendo a alternativa: ele escreve **exatamente** o mesmo
- * vocabulário (`controls.wheel`, `cannon.aim`, `ship.loadCannon`,
- * `ship.patchBreach`), e o `Ship` nunca descobre quem está aos comandos.
+ * `ShipAI` is still the alternative: it writes **exactly** the same vocabulary
+ * (`controls.wheel`, `cannon.aim`, `ship.loadCannon`, `ship.patchBreach`), and `Ship`
+ * never finds out who is at the controls.
  */
 
 import type { InputFrame } from '../core/InputFrame';
@@ -27,7 +27,7 @@ export class Crewman {
     this.respawn();
   }
 
-  /** Põe o marujo no ponto de partida e refaz a lista de peças do navio dele. */
+  /** Puts the sailor at the starting point and rebuilds their ship's list of parts. */
   respawn(): void {
     this.controller.spawn();
     this.interaction.clear();
@@ -37,20 +37,21 @@ export class Crewman {
   }
 
   /**
-   * Um passo do marujo.
+   * One step of the sailor.
    *
-   * ⚠️ **A ordem das três chamadas é significativa e está documentada nos três
-   * lugares que dependem dela.** O controlador vem primeiro porque é ele que zera
-   * os comandos do navio a cada passo; a interação vem em seguida porque o
-   * cabrestante liga a bandeira que o controlador acabou de zerar — e porque é o
-   * que impede o mesmo toque de entrar e sair do modo. O relógio da tábua vem por
-   * último por uma questão de quem sabe o quê: o controlador não conhece rombos, e
-   * só a interação vê o buraco e o botão segurado no mesmo passo. Adiantá-lo daria
-   * uma madeira que aparece na mão um passo antes de o jogador apertar.
+   * ⚠️ **The order of the three calls is significant and is documented in all three
+   * places that depend on it.** The controller comes first because it is what zeroes
+   * the ship's commands on every step; the interaction comes next because the capstan
+   * switches on the flag the controller has just zeroed — and because it is what keeps
+   * the same tap from entering and leaving the mode. The plank's clock comes last as a
+   * matter of who knows what: the controller knows nothing about breaches, and only
+   * the interaction sees the hole and the held button on the same step. Advancing it
+   * would give wood that appears in the hand one step before the player presses.
    *
-   * @param waves o mar. Chega até aqui por um motivo só, e ele é de fora do navio:
-   *   o marujo pode **cair na água**, e a única coisa que decide se ele está nela é
-   *   a altura da onda debaixo dos pés dele. Ver `PlayerController.fixedUpdate`.
+   * @param waves the sea. It reaches this far for one reason only, and it comes from
+   *   outside the ship: the sailor can **fall into the water**, and the only thing
+   *   that decides whether they are in it is the height of the wave under their feet.
+   *   See `PlayerController.fixedUpdate`.
    */
   fixedUpdate(dt: number, frame: InputFrame, waves: WaveField): void {
     this.controller.fixedUpdate(dt, frame, this.ship, waves);

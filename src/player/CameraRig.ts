@@ -1,16 +1,17 @@
 /**
- * A câmera: converte a pose do jogador (local, no navio) em pose de mundo.
+ * The camera: converts the player's pose (local, on the ship) into a world pose.
  *
- * O detalhe que decide se o jogo parece sólido ou barato está numa linha só:
- * o rig lê `ship.model.root`, e **não** `ship.body`. O corpo guarda a pose do
- * último passo de física, a 60 Hz; o modelo guarda a pose interpolada pelo
- * `alpha` do frame. Compor a câmera com o corpo enquanto o convés é desenhado
- * com o modelo faz o navio inteiro tremer diante dos olhos do jogador em telas
- * de 144 Hz — um jitter de milímetros que não some com nenhuma suavização.
+ * The detail that decides whether the game looks solid or cheap is in one line: the
+ * rig reads `ship.model.root`, and **not** `ship.body`. The body holds the pose from
+ * the last physics step, at 60 Hz; the model holds the pose interpolated by the
+ * frame's `alpha`. Composing the camera with the body while the deck is drawn with the
+ * model makes the whole ship shake in front of the player's eyes on 144 Hz screens — a
+ * jitter of millimeters that no smoothing removes.
  *
- * A troca de estação (convés → timão → canhão) é interpolada **em coordenadas
- * locais**, não no mundo: durante a transição o navio continua jogando na onda,
- * e o que se quer é a cabeça andando pelo convés, não a câmera se soltando dele.
+ * The station change (deck → helm → cannon) is interpolated **in local coordinates**,
+ * not in the world: during the transition the ship goes on rolling with the wave, and
+ * what we want is the head walking across the deck, not the camera coming loose from
+ * it.
  */
 
 import * as THREE from 'three';
@@ -21,18 +22,17 @@ import type { PlayerController } from './PlayerController';
 export type CameraMode = 'player' | 'cinematic' | 'detached';
 
 /**
- * Duração da transição ao assumir ou largar uma estação, em segundos.
+ * Duration of the transition when taking or leaving a station, in seconds.
  *
- * Exportada porque o corpo do jogador tem de percorrer o mesmo caminho no mesmo
- * tempo: em primeira pessoa, câmera e corpo que chegam ao timão em instantes
- * diferentes leem como o personagem andando sozinho na direção do jogador. Ver
- * `PlayerAvatar`.
+ * Exported because the player's body has to travel the same path in the same time: in
+ * first person, a camera and a body that reach the helm at different instants read as
+ * the character walking off on their own toward the player. See `PlayerAvatar`.
  */
 export const STATION_BLEND = 0.28;
-/** Convergência do campo de visão, em 1/s. */
+/** Convergence of the field of view, in 1/s. */
 const FOV_LAMBDA = 9;
 
-/** Órbita do menu: raio, altura e velocidade angular. */
+/** The menu's orbit: radius, height and angular speed. */
 const CINEMATIC_RADIUS = 26;
 const CINEMATIC_HEIGHT = 7.5;
 const CINEMATIC_SPEED = 0.055;
@@ -47,7 +47,7 @@ export class CameraRig {
 
   private readonly blendPosition = new THREE.Vector3();
   private readonly blendQuaternion = new THREE.Quaternion();
-  /** 1 = transição terminada. Começa pronto para o primeiro frame não saltar. */
+  /** 1 = transition finished. It starts ready so the first frame does not jump. */
   private blend = 1;
   private lastStationChange = -1;
 
@@ -55,19 +55,19 @@ export class CameraRig {
 
   constructor(readonly camera: THREE.PerspectiveCamera) {}
 
-  /** Volta a câmera para os olhos do jogador. */
+  /** Puts the camera back at the player's eyes. */
   attachPlayer(): void {
     this.mode = 'player';
     this.blend = 1;
     this.lastStationChange = -1;
   }
 
-  /** Órbita cinematográfica em volta do navio — o fundo do menu. */
+  /** A cinematic orbit around the ship — the menu's backdrop. */
   cinematic(): void {
     this.mode = 'cinematic';
   }
 
-  /** Solta a câmera: quem quiser posicionar escreve nela direto (bancada DEV). */
+  /** Releases the camera: whoever wants to position it writes to it directly (the dev bench). */
   detach(): void {
     this.mode = 'detached';
   }
@@ -81,8 +81,8 @@ export class CameraRig {
 
     this.updateStationBlend(dt, player);
 
-    // A pose visual do navio, interpolada. `localToWorld` já atualiza a matriz
-    // de mundo do modelo, então não há um frame de atraso aqui.
+    // The ship's visual pose, interpolated. `localToWorld` already updates the
+    // model's world matrix, so there is no frame of delay here.
     ship.model.root.localToWorld(_position.copy(this.blendPosition));
     _quaternion.copy(ship.model.root.quaternion).multiply(this.blendQuaternion);
 
@@ -94,7 +94,7 @@ export class CameraRig {
 
   private updateStationBlend(dt: number, player: PlayerController): void {
     if (player.stationChangeCount !== this.lastStationChange) {
-      // Primeira vez (spawn) não tem de onde vir: começa já no lugar.
+      // The first time (spawn) has nowhere to come from: it starts already in place.
       this.blend = this.lastStationChange < 0 ? 1 : 0;
       this.lastStationChange = player.stationChangeCount;
       if (this.blend === 1) {
@@ -111,8 +111,8 @@ export class CameraRig {
     }
 
     this.blend = Math.min(this.blend + dt / STATION_BLEND, 1);
-    // Suavização de entrada e saída: linear puro denuncia o começo e o fim do
-    // movimento, e uma câmera que "liga e desliga" lê como corte, não como passo.
+    // Ease in and out: pure linear gives away the movement's start and end, and a
+    // camera that "switches on and off" reads as a cut, not as a step.
     const s = this.blend * this.blend * (3 - 2 * this.blend);
     this.blendPosition.lerp(player.eyeLocal, s);
     this.blendQuaternion.slerp(player.eyeQuaternion, s);
@@ -135,8 +135,8 @@ export class CameraRig {
 
   private updateFov(dt: number, target: number): void {
     const next = damp(this.camera.fov, target, FOV_LAMBDA, dt);
-    // Recompor a matriz de projeção custa; abaixo de um décimo de grau ninguém
-    // vê a diferença, e assim ela só é refeita durante o zoom de mira.
+    // Recomposing the projection matrix costs; below a tenth of a degree nobody sees
+    // the difference, so it is only redone during the aiming zoom.
     if (Math.abs(next - this.camera.fov) < 0.01) return;
     this.camera.fov = next;
     this.camera.updateProjectionMatrix();
