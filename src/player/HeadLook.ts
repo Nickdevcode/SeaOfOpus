@@ -1,62 +1,61 @@
 /**
- * A cabeça que acompanha o olhar — a metade do corpo que o fio já carregava e
- * que ninguém via.
+ * The head that follows the gaze — the half of the body the wire already carried and
+ * nobody could see.
  *
- * O rumo horizontal do adversário nunca foi problema: parado, o corpo inteiro
- * gira para onde ele olha (`PlayerAvatar.updateFacing`), e andando, a direção do
- * movimento conta a mesma história. O que se perdia era a **vertical**. O
- * instantâneo traz o `pitch` desde a primeira versão do protocolo — ele é o que
- * decide o foco de interação do outro lado —, e o corpo o ignorava: o pirata
- * ficava com o queixo cravado no horizonte enquanto o jogador dele mirava o
- * cesto da gávea, procurava um rombo no porão ou olhava para as próprias mãos.
+ * The opponent's horizontal heading was never a problem: standing still, the whole body
+ * turns toward where they look (`PlayerAvatar.updateFacing`), and walking, the
+ * direction of movement tells the same story. What was lost was the **vertical**. The
+ * snapshot has carried `pitch` since the protocol's first version — it is what decides
+ * the interaction focus on the other side — and the body ignored it: the pirate kept
+ * his chin pinned to the horizon while his player was aiming at the crow's nest,
+ * looking for a breach in the hold or looking at his own hands.
  *
- * ## Por que dois ossos, e não um
+ * ## Why two bones, and not one
  *
- * Concentrar 50° num osso só dá um pescoço quebrado — a mesma razão pela qual
- * `FirstPersonBody` reparte a torção por três vértebras em vez de torcer um
- * disco. Aqui são dois: o `neck` leva a maior parte e o `head` completa, que é
- * como um pescoço humano se dobra.
+ * Concentrating 50° in a single bone gives a broken neck — the same reason
+ * `FirstPersonBody` shares the twist across three vertebrae instead of twisting one
+ * disc. Here there are two: the `neck` takes the larger share and the `head` completes
+ * it, which is how a human neck bends.
  *
- * ## Por que a rotação é conjugada
+ * ## Why the rotation is conjugated
  *
- * Porque o eixo X do osso **não** é o eixo lateral do personagem. O rig foi
- * montado no Blender em Z-up e a conversão do glTF já girou os eixos de repouso;
- * um `bone.rotateX(θ)` cru inclinaria a cabeça em torno de um eixo torto, e o
- * resultado é um pirata que olha para cima entortando o pescoço para o lado.
- * A rotação é definida no espaço do **avatar** — onde +Z é a frente do
- * personagem, porque é para lá que o modelo olha — e levada até o espaço do osso
- * pelo acumulado dos pais, exatamente como a torção do quadril já faz.
+ * Because the bone's X axis is **not** the character's lateral axis. The rig was built
+ * in Blender in Z-up and the glTF conversion has already turned the rest axes; a raw
+ * `bone.rotateX(θ)` would tilt the head about a crooked axis, and the result is a
+ * pirate who looks up by bending his neck sideways. The rotation is defined in the
+ * **avatar's** space — where +Z is the character's front, because that is where the
+ * model looks — and taken into bone space by the parents' accumulated product, exactly
+ * as the hip's twist already does.
  *
- * As duas parcelas giram em torno do mesmo eixo, então comutam: o acumulado do
- * `head` pode ser colhido depois de o `neck` já ter sido escrito, sem que a
- * conjugação mude de valor. É a mesma propriedade que `FirstPersonBody` usa para
- * percorrer a coluna numa passagem só.
+ * The two shares rotate about the same axis, so they commute: the `head`'s accumulated
+ * product can be gathered after the `neck` has already been written, without the
+ * conjugation changing value. It is the same property `FirstPersonBody` uses to walk
+ * the spine in a single pass.
  *
- * ## Quem usa
+ * ## Who uses it
  *
- * Só o corpo visto **de fora** — o do adversário, e o do jogador com a câmera
- * solta. Vestindo o corpo, quem olha para cima é a câmera, e a cabeça está
- * recortada pelo `headClip` de qualquer forma; pior, ali a torção de
- * `FirstPersonBody` roda no mesmo quadro e as duas rotações **não** comutam
- * (uma em Y, outra em X). Aplicar as duas juntas custaria uma composição
- * correta para ganhar exatamente nada que se veja.
+ * Only the body seen from **outside** — the opponent's, and the player's with the
+ * camera detached. Wearing the body, what looks up is the camera, and the head is
+ * clipped by `headClip` anyway; worse, there `FirstPersonBody`'s twist runs on the same
+ * frame and the two rotations do **not** commute (one in Y, the other in X). Applying
+ * both together would cost a correct composition to gain exactly nothing you can see.
  */
 
 import * as THREE from 'three';
 import { clamp } from '../core/MathUtils';
 
 /**
- * Quanto do olhar vertical cada osso leva.
+ * How much of the vertical gaze each bone takes.
  *
- * Somam menos que 1 de propósito: um pescoço real não entrega os 83° de
- * `PITCH_LIMIT`, e o resto do movimento, num jogador de verdade, sai dos olhos —
- * que este personagem não move. Com 0,85 no total, olhar para o zênite deixa o
- * queixo levantado no limite do crível em vez de dobrar a nuca ao meio.
+ * They add up to less than 1 on purpose: a real neck does not deliver `PITCH_LIMIT`'s
+ * 83°, and the rest of the movement, in a real player, comes from the eyes — which this
+ * character does not move. At 0.85 in total, looking at the zenith leaves the chin
+ * raised at the limit of the believable instead of folding the nape in half.
  */
 const NECK_SHARE = 0.5;
 const HEAD_SHARE = 0.35;
 
-/** Teto do que o pescoço faz, em radianos (≈57°) para cada lado. */
+/** Ceiling of what the neck does, in radians (≈57°) each way. */
 const LOOK_LIMIT = 1.0;
 
 const _axis = new THREE.Vector3(1, 0, 0);
@@ -68,27 +67,25 @@ export class HeadLook {
   private neck: THREE.Bone | null = null;
   private head: THREE.Bone | null = null;
   /**
-   * Os ancestrais de cada osso até o nó do avatar, do mais baixo para o mais
-   * alto.
+   * Each bone's ancestors up to the avatar's node, from lowest to highest.
    *
-   * Montadas uma vez: a **hierarquia** não muda durante a vida do esqueleto, só
-   * os quaternions dentro dela. Refazer as duas listas a cada quadro seria
-   * alocar dois vetores por corpo sessenta vezes por segundo, dentro do
-   * orçamento de 16 ms do quadro de render.
+   * Built once: the **hierarchy** does not change during the skeleton's life, only the
+   * quaternions inside it. Rebuilding the two lists every frame would mean allocating
+   * two arrays per body sixty times a second, inside the render frame's 16 ms budget.
    */
   private readonly neckChain: THREE.Object3D[] = [];
   private readonly headChain: THREE.Object3D[] = [];
   private ready = false;
 
-  /** Inclinação escrita no último quadro, em radianos. Diagnóstico. */
+  /** Tilt written on the last frame, in radians. Diagnostics. */
   pitch = 0;
 
   /**
-   * Resolve os dois ossos. Devolve `false` se algum faltar.
+   * Resolves the two bones. Returns `false` if either is missing.
    *
-   * Faltar osso não derruba nada: um GLB antigo em cache do navegador perde só
-   * o gesto do pescoço, e o corpo continua andando, subindo e governando. É a
-   * mesma política do clipe de pulo e da torção do quadril.
+   * A missing bone brings nothing down: an old GLB in the browser's cache loses only
+   * the neck's gesture, and the body goes on walking, climbing and steering. It is the
+   * same policy as the jump clip and the hip's twist.
    */
   attach(skeleton: THREE.Skeleton, avatarRoot: THREE.Object3D): boolean {
     this.ready = false;
@@ -104,13 +101,13 @@ export class HeadLook {
   }
 
   /**
-   * Inclina a cabeça. **Depois** de `mixer.update(dt)`, todo quadro.
+   * Tilts the head. **After** `mixer.update(dt)`, every frame.
    *
-   * O mixer reescreve os 43 nós a cada passagem, então o que se escreve aqui não
-   * realimenta nada e nada acumula — a mesma garantia de `FirstPersonBody`.
+   * The mixer rewrites all 43 nodes on every pass, so what is written here feeds back
+   * into nothing and nothing accumulates — the same guarantee as `FirstPersonBody`.
    *
-   * @param pitch para onde o dono do corpo está olhando, em radianos. Positivo
-   *   é para cima, como em `PlayerController.pitch`.
+   * @param pitch where the body's owner is looking, in radians. Positive is up, as in
+   *   `PlayerController.pitch`.
    */
   apply(pitch: number): void {
     if (!this.ready) return;
@@ -126,7 +123,7 @@ export class HeadLook {
   }
 }
 
-/** Os ancestrais de um osso até o nó do avatar, do mais baixo para o mais alto. */
+/** A bone's ancestors up to the avatar's node, from lowest to highest. */
 function collectChain(
   bone: THREE.Bone,
   avatarRoot: THREE.Object3D,
@@ -137,18 +134,17 @@ function collectChain(
 }
 
 /**
- * `q ← (W⁻¹ · R · W) · q`, com `W` o acumulado do espaço do avatar até o **pai**
- * do osso.
+ * `q ← (W⁻¹ · R · W) · q`, with `W` the accumulated product from the avatar's space to
+ * the bone's **parent**.
  *
- * O sinal é negativo porque o personagem foi modelado olhando para −Y no
- * Blender, o que vira **+Z** depois da conversão Y-up do glTF: uma rotação
- * positiva em torno de X leva +Z para baixo, e olhar para cima é justamente o
- * contrário.
+ * The sign is negative because the character was modeled looking at −Y in Blender,
+ * which becomes **+Z** after glTF's Y-up conversion: a positive rotation about X takes
+ * +Z downward, and looking up is precisely the opposite.
  */
 function rotate(bone: THREE.Bone, chain: readonly THREE.Object3D[], angle: number): void {
   _rotation.setFromAxisAngle(_axis, -angle);
 
-  // Do ancestral mais alto para o mais baixo: é essa a ordem do produto.
+  // From the highest ancestor to the lowest: that is the product's order.
   _world.identity();
   for (let i = chain.length - 1; i >= 0; i--) _world.multiply(chain[i]!.quaternion);
 

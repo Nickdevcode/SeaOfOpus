@@ -1,46 +1,45 @@
 /**
- * O corte para o preto que cobre o resgate.
+ * The cut to black that covers the rescue.
  *
- * É o único momento do jogo em que o corpo do jogador troca de lugar sem ele ter
- * andado até lá: pedir socorro na água põe o marujo de volta no convés do próprio
- * navio, que pode estar a duzentos metros. Sem o corte, o que se vê é a câmera
- * sendo arrancada do mar e plantada no convés num quadro — a leitura é de bug, não
- * de resgate.
+ * It is the only moment in the game where the player's body changes place without
+ * having walked there: calling for help in the water puts the sailor back on their own
+ * ship's deck, which can be two hundred meters away. Without the cut, what you see is
+ * the camera being torn out of the sea and planted on the deck in one frame — it reads
+ * as a bug, not as a rescue.
  *
- * ## A forma da curva, e por que ela não é simétrica
+ * ## The shape of the curve, and why it is not symmetric
  *
- * **Preto imediato, espera, e volta lenta.** Um esmaecimento de saída seria a
- * escolha bonita e a errada: durante ele o teleporte já aconteceu, então o jogador
- * veria o convés surgindo *por trás* do mar que está desaparecendo. O corte tem de
- * fechar antes de o corpo se mexer, e a única forma de garantir isso sem acoplar a
- * interface ao passo de física é fechar **rápido**. Sessenta milissegundos são
- * quatro quadros: rápido demais para se ler como transição, lento o bastante para
- * não ser um piscar.
+ * **Black immediately, hold, and a slow return.** A fade out would be the pretty choice
+ * and the wrong one: during it the teleport has already happened, so the player would
+ * see the deck appearing *behind* the sea that is disappearing. The cut has to close
+ * before the body moves, and the only way to guarantee that without coupling the UI to
+ * the physics step is to close **fast**. Sixty milliseconds is four frames: too fast to
+ * read as a transition, slow enough not to be a blink.
  *
- * A volta é o oposto: ela é a única parte que o jogador de fato assiste, e é onde
- * mora a impressão de ter sido puxado para bordo. Oitocentos milissegundos com
- * `smoothstep` é o tempo de abrir os olhos.
+ * The return is the opposite: it is the only part the player actually watches, and it
+ * is where the impression of having been hauled aboard lives. Eight hundred
+ * milliseconds with `smoothstep` is the time it takes to open your eyes.
  *
- * A espera no meio é o que dá peso à coisa. Sem ela o resgate seria instantâneo e
- * gratuito, e cair no mar deixaria de custar — e cair no mar tem de custar tempo,
- * que é a única moeda deste duelo.
+ * The hold in the middle is what gives the thing weight. Without it the rescue would be
+ * instantaneous and free, and falling into the sea would stop costing — and falling
+ * into the sea has to cost time, which is this duel's only currency.
  *
- * ## Por que não é CSS
+ * ## Why it is not CSS
  *
- * Porque `base.css` honra `prefers-reduced-motion` reduzindo **toda** animação a
- * 0,01 ms, e isto não é movimento decorativo: é o pano que esconde o teleporte.
- * Cortado a zero, o jogador com essa preferência ligada veria exatamente o defeito
- * que o pano existe para cobrir. Uma opacidade por quadro, escrita só quando ela
- * muda, custa menos que a `@keyframes` que ela substitui.
+ * Because `base.css` honors `prefers-reduced-motion` by cutting **every** animation to
+ * 0.01 ms, and this is not decorative movement: it is the cloth that hides the
+ * teleport. Cut to zero, the player with that preference on would see exactly the
+ * defect the cloth exists to cover. One opacity per frame, written only when it
+ * changes, costs less than the `@keyframes` it replaces.
  */
 
 import '../styles/blackout.css';
 
-/** Quanto o preto leva para fechar, em segundos. Ver o cabeçalho. */
+/** How long the black takes to close, in seconds. See the header. */
 const FADE_IN = 0.06;
-/** Quanto ele fica cheio. */
+/** How long it stays full. */
 const HOLD = 1.14;
-/** E quanto leva para abrir. Os três somam 2 s. */
+/** And how long it takes to open. The three add up to 2 s. */
 const FADE_OUT = 0.8;
 
 const TOTAL = FADE_IN + HOLD + FADE_OUT;
@@ -49,28 +48,28 @@ const smoothstep = (t: number): number => t * t * (3 - 2 * t);
 
 export class Blackout {
   private readonly root: HTMLDivElement;
-  /** Segundos desde o começo do corte. Negativo quando não há corte nenhum. */
+  /** Seconds since the cut started. Negative when there is no cut at all. */
   private elapsed = -1;
-  /** Última opacidade escrita no DOM. Ver `write`. */
+  /** Last opacity written to the DOM. See `write`. */
   private written = 0;
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
     this.root.className = 'blackout';
     this.root.hidden = true;
-    // Puramente visual: não há texto por baixo e não há nada a anunciar.
+    // Purely visual: there is no text underneath and nothing to announce.
     this.root.setAttribute('aria-hidden', 'true');
     parent.appendChild(this.root);
   }
 
-  /** `true` enquanto o corte está no ar. */
+  /** `true` while the cut is up. */
   get active(): boolean {
     return this.elapsed >= 0;
   }
 
   /**
-   * Começa um corte. Chamar de novo no meio de um recomeça do zero — o que é o
-   * certo: dois resgates seguidos são dois cortes, não um mais longo.
+   * Starts a cut. Calling it again mid-cut restarts from zero — which is right: two
+   * rescues in a row are two cuts, not one longer one.
    */
   play(): void {
     this.elapsed = 0;
@@ -78,7 +77,7 @@ export class Blackout {
     this.write(0);
   }
 
-  /** Roda no quadro, com o `dt` real. */
+  /** Runs on the frame, with the real `dt`. */
   update(dt: number): void {
     if (this.elapsed < 0) return;
 
@@ -93,7 +92,7 @@ export class Blackout {
     this.write(this.opacityAt(this.elapsed));
   }
 
-  /** Apaga o corte na hora. É o que a volta ao menu precisa. */
+  /** Clears the cut immediately. It is what going back to the menu needs. */
   clear(): void {
     if (this.elapsed < 0) return;
     this.elapsed = -1;
@@ -112,12 +111,12 @@ export class Blackout {
   }
 
   /**
-   * Escreve a opacidade, e só quando ela muda o bastante para aparecer.
+   * Writes the opacity, and only when it changes enough to show.
    *
-   * Um centésimo é menos de três degraus dos 256 níveis com que a composição do
-   * navegador trabalha — abaixo disso o `style` é reescrito para produzir o mesmo
-   * pixel. É o mesmo cuidado de `Prompts`, e pelo mesmo motivo: tocar no DOM é a
-   * parte cara.
+   * A hundredth is less than three steps of the 256 levels the browser's compositor
+   * works with — below that the `style` is rewritten to produce the same pixel. It is
+   * the same care as `Prompts`, and for the same reason: touching the DOM is the
+   * expensive part.
    */
   private write(value: number): void {
     if (Math.abs(value - this.written) < 0.01 && value !== 0 && value !== 1) return;

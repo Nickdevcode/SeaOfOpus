@@ -1,50 +1,50 @@
 /**
- * A tábua de reparo, carregada uma vez e emprestada a quem precisar.
+ * The repair plank, loaded once and lent to whoever needs it.
  *
- * Ela é o **segundo** binário do projeto, depois do personagem, e chega pelo
- * mesmo caminho que ele: `GLTFLoader`, sem esperar ninguém, degradando com um
- * aviso no console se falhar. Um jogo que não abre porque uma tábua de 64 KB
- * não baixou seria pior que um jogo em que o rombo fecha sem mostrar a madeira.
+ * It is the project's **second** binary, after the character, and it arrives by the
+ * same path: `GLTFLoader`, waiting for nobody, degrading with a console warning if it
+ * fails. A game that does not open because a 64 KB plank did not download would be
+ * worse than a game where the breach closes without showing the wood.
  *
- * A promessa é memoizada no módulo porque há **dois** consumidores e eles não
- * se conhecem: as tábuas pregadas no costado (`DamageView`, uma por navio) e a
- * que aparece na mão do jogador (`PlayerAvatar`). Sem a memoização, o mesmo
- * arquivo seria buscado três vezes e viraria três cópias de geometria na GPU.
+ * The promise is memoized at module level because there are **two** consumers and they
+ * do not know each other: the planks nailed to the planking (`DamageView`, one per
+ * ship) and the one that appears in the player's hand (`PlayerAvatar`). Without the
+ * memoization, the same file would be fetched three times and become three copies of
+ * geometry on the GPU.
  *
- * **A tábua sai do Blender deitada:** comprimento em X, espessura em Y e
- * largura em Z, com a origem no centro de massa. As duas primeiras coisas são
- * consequência do `export_yup` do glTF sobre um modelo Z-up; a terceira foi
- * escolhida em `Props/Plank` justamente para a peça girar no punho em vez de
- * orbitá-lo. `PLANK_TO_DECAL` é o que reconcilia esses eixos com a base em que
- * o resto do jogo trabalha.
+ * **The plank comes out of Blender lying down:** length in X, thickness in Y and width
+ * in Z, with the origin at the center of mass. The first two are a consequence of
+ * glTF's `export_yup` over a Z-up model; the third was chosen in `Props/Plank`
+ * precisely so the piece turns in the fist instead of orbiting it. `PLANK_TO_DECAL` is
+ * what reconciles those axes with the basis the rest of the game works in.
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-/** Comprimento da peça, em metros. Medido em `Props/Plank/scripts/plank_spec.py`. */
+/** Length of the piece, in meters. Measured in `Props/Plank/scripts/plank_spec.py`. */
 export const PLANK_LENGTH = 1.15;
-/** Largura da peça. É a mesma tábua do convés: `DECK_BAND_TILE / 8`. */
+/** Width of the piece. It is the same plank as the deck's: `DECK_BAND_TILE / 8`. */
 export const PLANK_WIDTH = 0.22;
-/** Espessura da peça. */
+/** Thickness of the piece. */
 export const PLANK_THICKNESS = 0.045;
 
 /**
- * Gira a tábua do referencial em que ela nasce para o da marca de rombo.
+ * Turns the plank from the frame it is born in into the breach decal's.
  *
- * A base do decalque é `X` = tabuado do costado, `Y` = subindo por ele, `Z` =
- * normal saindo do casco (ver `DamageView.orientDecal`). A tábua chega com a
- * largura em Z e a espessura em Y, então um quarto de volta em X põe a largura
- * deitada no costado e a espessura no eixo da normal — que é como se prega uma
- * tábua numa parede.
+ * The decal's basis is `X` = the planking's run, `Y` = climbing up it, `Z` = the normal
+ * leaving the hull (see `DamageView.orientDecal`). The plank arrives with its width in
+ * Z and its thickness in Y, so a quarter turn in X lays the width along the planking
+ * and puts the thickness on the normal's axis — which is how you nail a plank to a
+ * wall.
  *
- * **Menos um quarto, e não mais um.** O reparo acontece do lado de dentro: o
- * jogador desce ao porão, fica de frente para o forro e prega a tábua ali. Com
- * o giro positivo a espessura aponta para fora do casco, e a face que o jogador
- * enxerga passa a ser o **verso** da peça — o material é `doubleSided` e
- * desenha assim mesmo, mas as normais ficam invertidas e a madeira acende ao
- * contrário da luz que entra pela escotilha. O giro negativo vira a peça, e a
- * face de cima passa a olhar para dentro do porão.
+ * **Minus a quarter, and not plus one.** The repair happens on the inside: the player
+ * goes below, faces the inner planking and nails the plank there. With the positive
+ * turn the thickness points outward from the hull, and the face the player sees becomes
+ * the piece's **back** — the material is `doubleSided` and draws anyway, but the
+ * normals end up inverted and the wood lights against the light coming through the
+ * hatch. The negative turn flips the piece, and the top face ends up looking into the
+ * hold.
  */
 export const PLANK_TO_DECAL = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(1, 0, 0),
@@ -52,26 +52,26 @@ export const PLANK_TO_DECAL = new THREE.Quaternion().setFromAxisAngle(
 );
 
 export interface PlankAsset {
-  /** Geometria compartilhada. Ninguém a modifica — só a instancia. */
+  /** Shared geometry. Nobody modifies it — they only instantiate it. */
   readonly geometry: THREE.BufferGeometry;
-  /** Material compartilhado, com o atlas de 1024² que veio no arquivo. */
+  /** Shared material, with the 1024² atlas that came in the file. */
   readonly material: THREE.Material;
 }
 
 /**
- * Baixa o tom da tábua para o do navio em que ela vai ser pregada.
+ * Brings the plank's tone down to that of the ship it is going to be nailed to.
  *
- * `Props/Plank` pintou a peça como madeira **recém-serrada**, e fez isso de
- * propósito: é uma tábua nova, tirada do paiol. O problema é o vizinho — o
- * costado é carvalho alcatroado quase preto, e a peça sai do arquivo tão clara
- * que parece um adesivo de pinho colado no casco.
+ * `Props/Plank` painted the piece as **freshly sawn** wood, and did so on purpose: it
+ * is a new plank, taken from the magazine. The problem is the neighbor — the planking
+ * is almost-black tarred oak, and the piece comes out of the file so light it looks
+ * like a pine sticker glued to the hull.
  *
- * O corte é multiplicativo e leve: a tábua **tem** que continuar mais clara que
- * o costado, porque é assim que se lê, de longe, quantas vezes aquele navio já
- * foi remendado. O que se tira aqui é o excesso — o brilho de madeira de
- * loja —, não o contraste.
+ * The cut is multiplicative and light: the plank **has** to stay lighter than the
+ * planking, because that is how you read, from a distance, how many times that ship has
+ * been patched. What is taken away here is the excess — the shine of shop-bought wood —
+ * not the contrast.
  *
- * Os valores estão em espaço linear, que é onde a multiplicação acontece.
+ * The values are in linear space, which is where the multiplication happens.
  */
 function weather(source: THREE.Material): THREE.Material {
   const material = source.clone();
@@ -84,10 +84,10 @@ function weather(source: THREE.Material): THREE.Material {
 let pending: Promise<PlankAsset | null> | null = null;
 
 /**
- * Carrega a tábua, ou devolve o carregamento que já estava em curso.
+ * Loads the plank, or returns the load that was already in progress.
  *
- * @returns `null` quando o arquivo não chega — e nesse caso o jogo continua,
- *   com o rombo fechando sem madeira à vista.
+ * @returns `null` when the file does not arrive — and in that case the game carries on,
+ *   with the breach closing with no wood in sight.
  */
 export function loadPlank(): Promise<PlankAsset | null> {
   pending ??= new GLTFLoader()
@@ -98,14 +98,14 @@ export function loadPlank(): Promise<PlankAsset | null> {
         if (mesh === null && (node as THREE.Mesh).isMesh) mesh = node as THREE.Mesh;
       });
       if (!mesh) {
-        console.warn('[plank] o glb chegou sem malha nenhuma dentro');
+        console.warn('[plank] the glb arrived with no mesh inside it');
         return null;
       }
 
       const found = mesh as THREE.Mesh;
-      // O nó vem sem transformação no arquivo, mas ler a matriz em vez de
-      // supor identidade é o que impede um reexport com a peça deslocada de
-      // pregar a tábua 20 cm ao lado do rombo, sem nenhum erro no console.
+      // The node comes with no transform in the file, but reading the matrix instead
+      // of assuming identity is what keeps a re-export with the piece displaced from
+      // nailing the plank 20 cm beside the breach, with no error in the console.
       found.updateWorldMatrix(true, false);
       const geometry = found.geometry.clone().applyMatrix4(found.matrixWorld);
 
@@ -113,7 +113,7 @@ export function loadPlank(): Promise<PlankAsset | null> {
       return { geometry, material: weather(source) };
     })
     .catch((error: unknown) => {
-      console.warn('[plank] não deu para carregar a tábua:', error);
+      console.warn('[plank] could not load the plank:', error);
       return null;
     });
 
