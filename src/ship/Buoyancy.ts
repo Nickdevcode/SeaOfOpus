@@ -1,25 +1,25 @@
 /**
- * Flutuabilidade: o que faz o navio boiar, jogar e se endireitar.
+ * Buoyancy: what makes the ship float, roll and right itself.
  *
- * O casco é fatiado em **colunas verticais** — uma grade de estações ao longo do
- * comprimento por faixas ao longo da boca. Cada coluna guarda, tabelado na
- * construção, o volume submerso e o centróide desse volume para cada altura
- * possível da linha d'água dentro dela. Em tempo de execução cada coluna custa
- * uma amostragem de onda e duas interpolações lineares.
+ * The hull is sliced into **vertical columns** — a grid of stations along the length by
+ * bands along the beam. Each column stores, tabulated at construction time, the
+ * submerged volume and that volume's centroid for every possible waterline height
+ * inside it. At runtime each column costs one wave sample and two linear
+ * interpolations.
  *
- * Por que tabela e não `ρ·g·V·fração`: a seção do casco afina até virar quase
- * nada na quilha, então a fração submersa **não** é linear na profundidade. Com
- * a rampa linear que se vê por aí, o navio afunda alguns decímetros abaixo do
- * calado de projeto e ninguém sabe dizer por quê. Com a tabela, o volume
- * submerso com a linha d'água em `y = 0` é exatamente o deslocamento de projeto,
- * então o navio nasce boiando no calado desenhado — sem número mágico.
+ * Why a table and not `ρ·g·V·fraction`: the hull's section thins to almost nothing at
+ * the keel, so the submerged fraction is **not** linear in depth. With the linear ramp
+ * you see around, the ship sits a few decimeters below the design draft and nobody can
+ * say why. With the table, the submerged volume with the waterline at `y = 0` is
+ * exactly the design displacement, so the ship is born floating at the drawn draft —
+ * with no magic number.
  *
- * Dois efeitos importantes caem de graça daqui:
- * - **Momento de endireitamento:** ao adernar, as colunas de sotavento submergem
- *   mais que as de barlavento, e o centróide do empuxo migra para o lado baixo.
- *   Não existe mola artificial de estabilidade neste projeto.
- * - **Caturro e arfagem:** a onda chega em cada estação numa fase diferente, e é
- *   isso que balança o navio.
+ * Two important effects fall out of this for free:
+ * - **Righting moment:** as it heels, the leeward columns submerge more than the
+ *   windward ones, and the buoyancy's centroid migrates to the low side. There is no
+ *   artificial stability spring in this project.
+ * - **Pitch and heave:** the wave arrives at each station at a different phase, and
+ *   that is what rocks the ship.
  */
 
 import * as THREE from 'three';
@@ -35,36 +35,36 @@ import {
 import type { ShipBody } from './ShipBody';
 import type { WaveField } from '../world/WaveField';
 
-/** Estações ao longo do comprimento. Dez dá ~1,6 m de fatia. */
+/** Stations along the length. Ten gives ~1.6 m slices. */
 const LENGTH_SAMPLES = 10;
-/** Faixas ao longo da boca. Três (bombordo/centro/boreste) bastam para o balanço. */
+/** Bands along the beam. Three (port/center/starboard) are enough for the roll. */
 const WIDTH_SAMPLES = 3;
-/** Níveis da tabela de volume por coluna. */
+/** Levels of the per-column volume table. */
 const LEVELS = 40;
-/** Sub-passos da quadratura ao montar a tabela. */
+/** Quadrature sub-steps when building the table. */
 const QUADRATURE = 8;
 
 /**
- * Amortecimento de radiação, em 1/s.
+ * Radiation damping, in 1/s.
  *
- * Um casco que sobe e desce cria ondas que levam energia embora — é o que faz o
- * navio parar de quicar depois de uma vaga em vez de ressoar para sempre. Age só
- * na vertical: aplicá-lo também na horizontal travaria o navio a menos de 1 nó,
- * porque o arrasto de avanço é ordens de grandeza menor que este.
+ * A hull that rises and falls creates waves that carry energy away — it is what makes
+ * the ship stop bouncing after a swell instead of resonating forever. It acts on the
+ * vertical only: applying it horizontally too would lock the ship below 1 knot, because
+ * the surge drag is orders of magnitude smaller than this.
  */
 const HEAVE_DAMPING = 2.1;
 
 interface HullColumn {
-  /** X local da coluna na linha d'água de projeto. */
+  /** Local X of the column at the design waterline. */
   x: number;
   z: number;
   yBottom: number;
   yTop: number;
-  /** Volume submerso (m³) com a linha d'água em cada nível. */
+  /** Submerged volume (m³) with the waterline at each level. */
   volume: Float32Array;
-  /** X do centróide do volume submerso, por nível. */
+  /** X of the submerged volume's centroid, per level. */
   centroidX: Float32Array;
-  /** Y do centróide do volume submerso, por nível. */
+  /** Y of the submerged volume's centroid, per level. */
   centroidY: Float32Array;
 }
 
@@ -77,15 +77,15 @@ const _force = new THREE.Vector3();
 const _local = new THREE.Vector3();
 
 export interface BuoyancyReport {
-  /** Fração do volume de projeto que está submersa, 0..1+. */
+  /** Fraction of the design volume that is submerged, 0..1+. */
   submersion: number;
-  /** Profundidade média da água acima da linha d'água de projeto, em metros. */
+  /** Mean water depth above the design waterline, in meters. */
   meanDepth: number;
 }
 
 export class Buoyancy {
   private readonly columns: HullColumn[] = [];
-  /** Volume submerso com a linha d'água exatamente no calado de projeto. */
+  /** Submerged volume with the waterline exactly at the design draft. */
   readonly designVolume: number;
 
   private readonly report: BuoyancyReport = { submersion: 0, meanDepth: 0 };
@@ -104,9 +104,9 @@ export class Buoyancy {
       const span = yTop - yBottom;
 
       for (let j = 0; j < WIDTH_SAMPLES; j++) {
-        // A faixa acompanha a meia largura da seção em cada altura, em vez de
-        // ser um retângulo fixo: assim as colunas ladrilham o casco de verdade,
-        // sem sobra na quilha nem falta no bojo.
+        // The band follows the section's half width at each height, instead of being
+        // a fixed rectangle: that way the columns really tile the hull, with no excess
+        // at the keel and no shortfall at the bilge.
         const uCenter = (j + 0.5) / WIDTH_SAMPLES;
         const xFraction = uCenter * 2 - 1;
 
@@ -136,8 +136,8 @@ export class Buoyancy {
           centroidY[level] = accumulated > 0 ? momentY / accumulated : yBottom;
         }
 
-        // O centróide do nível 0 não é usado (volume zero), mas deixá-lo no
-        // fundo evita um salto na interpolação do primeiro nível.
+        // Level 0's centroid is not used (zero volume), but leaving it at the bottom
+        // avoids a jump in the first level's interpolation.
         centroidY[0] = yBottom;
 
         const column: HullColumn = {
@@ -158,26 +158,27 @@ export class Buoyancy {
   }
 
   /**
-   * Massa que faz o navio boiar exatamente no calado de projeto.
+   * The mass that makes the ship float exactly at the design draft.
    *
-   * Sai da mesma tabela que gera o empuxo, e não de `computeDisplacement()`:
-   * as duas quadraturas diferem em frações de por cento, e é justamente essa
-   * diferença que apareceria como o navio nascendo alguns centímetros fora da
-   * linha d'água e afundando devagar até se acomodar.
+   * It comes from the same table that generates the buoyancy, and not from
+   * `computeDisplacement()`: the two quadratures differ by fractions of a percent, and
+   * it is exactly that difference that would show up as the ship being born a few
+   * centimeters off the waterline and sinking slowly until it settled.
    */
   getDesignMass(): number {
     return this.designVolume * WATER_DENSITY;
   }
 
   /**
-   * Aplica empuxo e amortecimento vertical ao corpo. Devolve telemetria de
-   * quanto do casco está na água, que o alagamento e o HUD leem.
+   * Applies buoyancy and vertical damping to the body. Returns telemetry about how much
+   * of the hull is in the water, which the flooding and the HUD read.
    */
   apply(body: ShipBody, waves: WaveField): BuoyancyReport {
     body.localDirToWorld(_localUp, _up);
-    // Emborcado, a projeção da vertical local na vertical do mundo tende a zero
-    // e a divisão explodiria. O piso mantém a conta finita e o navio ainda
-    // recebe empuxo — só deixa de ter para onde se endireitar, que é o certo.
+    // Capsized, the projection of the local vertical onto the world's tends to zero
+    // and the division would blow up. The floor keeps the arithmetic finite and the
+    // ship still receives buoyancy — it just stops having anywhere to right itself to,
+    // which is correct.
     const upY = Math.max(_up.y, 0.2);
 
     let submerged = 0;
@@ -191,8 +192,8 @@ export class Buoyancy {
       const depth = waterY - _worldPoint.y;
       depthSum += depth;
 
-      // Altura local em que esta coluna corta a superfície: andar `s` ao longo
-      // do eixo vertical *do navio* sobe `s · upY` no mundo.
+      // Local height at which this column crosses the surface: moving `s` along the
+      // *ship's* vertical axis rises `s · upY` in the world.
       const crossing = depth / upY;
       const sample = sampleColumn(column, crossing);
       if (sample.volume <= 0) continue;
@@ -203,9 +204,9 @@ export class Buoyancy {
       body.localToWorld(_local, _worldPoint);
       _worldArm.subVectors(_worldPoint, body.comPosition);
 
-      // Empuxo: sempre para cima no mundo, aplicado no centróide do volume
-      // submerso desta coluna. O braço até o centro de massa é o que vira
-      // momento de endireitamento quando o navio aderna.
+      // Buoyancy: always upward in the world, applied at this column's submerged
+      // volume centroid. The arm to the center of mass is what becomes the righting
+      // moment when the ship heels.
       _force.set(0, WATER_DENSITY * GRAVITY * sample.volume, 0);
 
       body.pointVelocity(_worldArm, _pointVelocity);
@@ -223,8 +224,8 @@ export class Buoyancy {
 const _sample = { volume: 0, x: 0, y: 0 };
 
 /**
- * Lê a tabela de uma coluna na altura `y` da linha d'água, interpolando.
- * Devolve um objeto compartilhado — isto roda trinta vezes por passo de física.
+ * Reads a column's table at waterline height `y`, interpolating.
+ * It returns a shared object — this runs thirty times per physics step.
  */
 function sampleColumn(column: HullColumn, y: number): typeof _sample {
   if (y <= column.yBottom) {

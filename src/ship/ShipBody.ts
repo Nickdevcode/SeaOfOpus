@@ -1,42 +1,42 @@
 /**
- * Corpo rígido de 6 graus de liberdade — o integrador que move o navio.
+ * A 6-degree-of-freedom rigid body — the integrator that moves the ship.
  *
- * É deliberadamente pequeno: acumula força e torque durante o passo, integra uma
- * vez e zera. Quem decide *quais* forças existem são `Buoyancy`, `Rudder`,
- * `SailSim` e `Anchor`; este módulo não sabe o que é água nem vento.
+ * It is deliberately small: it accumulates force and torque during the step,
+ * integrates once and zeroes. What decides *which* forces exist are `Buoyancy`,
+ * `Rudder`, `SailSim` and `Anchor`; this module does not know what water or wind is.
  *
- * **Massa adicionada.** Um casco que acelera de lado arrasta junto uma boa massa
- * de água, e ignorar isso deixa o navio nervoso: ele escorrega para os lados e
- * sobe na onda rápido demais. Em vez de montar o tensor completo de massa
- * adicionada (que acopla arfagem com caturro e vale o dobro do código), a massa
- * é anisotrópica no referencial do navio — o padrão em simulação de barco para
- * jogo. Como empuxo e gravidade são divididos pelo mesmo número, o equilíbrio
- * não muda; só muda a rapidez com que o navio responde em cada eixo.
+ * **Added mass.** A hull accelerating sideways drags a good mass of water along, and
+ * ignoring that leaves the ship twitchy: it slides sideways and rides up the wave too
+ * fast. Instead of assembling the full added-mass tensor (which couples heave with
+ * pitch and is worth twice the code), the mass is anisotropic in the ship's frame — the
+ * standard in boat simulation for games. Since buoyancy and gravity are divided by the
+ * same number, the equilibrium does not change; only how quickly the ship responds on
+ * each axis does.
  *
- * **Termo giroscópico.** ω × (Iω) foi omitido de propósito. Num navio ω é da
- * ordem de 0,3 rad/s e o termo fica três ordens de grandeza abaixo dos torques
- * hidrodinâmicos, mas ele é o primeiro a explodir com integração explícita.
+ * **Gyroscopic term.** ω × (Iω) was deliberately omitted. On a ship ω is on the order
+ * of 0.3 rad/s and the term sits three orders of magnitude below the hydrodynamic
+ * torques, but it is the first thing to blow up under explicit integration.
  */
 
 import * as THREE from 'three';
 
 export interface ShipBodyOptions {
-  /** Massa em repouso, em kg. Sai do deslocamento do casco. */
+  /** Mass at rest, in kg. It comes from the hull's displacement. */
   mass: number;
   /**
-   * Centro de massa, em coordenadas locais. Fica abaixo da linha d'água: é o
-   * lastro que garante que o navio se endireite em vez de emborcar.
+   * Center of mass, in local coordinates. It sits below the waterline: it is the
+   * ballast that guarantees the ship rights itself instead of capsizing.
    */
   centerOfMass: THREE.Vector3;
   /**
-   * Raios de giração em metros, em torno de X (caturro), Y (guinada) e
-   * Z (balanço). Já embutem a inércia adicionada da água.
+   * Radii of gyration in meters, about X (pitch), Y (yaw) and Z (roll). They already
+   * include the water's added inertia.
    */
   gyration: THREE.Vector3;
   /**
-   * Multiplicadores de massa adicionada por eixo local: X deriva, Y arfagem,
-   * Z avanço. Avanço é ~1,05 porque o casco é afilado nessa direção; deriva e
-   * arfagem empurram água de lado e quase dobram a massa efetiva.
+   * Added-mass multipliers per local axis: X sway, Y heave, Z surge. Surge is ~1.05
+   * because the hull is fine in that direction; sway and heave push water sideways and
+   * nearly double the effective mass.
    */
   addedMass: THREE.Vector3;
 }
@@ -51,31 +51,31 @@ const _localTorque = new THREE.Vector3();
 
 export class ShipBody {
   readonly mass: number;
-  /** Centro de massa em coordenadas locais (constante). */
+  /** Center of mass in local coordinates (constant). */
   readonly centerOfMass: THREE.Vector3;
-  /** Momentos de inércia principais, em kg·m², nos eixos locais X/Y/Z. */
+  /** Principal moments of inertia, in kg·m², on the local X/Y/Z axes. */
   readonly inertia = new THREE.Vector3();
   readonly addedMass: THREE.Vector3;
 
   /**
-   * Massa extra embarcada, em kg — hoje só a água do porão (`ShipDamage`).
+   * Extra mass shipped, in kg — today only the hold's water (`ShipDamage`).
    *
-   * Existe separada de `mass` porque o peso dela já entra como *força* aplicada
-   * no centróide da água, que é o que produz a adernagem. O que falta é a
-   * inércia: sem somar aqui, um navio meio alagado ficaria mais leve de manobrar
-   * do que um seco, que é exatamente o contrário do que deve acontecer.
+   * It exists separately from `mass` because its weight already comes in as a *force*
+   * applied at the water's centroid, which is what produces the heel. What is missing
+   * is the inertia: without adding it here, a half-flooded ship would be lighter to
+   * maneuver than a dry one, which is exactly the opposite of what should happen.
    */
   floodedMass = 0;
 
-  /** Posição **do centro de massa** no mundo. É o que o integrador move. */
+  /** Position **of the center of mass** in the world. It is what the integrator moves. */
   readonly comPosition = new THREE.Vector3();
   readonly orientation = new THREE.Quaternion();
-  /** Velocidade do centro de massa, no mundo. */
+  /** Velocity of the center of mass, in the world. */
   readonly velocity = new THREE.Vector3();
-  /** Velocidade angular no mundo, em rad/s. */
+  /** Angular velocity in the world, in rad/s. */
   readonly angularVelocity = new THREE.Vector3();
 
-  /** Pose do passo anterior, para interpolar o visual entre passos fixos. */
+  /** The previous step's pose, to interpolate the visuals between fixed steps. */
   readonly previousCom = new THREE.Vector3();
   readonly previousOrientation = new THREE.Quaternion();
 
@@ -91,54 +91,54 @@ export class ShipBody {
     this.inertia.set(this.mass * x * x, this.mass * y * y, this.mass * z * z);
   }
 
-  /** Posição da **origem local** do navio (linha d'água de projeto, meia-nau). */
+  /** Position of the ship's **local origin** (design waterline, amidships). */
   getOrigin(target: THREE.Vector3): THREE.Vector3 {
     return target.copy(this.centerOfMass).applyQuaternion(this.orientation).negate().add(this.comPosition);
   }
 
-  /** Coloca a origem local do navio num ponto do mundo. */
+  /** Places the ship's local origin at a point in the world. */
   setOrigin(x: number, y: number, z: number): void {
     _arm.copy(this.centerOfMass).applyQuaternion(this.orientation);
     this.comPosition.set(x + _arm.x, y + _arm.y, z + _arm.z);
     this.previousCom.copy(this.comPosition);
   }
 
-  /** Converte um ponto local em ponto do mundo. */
+  /** Converts a local point into a world point. */
   localToWorld(local: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 {
     return target.copy(local).sub(this.centerOfMass).applyQuaternion(this.orientation).add(this.comPosition);
   }
 
-  /** Converte um ponto do mundo em ponto local. Inverso de `localToWorld`. */
+  /** Converts a world point into a local point. The inverse of `localToWorld`. */
   worldToLocal(world: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 {
     _invRotation.copy(this.orientation).invert();
     return target.copy(world).sub(this.comPosition).applyQuaternion(_invRotation).add(this.centerOfMass);
   }
 
-  /** Rotaciona uma direção local para o mundo (sem transladar). */
+  /** Rotates a local direction into the world (without translating). */
   localDirToWorld(local: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 {
     return target.copy(local).applyQuaternion(this.orientation);
   }
 
-  /** Rotaciona uma direção do mundo para o referencial do navio. */
+  /** Rotates a world direction into the ship's frame. */
   worldDirToLocal(world: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 {
     _invRotation.copy(this.orientation).invert();
     return target.copy(world).applyQuaternion(_invRotation);
   }
 
   /**
-   * Velocidade de um ponto do corpo, dado o **braço até o centro de massa** já
-   * no referencial do mundo: v + ω × r.
+   * Velocity of a point on the body, given the **arm to the center of mass** already in
+   * the world frame: v + ω × r.
    */
   pointVelocity(worldArm: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 {
     return target.crossVectors(this.angularVelocity, worldArm).add(this.velocity);
   }
 
-  /** Força no mundo aplicada no centro de massa — não gera torque. */
+  /** A world force applied at the center of mass — it generates no torque. */
   applyForce(force: THREE.Vector3): void {
     this.force.add(force);
   }
 
-  /** Força no mundo aplicada num ponto do mundo. Gera torque em torno do CM. */
+  /** A world force applied at a world point. It generates torque about the CM. */
   applyForceAtPoint(force: THREE.Vector3, worldPoint: THREE.Vector3): void {
     this.force.add(force);
     _arm.subVectors(worldPoint, this.comPosition);
@@ -153,8 +153,8 @@ export class ShipBody {
     this.previousCom.copy(this.comPosition);
     this.previousOrientation.copy(this.orientation);
 
-    // Linear: divide no referencial do navio para a massa adicionada valer por
-    // eixo, e só então volta para o mundo.
+    // Linear: it divides in the ship's frame so the added mass applies per axis, and
+    // only then goes back into the world.
     const mass = this.mass + this.floodedMass;
     this.worldDirToLocal(this.force, _localForce);
     _accel.set(
@@ -166,9 +166,9 @@ export class ShipBody {
     this.velocity.addScaledVector(_accel, dt);
     this.comPosition.addScaledVector(this.velocity, dt);
 
-    // Angular: mesmo caminho, agora com o tensor de inércia (diagonal no local).
-    // A inércia acompanha a massa embarcada pela mesma razão — água no porão
-    // também custa para girar.
+    // Angular: the same path, now with the inertia tensor (diagonal in local space).
+    // The inertia follows the shipped mass for the same reason — water in the hold
+    // costs to rotate too.
     const inertiaScale = mass / this.mass;
     this.worldDirToLocal(this.torque, _localTorque);
     _localTorque.set(
@@ -179,8 +179,8 @@ export class ShipBody {
     this.localDirToWorld(_localTorque, _localTorque);
     this.angularVelocity.addScaledVector(_localTorque, dt);
 
-    // q̇ = ½ ω q. Normalizar todo passo é o que impede o erro de integração de
-    // virar escala espúria na matriz do navio.
+    // q̇ = ½ ω q. Normalizing every step is what keeps the integration error from
+    // becoming a spurious scale in the ship's matrix.
     _spin.set(this.angularVelocity.x, this.angularVelocity.y, this.angularVelocity.z, 0);
     _spin.multiply(this.orientation);
     this.orientation.x += _spin.x * 0.5 * dt;
@@ -194,21 +194,21 @@ export class ShipBody {
   }
 
   /**
-   * Descarta o que se acumulou sem integrar.
+   * Discards what has accumulated without integrating.
    *
-   * Existe para o lado que **não** simula. Lá a pose chega pronta pela rede e
-   * `integrate` nunca roda — mas alguns subsistemas continuam rodando pelo que
-   * eles *desenham* (a vela, que precisa medir o vento para se inflar), e eles
-   * empurram força ao passar. Sem esta chamada, esse acumulador cresceria por
-   * toda a partida sem nunca ser lido: inofensivo hoje, e exatamente o tipo de
-   * número que estoura em `Infinity` no dia em que alguém resolver lê-lo.
+   * It exists for the side that does **not** simulate. There the pose arrives ready
+   * over the network and `integrate` never runs — but some subsystems go on running for
+   * what they *draw* (the sail, which has to measure the wind to fill), and they push
+   * force as they pass. Without this call, that accumulator would grow for the whole
+   * match without ever being read: harmless today, and exactly the kind of number that
+   * blows up to `Infinity` the day somebody decides to read it.
    */
   clearForces(): void {
     this.force.set(0, 0, 0);
     this.torque.set(0, 0, 0);
   }
 
-  /** Pose interpolada entre o passo anterior e o atual, para o render. */
+  /** Pose interpolated between the previous step and the current one, for the render. */
   sampleOrigin(alpha: number, target: THREE.Vector3, targetRotation: THREE.Quaternion): void {
     targetRotation.copy(this.previousOrientation).slerp(this.orientation, alpha);
     _arm.copy(this.centerOfMass).applyQuaternion(targetRotation);
