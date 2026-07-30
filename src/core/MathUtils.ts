@@ -13,7 +13,7 @@ export const RAD = 180 / Math.PI;
 /** Gravity in m/s². Used by the ballistics and by the buoyancy. */
 export const GRAVITY = 9.81;
 
-/** Densidade da água do mar em kg/m³. */
+/** Seawater density in kg/m³. */
 export const WATER_DENSITY = 1025;
 
 /** Air density in kg/m³, used by the sail's force and the ball's drag. */

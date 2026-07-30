@@ -1,14 +1,14 @@
 /**
- * Os dois auxiliares de construção que as telas de sobreposição compartilham.
+ * The two building helpers the overlay screens share.
  *
- * Moram fora de `Menu` por uma razão mecânica, e não de arrumação: `OnlineMenu`
- * constrói o próprio DOM e `Menu` constrói `OnlineMenu`. Se os auxiliares ficassem
- * num dos dois, os módulos se importariam em círculo — e um ciclo que hoje
- * funciona por ordem de avaliação é o tipo de coisa que quebra no dia em que
- * alguém troca um `function` por um `const`.
+ * They live outside `Menu` for a mechanical reason, and not for tidiness: `OnlineMenu`
+ * builds its own DOM and `Menu` builds `OnlineMenu`. If the helpers lived in either one,
+ * the modules would import each other in a circle — and a cycle that works today by
+ * evaluation order is the kind of thing that breaks the day somebody swaps a `function`
+ * for a `const`.
  */
 
-/** Cria um elemento com classe, pai e texto opcionais, na ordem em que se escreve. */
+/** Creates an element with optional class, parent and text, in the order you write it. */
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className: string,
@@ -22,7 +22,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-/** Cabeçalho com o logotipo. Usado no título, no online e na tela de fim. */
+/** The header with the wordmark. Used on the title, on online and on the end screen. */
 export function buildBrand(parent: HTMLElement, subtitle: string): void {
   const brand = el('div', 'brand', parent);
   el('h1', 'brand__title', brand, 'Sea of Opus');

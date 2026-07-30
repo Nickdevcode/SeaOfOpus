@@ -1,20 +1,21 @@
 /// <reference types="vite/client" />
 
 /**
- * As variáveis de ambiente que o jogo lê.
+ * The environment variables the game reads.
  *
- * ⚠️ O Vite **embute** estes valores no pacote durante o `build`, e não os lê em
- * tempo de execução. Trocar a URL do servidor de sala na hospedagem exige um build
- * novo — republicar o mesmo artefato mantém o valor antigo lá dentro.
+ * ⚠️ Vite **inlines** these values into the bundle during the `build`, and does not read
+ * them at run time. Changing the room server's URL on the host requires a new build —
+ * republishing the same artifact keeps the old value inside it.
  */
 interface ImportMetaEnv {
   /**
-   * Servidor de sala do duelo em rede: `ws://127.0.0.1:8787` em desenvolvimento,
-   * `wss://<worker>.workers.dev` publicado.
+   * The networked duel's room server: `ws://127.0.0.1:8787` in development,
+   * `wss://<worker>.workers.dev` once published.
    *
-   * Ausente, o modo online nasce apagado com o motivo na tela — ver
-   * `Menu.setOnlineAvailable`. É de propósito: um jogo que abre normal e só falha
-   * depois de dois cliques é pior que um que diz na primeira tela o que falta.
+   * Absent, online mode is born disabled with the reason on screen — see
+   * `Menu.setOnlineAvailable`. That is on purpose: a game that opens normally and only
+   * fails after two clicks is worse than one that says on the first screen what is
+   * missing.
    */
   readonly VITE_ROOM_SERVER?: string;
 }
