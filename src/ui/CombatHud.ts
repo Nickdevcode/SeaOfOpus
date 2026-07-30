@@ -1,21 +1,21 @@
 /**
- * HUD de combate: bússola, marcador do inimigo, porão e estado das peças.
+ * The combat HUD: compass, enemy marker, hold and the guns' state.
  *
- * Duas decisões de engenharia moldam o arquivo.
+ * Two engineering decisions shape the file.
  *
- * **1. O DOM só é tocado quando o conteúdo muda.** Este HUD roda a cada quadro, e
- * escrever `textContent` a 144 Hz obriga o navegador a refazer o layout de texto
- * mesmo quando o número é o mesmo. Cada campo guarda o último valor escrito e sai
- * fora se nada mudou. O que muda todo quadro por natureza — a rolagem da bússola e
- * a posição do marcador — usa **só `transform`**, que o compositor resolve sem
- * tocar no layout.
+ * **1. The DOM is only touched when the content changes.** This HUD runs every frame, and
+ * writing `textContent` at 144 Hz forces the browser to redo the text layout even when
+ * the number is the same. Each field keeps the last value it wrote and bails out if
+ * nothing changed. What changes every frame by nature — the compass's scroll and the
+ * marker's position — uses **only `transform`**, which the compositor resolves without
+ * touching layout.
  *
- * **2. A bússola é uma fita longa que desliza, não marcas reposicionadas.** As
- * marcas são criadas uma vez, cobrindo 720° em posições fixas, e o rumo entra como
- * um único `translateX`. A alternativa — recalcular o `left` de 24 marcas por
- * quadro — são 24 escritas de layout por quadro para o mesmo resultado visual. Os
- * 720° (duas voltas) existem para que a janela sempre caia no meio da fita e
- * nenhuma das bordas fique sem marcas ao cruzar o Norte.
+ * **2. The compass is one long strip that slides, not repositioned ticks.** The ticks are
+ * created once, covering 720° at fixed positions, and the heading comes in as a single
+ * `translateX`. The alternative — recomputing the `left` of 24 ticks per frame — is 24
+ * layout writes per frame for the same visual result. The 720° (two turns) exist so the
+ * window always falls in the middle of the strip and neither edge is left without ticks
+ * when crossing North.
  */
 
 import * as THREE from 'three';
@@ -25,14 +25,14 @@ import type { Ship } from '../ship/Ship';
 import type { WaveField } from '../world/WaveField';
 import '../styles/hud.css';
 
-/** Pixels por grau na fita da bússola: ~90° visíveis na janela de 34rem. */
+/** Pixels per degree on the compass strip: ~90° visible in the 34rem window. */
 const PIXELS_PER_DEGREE = 6;
-/** Passo entre marcas menores, em graus. */
+/** Step between minor ticks, in degrees. */
 const TICK_STEP = 15;
-/** Folga da borda da tela para a seta de fora de campo, em pixels. */
+/** Clearance from the screen's edge for the off-screen arrow, in pixels. */
 const EDGE_MARGIN = 46;
 
-/** Alagamento a partir do qual o poço avisa, e a partir do qual ele grita. */
+/** The flooding at which the well warns, and the one at which it shouts. */
 const WARN_FLOOD = 0.25;
 const CRITICAL_FLOOD = 0.5;
 
@@ -50,7 +50,7 @@ const CARDINALS: Record<number, string> = {
 const _worldPoint = new THREE.Vector3();
 const _projected = new THREE.Vector3();
 
-/** Um campo de texto que só escreve no DOM quando o valor muda. */
+/** A text field that only writes to the DOM when the value changes. */
 class TextField {
   private last = '\0';
 
@@ -94,7 +94,7 @@ export class CombatHud {
   private readonly foeState: HTMLDivElement;
   private readonly foeStateText: TextField;
 
-  /** Última classe de estado do poço, para não reescrever `className` por quadro. */
+  /** The well's last state class, so `className` is not rewritten every frame. */
   private lastBilgeClass = '';
   private lastDrownOpacity = -1;
 
@@ -102,14 +102,14 @@ export class CombatHud {
     this.root = div('hud');
     this.root.hidden = true;
 
-    // --- bússola ---
+    // --- compass ---
     const compass = div('compass', this.root);
     this.compassStrip = div('compass__strip', compass);
     this.buildTicks();
 
-    // A seta aponta o rumo de **vento em popa**, não de onde o vento vem. É a
-    // informação acionável: aquele é o rumo mais rápido da Chalupa, e é para lá que
-    // se corre quando se está perdendo.
+    // The arrow points to the **downwind** heading, not to where the wind comes from.
+    // That is the actionable information: it is the sloop's fastest heading, and it is
+    // where you run when you are losing.
     this.windMark = div('compass__wind', this.compassStrip);
     this.windMark.textContent = '▼';
 
@@ -119,13 +119,13 @@ export class CombatHud {
     this.foeState = div('foe-state', this.root);
     this.foeStateText = new TextField(this.foeState);
 
-    // --- marcador do inimigo ---
+    // --- enemy marker ---
     this.target = div('target', this.root);
     this.target.hidden = true;
     this.targetMark = div('target__mark', this.target);
     this.targetRange = new TextField(div('target__range', this.target));
 
-    // --- poço do porão ---
+    // --- the hold's well ---
     this.bilge = div('bilge', this.root);
     const bilgeLabel = div('bilge__label', this.bilge);
     const caption = document.createElement('span');
@@ -138,8 +138,8 @@ export class CombatHud {
     const well = div('bilge__well', this.bilge);
     this.bilgeWater = div('bilge__water', well);
 
-    // --- peças e paiol ---
-    // Numa coluna só, ancorada acima das dicas de comando: ver `.crew-status`.
+    // --- guns and magazine ---
+    // In a single column, anchored above the control hints: see `.crew-status`.
     const crew = div('crew-status', this.root);
     const pieces = div('pieces', crew);
     this.pieces = ['Starboard', 'Port'].map((name) => {
@@ -177,15 +177,15 @@ export class CombatHud {
   }
 
   /**
-   * Um quadro de HUD.
+   * One HUD frame.
    *
-   * @param camera necessária para projetar o inimigo na tela.
+   * @param camera needed to project the enemy onto the screen.
    */
   /**
-   * @param foeLabel como o adversário é anunciado: a intenção do capitão da
-   *   máquina, ou o apelido de quem está do outro lado. O HUD não pergunta qual
-   *   dos dois é — quem sabe é quem montou a partida, e passar o rótulo pronto
-   *   é o que faz esta tela funcionar igual nos dois modos.
+   * @param foeLabel how the opponent is announced: the machine captain's intent, or the
+   *   nickname of whoever is on the other side. The HUD does not ask which of the two it
+   *   is — whoever knows is whoever set the match up, and passing the label ready-made is
+   *   what makes this screen work the same in both modes.
    */
   update(
     ship: Ship,
@@ -203,9 +203,9 @@ export class CombatHud {
     this.updateFoe(enemy, foeLabel);
   }
 
-  // -- bússola -----------------------------------------------------------------
+  // -- compass -----------------------------------------------------------------
 
-  /** Cria as marcas uma vez, cobrindo duas voltas. Ver a nota no topo. */
+  /** Creates the ticks once, covering two turns. See the note at the top. */
   private buildTicks(): void {
     for (let degrees = 0; degrees <= 720; degrees += TICK_STEP) {
       const cardinal = CARDINALS[degrees % 360];
@@ -219,12 +219,12 @@ export class CombatHud {
   }
 
   private updateCompass(ship: Ship, waves: WaveField): void {
-    // O rumo do jogo é 0 em −Z e cresce para bombordo; a bússola do jogador precisa
-    // crescer no sentido horário, como qualquer bússola. Daí a negação.
+    // The game's heading is 0 at −Z and grows to port; the player's compass has to grow
+    // clockwise, like any compass. Hence the negation.
     const degrees = (((-ship.heading * RAD) % 360) + 360) % 360;
 
-    // Centra a janela no meio da fita (a volta do meio, +360°), para que as duas
-    // bordas sempre tenham marcas mesmo cruzando o Norte.
+    // Center the window in the middle of the strip (the middle turn, +360°), so both
+    // edges always have ticks even when crossing North.
     const width = this.compassStrip.parentElement?.clientWidth ?? 0;
     const offset = width / 2 - (degrees + 360) * PIXELS_PER_DEGREE;
     this.compassStrip.style.transform = `translateX(${offset.toFixed(1)}px)`;
@@ -235,7 +235,7 @@ export class CombatHud {
     this.heading.set(`${degrees.toFixed(0).padStart(3, '0')}°`);
   }
 
-  // -- marcador do inimigo -----------------------------------------------------
+  // -- enemy marker ------------------------------------------------------------
 
   private updateTarget(enemy: Ship, camera: THREE.PerspectiveCamera): void {
     if (enemy.damage.isSunk) {
@@ -243,8 +243,8 @@ export class CombatHud {
       return;
     }
 
-    // Mira o topo do mastro? Não: o meio do casco. O mastro tem 12 m e a marca
-    // subiria muito acima do navio de perto, apontando para céu vazio.
+    // Aim at the masthead? No: at the middle of the hull. The mast is 12 m and up close
+    // the marker would climb far above the ship, pointing at empty sky.
     enemy.body.localToWorld(_worldPoint.set(0, 2, 0), _worldPoint);
     const distance = camera.position.distanceTo(_worldPoint);
 
@@ -252,8 +252,9 @@ export class CombatHud {
 
     const width = window.innerWidth;
     const height = window.innerHeight;
-    // `z > 1` é atrás do plano near, e nesse caso a projeção sai espelhada — o
-    // sinal precisa ser invertido para a seta apontar para trás e não para frente.
+    // `z > 1` is behind the near plane, and in that case the projection comes out
+    // mirrored — the sign has to be flipped for the arrow to point backward and not
+    // forward.
     const behind = _projected.z > 1;
     const ndcX = behind ? -_projected.x : _projected.x;
     const ndcY = behind ? -_projected.y : _projected.y;
@@ -272,7 +273,7 @@ export class CombatHud {
       return;
     }
 
-    // Fora de campo: encosta na borda na direção certa e vira seta.
+    // Off screen: it sticks to the edge in the right direction and becomes an arrow.
     if (!this.target.classList.contains('target--offscreen')) {
       this.target.classList.add('target--offscreen');
     }
@@ -280,11 +281,11 @@ export class CombatHud {
     const halfWidth = width / 2 - EDGE_MARGIN;
     const halfHeight = height / 2 - EDGE_MARGIN;
     const dirX = ndcX;
-    // A tela cresce para baixo e o NDC para cima.
+    // The screen grows downward and the NDC upward.
     const dirY = -ndcY;
 
-    // Escala o vetor até ele encostar na primeira borda da caixa. O maior dos dois
-    // quocientes é o eixo que estoura primeiro.
+    // Scale the vector until it touches the box's first edge. The larger of the two
+    // quotients is the axis that overflows first.
     const scale = Math.max(
       Math.abs(dirX) / (halfWidth || 1),
       Math.abs(dirY) / (halfHeight || 1),
@@ -294,11 +295,11 @@ export class CombatHud {
     const y = height / 2 + dirY * factor;
 
     this.target.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
-    // A seta do CSS aponta para baixo em repouso, então o zero do ângulo é +Y.
+    // The CSS arrow points down at rest, so the angle's zero is +Y.
     this.targetMark.style.setProperty('--angle', `${Math.atan2(dirX, dirY).toFixed(3)}rad`);
   }
 
-  // -- porão -------------------------------------------------------------------
+  // -- hold --------------------------------------------------------------------
 
   private updateBilge(ship: Ship): void {
     const flood = ship.damage.floodFraction;
@@ -315,13 +316,13 @@ export class CombatHud {
       this.lastBilgeClass = className;
     }
 
-    // A moldura só começa a aparecer no aviso, e chega ao talo no crítico: antes
-    // disso ela seria ansiedade sem informação.
+    // The vignette only starts showing at the warning, and goes all the way at the
+    // critical mark: before that it would be anxiety with no information.
     const alarm = ship.damage.isSinking
       ? 1
       : clamp01((flood - WARN_FLOOD) / (CRITICAL_FLOOD * 1.6 - WARN_FLOOD));
-    // Arredondado a duas casas: sem isso é uma escrita de estilo por quadro para
-    // uma diferença que ninguém vê.
+    // Rounded to two places: without it, it is a style write per frame for a difference
+    // nobody sees.
     const rounded = Math.round(alarm * 100) / 100;
     if (rounded !== this.lastDrownOpacity) {
       this.drown.style.opacity = `${rounded}`;
@@ -334,7 +335,7 @@ export class CombatHud {
     );
   }
 
-  // -- peças -------------------------------------------------------------------
+  // -- guns --------------------------------------------------------------------
 
   private updatePieces(ship: Ship): void {
     for (let i = 0; i < this.pieces.length; i++) {
@@ -351,7 +352,7 @@ export class CombatHud {
     this.magazine.set(`${ship.cannonballs}`);
   }
 
-  // -- inimigo -----------------------------------------------------------------
+  // -- enemy -------------------------------------------------------------------
 
   private updateFoe(enemy: Ship, foeLabel: string): void {
     if (enemy.damage.isSunk) {
@@ -360,9 +361,9 @@ export class CombatHud {
     }
     this.foeState.hidden = false;
 
-    // Mostra a intenção **e** o porão do inimigo: os dois juntos são o placar do
-    // duelo. Ver o inimigo em "Tapando rombos" com o porão em 40% é a leitura de
-    // que se está ganhando, e ela não precisa de barra de vida nenhuma.
+    // It shows the enemy's intent **and** their hold: the two together are the duel's
+    // scoreboard. Seeing the enemy on "Patching breaches" with the hold at 40% is the
+    // reading that you are winning, and it needs no health bar at all.
     const flood = enemy.damage.floodFraction;
     const suffix = flood > 0.01 ? ` · hold ${(flood * 100).toFixed(0)}%` : '';
     this.foeStateText.set(`${foeLabel}${suffix}`);
