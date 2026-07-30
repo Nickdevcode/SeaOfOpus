@@ -1,26 +1,27 @@
 /**
- * Rombos, alagamento e afundamento.
+ * Breaches, flooding and sinking.
  *
- * O modelo é o do Sea of Thieves lido pelo lado da física de verdade, e o que o
- * torna interessante é que **nada aqui é uma barra de vida**. Um tiro abre um
- * furo numa posição do casco; a água entra por ele na vazão que a diferença de
- * pressão manda; o peso dessa água faz o navio calar mais fundo; calando mais
- * fundo, mais furos ficam submersos e a vazão cresce. O navio afunda quando
- * ninguém segura essa realimentação — não quando um contador chega a zero.
+ * The model is Sea of Thieves read through real physics, and what makes it
+ * interesting is that **nothing here is a health bar**. A shot opens a hole at a
+ * position on the hull; water comes in through it at the flow rate the pressure
+ * difference dictates; the weight of that water makes the ship sit deeper; sitting
+ * deeper, more holes go under and the flow rate grows. The ship sinks when nobody
+ * holds that feedback loop back — not when a counter reaches zero.
  *
- * **Superfície livre.** A água do porão é tratada como um volume com o topo
- * *horizontal no mundo*, e não como um peso morto no centro do navio. Ao adernar,
- * ela escorre para o bordo baixo e o peso vai junto, o que aderna mais. É o
- * efeito de superfície livre, o mesmo que emborca navio de verdade com o porão
- * pela metade, e ele cai de graça de tratar a água como volume em vez de número.
+ * **Free surface.** The hold water is treated as a volume whose top is
+ * *horizontal in world space*, not as dead weight at the center of the ship. As
+ * the ship heels, it runs to the low side and the weight goes with it, which heels
+ * it further. That's the free surface effect, the same one that capsizes real
+ * ships with a half-full hold, and it falls out for free from treating the water
+ * as a volume instead of a number.
  *
- * A conta usa a mesma estrutura de colunas de `Buoyancy`, só que virada para
- * dentro: ali as colunas medem quanto casco está debaixo d'água, aqui medem
- * quanta água está dentro do casco. Ambas leem a mesma tabela de estações.
+ * The math uses the same column structure as `Buoyancy`, only turned inward:
+ * there the columns measure how much hull is under water, here they measure how
+ * much water is inside the hull. Both read the same station table.
  *
- * **Escapou de propósito:** balde. Tirar água com balde exige item na mão, e o
- * escopo desta entrega não tem inventário — a bomba de porão faz o mesmo trabalho
- * com `F` segurado, que é o verbo que o resto do navio já usa.
+ * **Deliberately left out:** the bucket. Bailing needs an item in hand, and the
+ * scope of this delivery has no inventory — the bilge pump does the same job with
+ * `F` held down, which is the verb the rest of the ship already uses.
  */
 
 import * as THREE from 'three';
@@ -45,345 +46,353 @@ import {
 import type { ShipHit } from '../combat/HitDetection';
 import type { WaveField } from '../world/WaveField';
 
-/** Estações do porão ao longo do comprimento. */
+/** Hold stations along the length. */
 const LENGTH_SAMPLES = 8;
-/** Faixas ao longo da boca: bombordo, centro, boreste. */
+/** Strips across the beam: port, center, starboard. */
 const WIDTH_SAMPLES = 3;
-/** Níveis da tabela de volume por coluna. */
+/** Levels in the per-column volume table. */
 const LEVELS = 24;
-/** Sub-passos da quadratura ao montar a tabela. */
+/** Quadrature sub-steps when building the table. */
 const QUADRATURE = 6;
 
 /**
- * Área efetiva de um rombo de bala, em m².
+ * Effective area of a cannonball breach, in m².
  *
- * Uma bala de 10 cm não abre um furo de 10 cm: ela estilhaça a tábua e leva
- * embora um pedaço de uns 30 cm de vão. O número é o do vão, não o da bala, e é
- * ele que decide o ritmo do jogo — dele sai a vazão de entrada de água.
+ * A 10 cm ball doesn't open a 10 cm hole: it shatters the plank and takes away a
+ * piece some 30 cm across. The number is the opening's, not the ball's, and it's
+ * the one that sets the pace of the game — the water inflow rate comes out of it.
  */
 const BREACH_AREA = 0.055;
 
 /**
- * Coeficiente de descarga de um furo de borda viva.
+ * Discharge coefficient of a sharp-edged hole.
  *
- * A água que entra por um buraco irregular não usa a área toda: a veia contrai.
- * 0,62 é o valor clássico para orifício em parede fina, e é o que transforma
- * "área do furo" em vazão real.
+ * The water coming in through a ragged hole doesn't use the whole area: the jet
+ * contracts. 0.62 is the classic value for a thin-plate orifice, and it's what
+ * turns "hole area" into real flow rate.
  */
 const DISCHARGE_COEFFICIENT = 0.62;
 
 /**
- * Velocidade máxima da veia que entra por um rombo, em m/s.
+ * Maximum speed of the jet coming in through a breach, in m/s.
  *
- * Torricelli não sabe que existe um casco: com o navio já afundando, a coluna
- * d'água sobre o furo passa de dois metros e a veia chegaria a 6 m/s, o que faz o
- * último segundo do naufrágio virar um degrau. Este teto é o pedaço de física que
- * falta — a resistência do próprio caminho da água pelo cavername — resumido num
- * número, e 3,81 m/s é a veia de uma coluna de 74 cm: acima disso, quem manda na
- * vazão é o caminho, não a pressão.
+ * Torricelli doesn't know a hull exists: with the ship already sinking, the water
+ * column over the hole passes two meters and the jet would reach 6 m/s, which
+ * turns the last second of the sinking into a step. This cap is the missing piece
+ * of physics — the resistance of the water's own path through the framing — boiled
+ * down to a number, and 3.81 m/s is the jet of a 74 cm column: above that, what
+ * rules the flow rate is the path, not the pressure.
  *
- * O valor **não** é escolhido: é o teto antigo (130 L/s) convertido, ou seja
- * `0,13 / (DISCHARGE_COEFFICIENT × BREACH_AREA)`. Assim um rombo recém-aberto
- * entrega exatamente a mesma água de antes e nada do balanço já medido se mexe —
- * o que muda é só o que acontece quando ele **cresce**. Errar essa conversão
- * (esquecer o coeficiente de descarga, por exemplo) derruba a vazão de todos os
- * rombos submersos em 38% de uma vez, e o sintoma é um duelo que fica um minuto
- * mais longo sem nenhuma razão aparente.
+ * The value is **not** chosen: it's the old cap (130 L/s) converted, that is,
+ * `0.13 / (DISCHARGE_COEFFICIENT × BREACH_AREA)`. That way a freshly opened breach
+ * delivers exactly the same water as before and nothing in the balance already
+ * measured moves — all that changes is what happens when it **grows**. Getting
+ * that conversion wrong (forgetting the discharge coefficient, say) drops the flow
+ * rate of every submerged breach by 38% at once, and the symptom is a duel that
+ * runs a minute longer for no apparent reason.
  *
- * **Era um teto de vazão (0,13 m³/s por rombo) e virou um teto de velocidade, e a
- * diferença decide o jogo.** Fixo por rombo, ele dizia que um buraco do dobro do
- * tamanho bebe o mesmo que um buraco pequeno — ou seja, que alargar um rombo não
- * vale nada e só abrir buracos novos conta. A telemetria mostrou o preço disso:
- * oito acertos concentrados num palmo do costado punham 10% de água no porão,
- * enquanto os mesmos oito varridos ao longo do casco **afundavam o navio**. Quem
- * mirava melhor causava dez vezes menos dano.
+ * **It was a flow rate cap (0.13 m³/s per breach) and became a speed cap, and the
+ * difference decides the game.** Fixed per breach, it said that a hole twice the
+ * size drinks the same as a small one — that is, that widening a breach is worth
+ * nothing and only opening new holes counts. Telemetry showed the price of that:
+ * eight hits concentrated within a handspan of hull side put 10% of water in the
+ * hold, while the same eight spread along the hull **sank the ship**. Whoever
+ * aimed better did ten times less damage.
  *
- * A resistência do cavername é por *área de passagem*, não por buraco: dois furos
- * lado a lado são dois caminhos, e um furo do dobro do tamanho também. Multiplicado
- * pela área, o teto passou a dizer isso — e alargar um rombo vale exatamente o que
- * a área dele diz.
+ * The framing's resistance is per *passage area*, not per hole: two holes side by
+ * side are two paths, and so is one hole twice the size. Multiplied by the area,
+ * the cap started saying that — and widening a breach is worth exactly what its
+ * area says.
  */
 const MAX_JET_SPEED = 3.81;
 
-/** Segundos de `F` segurado para pregar uma tábua sobre o rombo. */
+/** Seconds of `F` held down to nail a plank over the breach. */
 const REPAIR_TIME = 2.4;
 
 /**
- * Vazão da bomba de porão, em m³/s.
+ * Bilge pump flow rate, in m³/s.
  *
- * **Este número estava errado por uma ordem de grandeza.** Eram 90 L/s — bomba
- * de mão honesta, e completamente fora de escala para um porão de 81 m³: dava
- * 0,11 ponto percentual por segundo, ou seja, o contador do HUD só mudava a
- * cada nove segundos de botão segurado e a lâmina baixava 1,8 mm por segundo.
- * O jogador segurava, olhava, e concluía — com razão — que a bomba não fazia
- * nada. O bug não era de código: era de aritmética.
+ * **This number was wrong by an order of magnitude.** It was 90 L/s — an honest
+ * hand pump, and completely out of scale for an 81 m³ hold: it gave 0.11
+ * percentage point per second, meaning the HUD counter only changed every nine
+ * seconds of held button and the water sheet dropped 1.8 mm per second. The player
+ * held it down, watched, and concluded — rightly — that the pump did nothing.
+ * The bug wasn't in the code: it was in the arithmetic.
  *
- * 750 L/s é quase um ponto percentual por segundo, o que dá meio minuto para
- * secar um porão a 30% e cento e poucos segundos para esvaziar tudo. Continua
- * sendo trabalho, e continua sendo perder tapar depois de bombear: um rombo novo
- * bem submerso entrega até 130 L/s (ver `MAX_JET_SPEED`), então **seis furos
- * abertos ainda enchem mais rápido do que a bomba tira** — e um rombo alargado
- * conta como vários. O que ela dá é o que sempre deveria ter dado: a chance de
- * recuperar um navio já tapado antes que o combate acabe.
+ * 750 L/s is almost a percentage point per second, which gives half a minute to
+ * dry out a hold at 30% and a hundred-odd seconds to empty it all. It's still
+ * work, and patching after pumping is still a losing move: a new, well submerged
+ * breach delivers up to 130 L/s (see `MAX_JET_SPEED`), so **six open holes still
+ * fill faster than the pump empties** — and a widened breach counts as several.
+ * What it gives is what it always should have: the chance to recover a ship that's
+ * already patched before the fight is over.
  */
 const PUMP_RATE = 0.75;
 
 /**
- * Distância em que uma bala nova é absorvida por um rombo já existente.
+ * Distance within which a new cannonball is absorbed by an existing breach.
  *
- * Sem isto, duas balas na mesma tábua abrem dois furos sobrepostos e o casco
- * ganha o dobro da vazão numa área que fisicamente só cabe um rombo.
+ * Without this, two balls in the same plank open two overlapping holes and the
+ * hull gets twice the flow rate in an area that physically fits only one breach.
  *
- * **Deixou de ser um número escolhido e passou a sair do próprio rombo.** Estava
- * cravado em 90 cm — três vezes e meia o vão que um tiro abre —, e era isso que
- * fazia oito acertos bem agrupados renderem menos de dois rombos: o costado de 16 m
- * comportava só onze posições distintas, e a mira de um jogador que corrige a
- * pontaria cabe inteira dentro de uma delas. A precisão virava punição.
+ * **It stopped being a chosen number and now comes out of the breach itself.** It
+ * was pinned at 90 cm — three and a half times the opening a shot makes — and that
+ * is what made eight tightly grouped hits yield less than two breaches: the 16 m
+ * hull side held only eleven distinct positions, and the aim of a player who
+ * corrects his gunnery fits entirely inside one of them. Precision became
+ * punishment.
  *
- * O vão de `BREACH_AREA` é um círculo de 26 cm. Dois tiros abrem o mesmo buraco
- * quando os vãos se tocam, e o fator 1,6 é a folga da madeira trincada entre eles —
- * o que sobra de tábua entre dois furos a meio metro um do outro não segura água.
- * Amarrado à área, o dia em que o vão de um rombo mudar traz a fusão junto.
+ * The opening of `BREACH_AREA` is a 26 cm circle. Two shots open the same hole
+ * when their openings touch, and the 1.6 factor is the slack of cracked wood
+ * between them — what's left of plank between two holes half a meter apart won't
+ * hold water. Tied to the area, the day a breach's opening changes brings the
+ * merge along with it.
  */
 export const MERGE_DISTANCE = 2 * Math.sqrt(BREACH_AREA / Math.PI) * 1.6;
 
 /**
- * Distância em que um tiro arranca uma tábua já pregada.
+ * Distance within which a shot tears off an already nailed plank.
  *
- * Maior que `MERGE_DISTANCE` porque a tábua é uma peça de 1,15 m atravessada
- * sobre o furo: uma bala que bate a um metro do centro do rombo ainda pega
- * madeira. Menor que o meio comprimento dela porque acertar a ponta que sobra
- * não deveria abrir o casco de novo.
+ * Larger than `MERGE_DISTANCE` because the plank is a 1.15 m piece laid across
+ * the hole: a ball landing a meter from the center of the breach still catches
+ * wood. Smaller than half its length because hitting the leftover tip shouldn't
+ * open the hull again.
  */
 const PATCH_DISTANCE = 1.1;
 
 /**
- * Tábuas pregadas que o casco guarda ao mesmo tempo.
+ * Nailed planks a hull keeps at once.
  *
- * O mesmo teto do desenho dos rombos, e pelo mesmo motivo. Estourá-lo aposenta
- * a tábua mais antiga — que, numa partida em que já se pregaram vinte e quatro,
- * está num pedaço de casco que ninguém está olhando.
+ * The same cap as the breach visuals, and for the same reason. Blowing past it
+ * retires the oldest plank — which, in a match where twenty-four have already been
+ * nailed, is on a piece of hull nobody is looking at.
  */
 const MAX_PATCHES = 24;
 
 /**
- * Rombos abertos que um casco guarda ao mesmo tempo.
+ * Open breaches a hull keeps at once.
  *
- * ⚠️ **Este teto faltava, e a falta dele não era um detalhe de desenho: era o
- * formato de rede.** Ver `MAX_BREACHES` em `shared/protocol` — é de lá que o
- * número vem, porque é o fio que manda nele. E não era um limite teórico: com
- * `MERGE_DISTANCE` em 42 cm, um costado de 16 m comporta muito mais posições
- * distintas que isso.
+ * ⚠️ **This cap was missing, and its absence wasn't a visual detail: it was the
+ * wire format.** See `MAX_BREACHES` in `shared/protocol` — that's where the number
+ * comes from, because the wire is what rules it. And it wasn't a theoretical
+ * limit: with `MERGE_DISTANCE` at 42 cm, a 16 m hull side holds far more distinct
+ * positions than that.
  *
- * Com a lista cheia, um tiro novo **alarga o rombo mais próximo** em vez de
- * abrir mais um. É a degradação certa: o casco continua bebendo mais a cada
- * acerto (a vazão é linear na área — ver `breachInflow`), e o jogador não perde
- * o efeito do tiro que deu.
+ * With the list full, a new shot **widens the nearest breach** instead of opening
+ * one more. That's the right degradation: the hull goes on drinking more with
+ * every hit (the flow rate is linear in the area — see `breachInflow`), and the
+ * player doesn't lose the effect of the shot he landed.
  */
 export { MAX_BREACHES };
 
 /**
- * Quanto um rombo pode crescer ao absorver outros tiros.
+ * How much a breach can grow by absorbing further shots.
  *
- * Subiu de 2,2 quando o teto de vazão passou a escalar com a área
- * (`MAX_JET_SPEED`): enquanto alargar não valia nada, o número dava no mesmo;
- * valendo, ele vira o limite de quantos acertos no mesmo palmo ainda contam. Em
- * 3,2 são quatro tiros absorvidos antes de saturar (cada um soma 0,6 da área base)
- * — daí em diante o que a bala arranca é cavername, e casco sem caverna não é mais
- * um rombo, é outra avaria, que este arquivo não modela.
+ * Raised from 2.2 when the flow rate cap started scaling with the area
+ * (`MAX_JET_SPEED`): while widening was worth nothing, the number made no
+ * difference; now that it is worth something, it becomes the limit on how many
+ * hits in the same handspan still count. At 3.2 that's four shots absorbed before
+ * saturating (each one adds 0.6 of the base area) — from there on what the ball
+ * tears out is framing, and hull with no frame isn't a breach anymore, it's a
+ * different kind of damage, which this file doesn't model.
  */
 const MAX_BREACH_SCALE = 3.2;
 
 /**
- * Velocidade efetiva da água que embarca por um rombo acima da linha, em m/s.
+ * Effective speed of the water taken on through a breach above the line, in m/s.
  *
- * Não sai de Torricelli — não há coluna d'água para converter em velocidade.
- * Sai da ordem de grandeza do que uma crista carrega ao varrer o costado, e foi
- * calibrada pelo relógio do combate: com ela, três rombos altos num mar de meio
- * metro de desvio enchem o porão em cerca de dez minutos, e os mesmos três com
- * o navio já adernado (que é o que acontece quando a água entra) em bem menos.
- * Alta demais, e um único acerto de raspão afunda uma chalupa; baixa demais, e
- * volta-se ao que havia — furos que não significam nada.
+ * It doesn't come from Torricelli — there's no water column to turn into speed.
+ * It comes from the order of magnitude of what a crest carries as it sweeps the
+ * hull side, and it was calibrated against the clock of the fight: with it, three
+ * high breaches in a sea of half a meter of deviation fill the hold in about ten
+ * minutes, and those same three with the ship already heeled (which is what
+ * happens once water comes in) in far less. Too high, and a single grazing hit
+ * sinks a sloop; too low, and it's back to what it was — holes that mean nothing.
  */
 const SPRAY_SPEED = 1.6;
 
 /**
- * Velocidade de aproximação a partir da qual um abalroamento abre casco, em m/s.
+ * Closing speed from which a ramming opens hull, in m/s.
  *
- * Abaixo disso os cascos se encostam, rangem e se afastam — é atracar, e atracar
- * não arranca tábua. 1,2 m/s é mais que o mar empurra dois navios encostados um
- * contra o outro numa ondulação normal, e menos que qualquer manobra em que alguém
- * *escolheu* ir para cima do outro. A separação importa: sem ela, colar no
- * adversário e deixar a onda trabalhar afundaria os dois de graça.
+ * Below that the hulls touch, groan and drift apart — that's coming alongside, and
+ * coming alongside doesn't tear out plank. 1.2 m/s is more than the sea pushes two
+ * ships resting against each other in a normal swell, and less than any maneuver
+ * where someone *chose* to go at the other. The separation matters: without it,
+ * sticking to the enemy and letting the wave do the work would sink both for free.
  */
 const RAM_SPEED = 1.2;
 
 /**
- * Quanta velocidade a mais vale um rombo a mais, em m/s.
+ * How much extra speed one extra breach is worth, in m/s.
  *
- * A escada sai em 1,2 → um rombo, 2,1 → dois, 3,0 e acima → três. Uma chalupa a
- * pano faz uns 5 m/s, então uma investida deliberada entrega o teto e um encostão
- * de manobra entrega um furo só. É a leitura que o jogo quer: bateu, quebrou, e
- * quanto mais forte, mais quebrou.
+ * The ladder comes out at 1.2 → one breach, 2.1 → two, 3.0 and above → three. A
+ * sloop under full sail does some 5 m/s, so a deliberate charge delivers the cap
+ * and a bump while maneuvering delivers a single hole. That's the reading the game
+ * wants: you hit it, you broke it, and the harder you hit, the more you broke.
  */
 const RAM_SPEED_STEP = 0.9;
 
-/** Rombos que um abalroamento abre por casco, no máximo. Ver `RAM_SPEED_STEP`. */
+/** Breaches a ramming opens per hull, at most. See `RAM_SPEED_STEP`. */
 const RAM_BREACHES_MAX = 3;
 
 /**
- * Distância entre os rombos de um mesmo abalroamento, ao longo do costado.
+ * Distance between the breaches of one and the same ramming, along the hull side.
  *
- * Tem de ser maior que `MERGE_DISTANCE` (42 cm), senão os três rombos que a pancada
- * abre viram um só alargado — e um rombo alargado bebe menos que três separados,
- * porque o alargamento satura em `MAX_BREACH_SCALE`. 90 cm dá o dobro da folga
- * necessária e ainda mantém o estrago concentrado onde os cascos se tocaram, que é
- * onde ele tem de estar para a história se ler no costado.
+ * It has to be larger than `MERGE_DISTANCE` (42 cm), or the three breaches the
+ * impact opens turn into a single widened one — and a widened breach drinks less
+ * than three separate ones, because widening saturates at `MAX_BREACH_SCALE`.
+ * 90 cm gives twice the slack needed and still keeps the damage concentrated where
+ * the hulls touched, which is where it has to be for the story to read on the hull
+ * side.
  */
 const RAM_SPREAD = 0.9;
 
 /**
- * Fração do porão cheia que conta como perdido.
+ * Fraction of the hold filled that counts as lost.
  *
- * Não é 1: com o porão em 92% a água já está passando por cima do vau e o navio
- * não volta mais. Esperar o último por cento só atrasaria o fim da partida.
+ * It isn't 1: with the hold at 92% the water is already coming over the deck beam
+ * and the ship doesn't come back. Waiting for the last percent would only delay
+ * the end of the match.
  */
 const FATAL_FLOOD = 0.92;
 
-/** Segundos entre "está afundando" e "afundou", para o naufrágio ser visto. */
+/** Seconds between "it is sinking" and "it sank", so the sinking gets watched. */
 const SINK_DURATION = 7;
 
 /**
- * Água embarcada **acima do porão** no fim do naufrágio, em kg.
+ * Water shipped **above the hold** at the end of the sinking, in kg.
  *
- * Sem este termo o navio não afunda, e vale a conta: o casco desloca ~37 t na
- * linha d'água de projeto e algo perto de 74 t completamente submerso. Com o porão
- * cheio (~28 t de água) o total chega a 65 t — ainda **menos** que o empuxo
- * disponível. O navio ficaria flutuando com a borda na água para sempre, e
- * `sinkTime` contaria sete segundos sem nada acontecer na tela.
+ * Without this term the ship does not sink, and the arithmetic is worth doing: the
+ * hull displaces ~37 t at the design waterline and something close to 74 t fully
+ * submerged. With the hold full (~28 t of water) the total reaches 65 t — still
+ * **less** than the buoyancy available. The ship would float with its sheer in the
+ * water forever, and `sinkTime` would count seven seconds with nothing happening on
+ * screen.
  *
- * O que falta na física não é um empurrão inventado: é que a 92% de porão o
- * trincaniz já está na água e o mar passa **por cima do convés**, pela escotilha e
- * pelas portinholas. Daí em diante enche o casco inteiro, não só o porão — e é
- * isso que este número representa. 45 t levam o conjunto a ~110 t contra 74 t de
- * empuxo, e o navio vai ao fundo com convicção.
+ * What the physics is missing is not an invented push: it is that at 92% of the hold
+ * the covering board is already in the water and the sea comes **over the deck**,
+ * through the hatch and through the gunports. From there on it fills the whole hull,
+ * not only the hold — and that is what this number represents. 45 t take the total to
+ * ~110 t against 74 t of buoyancy, and the ship goes down with conviction.
  *
- * O peso entra no **centro de massa**, e não no centróide da água do porão. Não é
- * preguiça: 45 t no braço de 2 m que o centróide alcança dariam 900 kN·m contra os
- * ~323 kN·m/rad de momento de endireitamento, ou seja, emborcaria o navio em
- * menos de um segundo. Um naufrágio real às vezes emborca mesmo, mas aqui o
- * resultado na tela seria um casco capotando como brinquedo. No centro de massa, a
- * banda continua vindo do efeito de superfície livre do porão, que já é o
- * mecanismo certo — só mais fundo a cada segundo.
+ * The weight is applied at the **center of mass**, and not at the centroid of the
+ * hold's water. That is not laziness: 45 t on the 2 m lever arm the centroid reaches
+ * would give 900 kN·m against the ~323 kN·m/rad of righting moment, meaning it would
+ * capsize the ship in under a second. A real sinking does sometimes capsize, but here
+ * the result on screen would be a hull rolling over like a toy. At the center of
+ * mass, the heel still comes from the hold's free-surface effect, which is already
+ * the right mechanism — only deeper with every second.
  */
 const SWAMP_MASS = 45000;
 
 /**
- * Vazão que entra por um rombo, em m³/s.
+ * Inflow through a breach, in m³/s.
  *
- * Pura, e exportada, porque é **a** conta do modelo de avaria: é ela que decide se
- * um casco furado em cinco lugares afunda ou aguenta, e é a única coisa aqui dentro
- * que dá para provar num teste sem montar um navio. Ver `tests/damage.ts`.
+ * Pure, and exported, because it is **the** calculation of the damage model: it is
+ * what decides whether a hull holed in five places sinks or holds, and it is the only
+ * thing in here you can prove in a test without assembling a ship. See
+ * `tests/damage.ts`.
  *
- * A propriedade que ela precisa ter, e que já faltou: **ser linear na área.** Um
- * rombo do dobro do tamanho bebe o dobro, inclusive depois de a veia saturar — é
- * isso que faz dois acertos no mesmo palmo de costado valerem dois acertos.
+ * The property it needs to have, and that it once lacked: **being linear in the
+ * area.** A breach twice the size drinks twice as much, including after the jet
+ * saturates — that is what makes two hits within a hand's breadth of planking worth
+ * two hits.
  *
- * ## E o rombo que fica **acima** da linha d'água
+ * ## And the breach that sits **above** the waterline
  *
- * Ele também bebe, e o motivo de isso ter virado regra é geométrico. Um acerto
- * abre rombo em qualquer ponto abaixo do convés, que fica em `y = 1,3`; a linha
- * d'água em repouso passa perto de `y = 0,05`. São **1,25 m de costado seco**
- * contra 85 cm de costado molhado — e o jogador mira no que enxerga, que é
- * justamente a parte seca. O resultado media-se no painel do F3: quatro rombos
- * somados entre os dois navios e `inflow 0 L/s` nos dois, com o porão parado em
- * 2% depois de um combate inteiro. Acertar deixava de ter consequência, que é o
- * contrário do que o modelo de avaria existe para fazer.
+ * It drinks too, and the reason that became a rule is geometric. A hit opens a breach
+ * at any point below the deck, which sits at `y = 1.3`; the waterline at rest runs
+ * near `y = 0.05`. That is **1.25 m of dry topsides** against 85 cm of wet — and the
+ * player aims at what they can see, which is exactly the dry part. The result was
+ * measured on the F3 panel: four breaches added up between the two ships and
+ * `inflow 0 L/s` on both, with the hold sitting at 2% after a whole engagement.
+ * Hitting stopped having consequences, which is the opposite of what the damage model
+ * exists to do.
  *
- * A saída não é fingir que o buraco alto está submerso: é reconhecer que **o mar
- * sobe até ele**. Um costado furado a meio metro da água embarca a cada
- * cavado, e quanto mais grosso o mar, mais vezes. A conta usa o desvio-padrão da
- * elevação do próprio campo de ondas como escala — o mesmo número que o HUD
- * mostra como `sigma` —, então a coisa fica ligada ao tempo de graça: em
- * calmaria um rombo alto quase não bebe, e numa tempestade ele bebe quase como
- * se estivesse submerso. Vira mais uma razão para fugir do mar grosso com o
- * casco furado, que é exatamente a decisão que este jogo quer que exista.
+ * The way out is not to pretend the high hole is submerged: it is to recognize that
+ * **the sea rises to it**. Planking holed half a meter above the water ships a wave
+ * with every trough, and the heavier the sea, the more often. The arithmetic uses the
+ * standard deviation of the wave field's own elevation as the scale — the same number
+ * the HUD shows as `sigma` — so it ties into the weather: in a dead calm a high breach
+ * barely drinks, and in a storm it drinks almost as if it were submerged. It becomes
+ * one more reason to run from heavy seas with a holed hull, which is exactly the
+ * decision this game wants to exist.
  *
- * @param area área efetiva de entrada, em m².
- * @param depth coluna d'água sobre o rombo, em metros. Negativo é altura acima.
- * @param waveSigma desvio-padrão da elevação do mar, em metros. Zero desliga o
- *   embarque por onda e devolve o modelo submerso puro — que é o que os testes
- *   de vazão querem medir.
+ * @param area effective inlet area, in m².
+ * @param depth water column above the breach, in meters. Negative is height above.
+ * @param waveSigma standard deviation of the sea's elevation, in meters. Zero switches
+ *   the wave shipping off and returns the pure submerged model — which is what the
+ *   inflow tests want to measure.
  */
 export function breachInflow(area: number, depth: number, waveSigma = 0): number {
   if (depth > 0) {
-    // Torricelli, até onde o caminho pelo cavername deixa. Ver `MAX_JET_SPEED`.
+    // Torricelli, as far as the path through the framing allows. See `MAX_JET_SPEED`.
     const speed = Math.min(Math.sqrt(2 * GRAVITY * depth), MAX_JET_SPEED);
     return DISCHARGE_COEFFICIENT * area * speed;
   }
 
   if (waveSigma <= 1e-3) return 0;
 
-  // Fração do tempo em que a crista alcança o rombo. É a cauda de uma normal de
-  // desvio `waveSigma`, aproximada pela própria gaussiana: a meio sigma acima da
-  // linha ela dá 88%, a um sigma 61%, a dois sigma 14%, e some. A aproximação
-  // exagera um pouco no meio da faixa e erra para o lado generoso, que é o lado
-  // certo quando a alternativa é o combate não ter consequência.
+  // Fraction of the time the crest reaches the breach. It is the tail of a normal
+  // with standard deviation `waveSigma`, approximated by the gaussian itself: half a
+  // sigma above the line it gives 88%, at one sigma 61%, at two sigma 14%, and it
+  // vanishes. The approximation overshoots a little in the middle of the range and
+  // errs on the generous side, which is the right side when the alternative is combat
+  // with no consequences.
   const above = -depth / waveSigma;
   const wetness = Math.exp(-0.5 * above * above);
   return DISCHARGE_COEFFICIENT * area * SPRAY_SPEED * wetness;
 }
 
 export interface Breach {
-  /** Centro do rombo, em coordenadas locais do navio. */
+  /** Center of the breach, in the ship's local coordinates. */
   readonly local: THREE.Vector3;
-  /** Normal externa do casco ali — orienta a tábua e o esguicho. */
+  /** Outward hull normal there — it orients the plank and the jet. */
   readonly normal: THREE.Vector3;
-  /** Área efetiva de entrada de água, em m². */
+  /** Effective water inlet area, in m². */
   area: number;
-  /** 0..1 do reparo em andamento. Chega a 1 e o rombo some da lista. */
+  /** 0..1 of the repair in progress. It reaches 1 and the breach leaves the list. */
   repair: number;
-  /** Vazão de entrada agora, em m³/s. O visual do esguicho lê daqui. */
+  /** Inflow right now, in m³/s. The jet's visuals read from here. */
   inflow: number;
-  /** Identificador estável, para o visual casar com o rombo entre frames. */
+  /** Stable identifier, so the visuals match the breach between frames. */
   readonly id: number;
 }
 
 /**
- * Uma tábua pregada sobre um rombo que já foi fechado.
+ * A plank nailed over a breach that has already been closed.
  *
- * Ela **não** faz física nenhuma: um rombo tapado sai de `breaches` e deixa de
- * entrar água, e é isso que resolve o alagamento. Isto aqui existe para o casco
- * ter memória do estrago — a tábua fica pregada onde estava o buraco, e uma
- * bala nova no mesmo lugar a arranca e reabre o rombo do tamanho que ele tinha.
+ * It does **no** physics at all: a patched breach leaves `breaches` and stops letting
+ * water in, and that is what resolves the flooding. This exists so the hull has a
+ * memory of the damage — the plank stays nailed where the hole was, and a fresh ball
+ * in the same place tears it off and reopens the breach at the size it had.
  *
- * É a mesma leitura do Sea of Thieves: um navio no fim de um combate longo é
- * uma colcha de retalhos, e a colcha conta a história melhor que qualquer
- * contador de vida.
+ * It is the same reading as Sea of Thieves: a ship at the end of a long fight is a
+ * patchwork quilt, and the quilt tells the story better than any health bar.
  */
 export interface Patch {
-  /** Centro do rombo tapado, em coordenadas locais do navio. */
+  /** Center of the patched breach, in the ship's local coordinates. */
   readonly local: THREE.Vector3;
-  /** Normal externa do casco ali — a tábua se deita contra ela. */
+  /** Outward hull normal there — the plank lies against it. */
   readonly normal: THREE.Vector3;
   /**
-   * Área do rombo que esta tábua fechou, em m².
+   * Area of the breach this plank closed, in m².
    *
-   * Guardada porque é ela que volta quando a tábua é arrancada: quem tapou um
-   * rombo alargado por três balas não recomeça de um furo pequeno.
+   * Kept because it is what comes back when the plank is torn off: whoever patched a
+   * breach widened by three balls does not start over from a small hole.
    */
   readonly area: number;
-  /** Identificador estável, e a semente do sorteio da pose da tábua. */
+  /** Stable identifier, and the seed for drawing the plank's pose. */
   readonly id: number;
 }
 
 interface HoldColumn {
-  /** X local do eixo da coluna. */
+  /** Local X of the column's axis. */
   x: number;
   z: number;
   yFloor: number;
   yCeiling: number;
-  /** Volume d'água (m³) com a superfície em cada nível. */
+  /** Water volume (m³) with the surface at each level. */
   volume: Float32Array;
   centroidX: Float32Array;
   centroidY: Float32Array;
@@ -394,7 +403,7 @@ const _centroid = new THREE.Vector3();
 const _force = new THREE.Vector3();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
-/** Rascunhos do rombo de abalroamento. Ver `ShipDamage.ram`. */
+/** Scratch values for the ramming breach. See `ShipDamage.ram`. */
 const _ramSection: HullSection = { halfBeam: 0, keelY: 0, sheerY: 0, fullness: 1 };
 const _ramHit: ShipHit = {
   fraction: 0,
@@ -406,49 +415,48 @@ const _ramHit: ShipHit = {
 
 export class ShipDamage {
   readonly breaches: Breach[] = [];
-  /** Tábuas pregadas, da mais antiga para a mais nova. Ver `Patch`. */
+  /** Nailed planks, from the oldest to the newest. See `Patch`. */
   readonly patches: Patch[] = [];
 
-  /** Água no porão, em m³. */
+  /** Water in the hold, in m³. */
   floodVolume = 0;
-  /** Capacidade total do porão, em m³. Medida da geometria, não escolhida. */
+  /** Total hold capacity, in m³. Measured from the geometry, not chosen. */
   readonly holdVolume: number;
 
   /**
-   * Offset do plano d'água interno no referencial local: os pontos da superfície
-   * satisfazem `p · localUp = waterPlane`. Guardado porque o visual da água do
-   * porão desenha exatamente este plano.
+   * Offset of the internal water plane in the local frame: the surface's points
+   * satisfy `p · localUp = waterPlane`. Kept because the hold water's visuals draw
+   * exactly this plane.
    */
   waterPlane = -Infinity;
 
-  /** Segundos desde que o naufrágio começou; `0` enquanto o navio está vivo. */
+  /** Seconds since the sinking started; `0` while the ship is alive. */
   sinkTime = 0;
 
-  /** Ligado por quem estiver na bomba neste passo. Zera todo passo. */
+  /** Switched on by whoever is at the pump this step. Zeroed every step. */
   pumping = false;
 
-  /** Água acima do convés durante o naufrágio, em kg. Ver `SWAMP_MASS`. */
+  /** Water above the deck during the sinking, in kg. See `SWAMP_MASS`. */
   private swampMass = 0;
 
   /**
-   * Próximo identificador de rombo **deste casco**.
+   * Next breach identifier for **this hull**.
    *
-   * Era um contador de módulo, partilhado pelos dois navios da partida — e com um
-   * contador só, os ids que cada casco recebe passam a depender da ordem em que
-   * os dois foram atingidos. Isso quebra duas coisas de uma vez: a decalcomania
-   * do estrago sorteia a aparência a partir do id (`DamageView.hash01`), então um
-   * mesmo tiro desenhava um buraco diferente conforme o que tivesse acontecido do
-   * outro lado; e, em rede, dois clientes que recebam os eventos em ordens
-   * ligeiramente diferentes divergem para sempre. Por instância, o id de um rombo
-   * é função só do próprio navio.
+   * It used to be a module-level counter, shared by both ships in the match — and
+   * with a single counter, the ids each hull receives start depending on the order
+   * the two were hit in. That breaks two things at once: the damage decal draws its
+   * appearance from the id (`DamageView.hash01`), so the same shot drew a different
+   * hole depending on what had happened on the other side; and, over the network, two
+   * clients receiving the events in slightly different orders diverge forever. Per
+   * instance, a breach's id is a function of its own ship alone.
    */
   private nextBreachId = 1;
 
   private readonly columns: HoldColumn[] = [];
   /**
-   * Vertical do mundo no referencial do navio, do último passo. É por instância
-   * (e não rascunho de módulo) porque os dois navios da partida alternam passos e
-   * o visual lê isto fora do `fixedUpdate`.
+   * The world's vertical in the ship's frame, from the last step. It is per instance
+   * (and not a module scratch) because the match's two ships alternate steps and the
+   * visuals read this outside `fixedUpdate`.
    */
   private readonly localUp = new THREE.Vector3(0, 1, 0);
 
@@ -463,8 +471,9 @@ export class ShipDamage {
       for (let j = 0; j < WIDTH_SAMPLES; j++) {
         const xFraction = ((j + 0.5) / WIDTH_SAMPLES) * 2 - 1;
 
-        // O eixo da coluna acompanha o forro na altura média do porão — é onde a
-        // água passa a maior parte do tempo, e é o X que o plano d'água usa.
+        // The column's axis follows the planking at the hold's mid height — it is
+        // where the water spends most of its time, and it is the X the water plane
+        // uses.
         const midHeight = (HOLD_FLOOR_Y + DECK_Y) * 0.5;
         const x = innerHalfWidthAt(t, midHeight) * xFraction;
         const yCeiling = ceilingY(t, x);
@@ -508,48 +517,49 @@ export class ShipDamage {
     this.holdVolume = total;
   }
 
-  /** Fração do porão alagada, 0..1 — o que o HUD desenha. */
+  /** Fraction of the hold flooded, 0..1 — what the HUD draws. */
   get floodFraction(): number {
     return clamp01(this.floodVolume / this.holdVolume);
   }
 
-  /** `true` do instante em que o navio passa do ponto de retorno. */
+  /** `true` from the instant the ship passes the point of no return. */
   get isSinking(): boolean {
     return this.sinkTime > 0;
   }
 
-  /** `true` quando o naufrágio terminou e o navio saiu da partida. */
+  /** `true` when the sinking is over and the ship has left the match. */
   get isSunk(): boolean {
     return this.sinkTime >= SINK_DURATION;
   }
 
   /**
-   * Registra um impacto. Só o que entra abaixo do convés vira rombo — tiro na
-   * amurada arranca lasca e nada mais, como no jogo.
+   * Registers an impact. Only what gets in below the deck becomes a breach — a shot
+   * into the bulwark tears splinters and nothing else, as in the game.
    *
-   * @returns o rombo afetado, novo ou alargado, ou `null` se o tiro não alaga.
+   * @returns the breach affected, new or widened, or `null` if the shot does not
+   *   flood.
    */
   registerHit(hit: ShipHit): Breach | null {
     if (!hit.floods || hit.part !== 'hull') return null;
 
     const existing = this.findNear(hit.local);
     if (existing) {
-      // Tiro em cima de rombo aberto: alarga em vez de duplicar.
+      // A shot on top of an open breach: it widens instead of duplicating.
       return this.widen(existing);
     }
 
-    // Casco no teto de rombos: o tiro alarga o mais próximo que houver, sem
-    // limite de distância. Ver `MAX_BREACHES` — o efeito do acerto tem de
-    // continuar existindo, e alargar é o efeito que este modelo tem.
+    // Hull at the breach ceiling: the shot widens the nearest one there is, with no
+    // distance limit. See `MAX_BREACHES` — the hit's effect has to go on existing,
+    // and widening is the effect this model has.
     if (this.breaches.length >= MAX_BREACHES) {
       const nearest = this.findNear(hit.local, Number.POSITIVE_INFINITY);
       return nearest ? this.widen(nearest) : null;
     }
 
-    // Tiro em cima de tábua pregada: arranca a tábua e devolve o rombo que ela
-    // fechava. O reparo era um remendo, e um remendo é a parte fraca do casco —
-    // é por isso que ele volta do tamanho que tinha, e não do tamanho de um
-    // furo novo.
+    // A shot on top of a nailed plank: it tears the plank off and gives back the
+    // breach it was closing. The repair was a patch, and a patch is the weak part of
+    // a hull — that is why it comes back at the size it had, and not at the size of a
+    // fresh hole.
     const patch = this.findPatchNear(hit.local);
     if (patch) this.patches.splice(this.patches.indexOf(patch), 1);
 
@@ -566,31 +576,31 @@ export class ShipDamage {
   }
 
   /**
-   * Rasga o casco num abalroamento.
+   * Tears the hull open in a ramming.
    *
-   * ## Por que abalroar tem de abrir casco
+   * ## Why ramming has to open a hull
    *
-   * Porque sem isso `HullContact` é só uma cerca: os navios param de se atravessar,
-   * e chegar perto continua não custando nada. Duas chalupas de 37 t se encontrando
-   * a três metros por segundo trocam 157 kJ, o que é mais energia do que quase
-   * qualquer bala do jogo entrega — e a madeira não tem como não ceder. Bateu,
-   * quebrou, nos **dois** cascos: quem investe leva o mesmo estrago que dá, e é isso
-   * que impede o abalroamento de virar a estratégia ótima em vez de um risco.
+   * Because without it `HullContact` is only a fence: the ships stop going through
+   * each other, and getting close still costs nothing. Two 37 t sloops meeting at
+   * three meters per second trade 157 kJ, which is more energy than almost any ball
+   * in the game delivers — and the wood has no way not to give. Hit, broken, in
+   * **both** hulls: whoever charges takes the same damage they give, and that is what
+   * keeps ramming from becoming the optimal strategy instead of a risk.
    *
-   * ## Um rombo de bala, e não um tipo novo de avaria
+   * ## A ball's breach, and not a new kind of damage
    *
-   * O que a pancada abre é a mesma coisa que uma bala abre — mesma área, mesma
-   * fusão, mesma tábua para pregar em cima. É reuso deliberado: `registerHit`
-   * já resolve rombo em cima de rombo, rombo em cima de tábua e casco no teto de
-   * rombos, e um caminho separado para o abalroamento significaria manter as três
-   * regras em dois lugares. O que a pancada tem de diferente não é o buraco, é a
-   * **quantidade** deles — ver `RAM_SPEED_STEP`.
+   * What the impact opens is the same thing a ball opens — same area, same merging,
+   * same plank to nail over it. It is deliberate reuse: `registerHit` already resolves
+   * breach on top of breach, breach on top of plank and hull at the breach ceiling,
+   * and a separate path for ramming would mean keeping the three rules in two places.
+   * What the impact has that is different is not the hole, it is **how many** of them
+   * — see `RAM_SPEED_STEP`.
    *
-   * @param local ponto do contato, em coordenadas locais deste casco. Não precisa
-   *   estar na superfície: o que se lê dele é a estação, a altura e o bordo, e o
-   *   rombo é posto no costado que corresponde.
-   * @param speed velocidade de aproximação no contato, em m/s.
-   * @returns quantos rombos foram abertos ou alargados. Zero é "só encostou".
+   * @param local the contact point, in this hull's local coordinates. It does not
+   *   have to be on the surface: what is read from it is the station, the height and
+   *   the side, and the breach is put on the planking that corresponds.
+   * @param speed closing speed at the contact, in m/s.
+   * @returns how many breaches were opened or widened. Zero is "it only touched".
    */
   ram(local: THREE.Vector3, speed: number): number {
     if (speed < RAM_SPEED) return 0;
@@ -599,14 +609,14 @@ export class ShipDamage {
       1 + Math.floor((speed - RAM_SPEED) / RAM_SPEED_STEP),
       RAM_BREACHES_MAX,
     );
-    // O bordo sai do sinal de X: a pancada veio do lado em que o ponto está.
+    // The side comes from X's sign: the impact came from the side the point is on.
     const side = local.x >= 0 ? 1 : -1;
 
     let opened = 0;
     for (let i = 0; i < count; i++) {
-      // Centrados no contato e espalhados para os dois lados dele ao longo do
-      // costado, sem chegar às pontas exatas — na roda de proa não há costado onde
-      // pôr um rombo.
+      // Centered on the contact and spread to both sides of it along the planking,
+      // without reaching the exact ends — at the stem there is no planking to put a
+      // breach on.
       const z = clamp(
         local.z + (i - (count - 1) / 2) * RAM_SPREAD,
         -HALF_LENGTH * 0.96,
@@ -618,12 +628,12 @@ export class ShipDamage {
   }
 
   /**
-   * Abre um rombo na superfície do casco, na estação `z` e na altura `y`.
+   * Opens a breach on the hull's surface, at station `z` and height `y`.
    *
-   * A altura vem do contato e é projetada na superfície pelo parâmetro `v` da
-   * seção, que é a mesma conversão que a bala usa (`HitDetection.hullNormalAt`) —
-   * então o rombo nasce exatamente onde a malha tem madeira, e não flutuando ao
-   * lado dela.
+   * The height comes from the contact and is projected onto the surface by the
+   * section's `v` parameter, which is the same conversion the ball uses
+   * (`HitDetection.hullNormalAt`) — so the breach is born exactly where the mesh has
+   * wood, and not floating beside it.
    */
   private tear(z: number, y: number, side: number): boolean {
     const t = zToT(z);
@@ -631,22 +641,22 @@ export class ShipDamage {
     const v = clamp01(sectionV(section, y));
 
     hullSurfacePoint(t, v, side, _ramHit.local);
-    // Acima do convés é amurada: arranca lasca e nada mais, como no tiro. É a mesma
-    // linha que `ShipHit.floods` desenha, e ela vale por qualquer causa.
+    // Above the deck it is bulwark: it tears splinters and nothing else, as with a
+    // shot. It is the same line `ShipHit.floods` draws, and it holds for any cause.
     if (_ramHit.local.y >= DECK_Y) return false;
 
     hullSurfaceNormal(t, v, side, _ramHit.normal);
     return this.registerHit(_ramHit) !== null;
   }
 
-  /** Alarga um rombo existente, até o teto de `MAX_BREACH_SCALE`. */
+  /** Widens an existing breach, up to the `MAX_BREACH_SCALE` ceiling. */
   private widen(breach: Breach): Breach {
     breach.area = Math.min(breach.area + BREACH_AREA * 0.6, BREACH_AREA * MAX_BREACH_SCALE);
     breach.repair = 0;
     return breach;
   }
 
-  /** O rombo mais próximo de um ponto local dentro do alcance de reparo. */
+  /** The breach nearest a local point within repair reach. */
   findNear(local: THREE.Vector3, radius = MERGE_DISTANCE): Breach | null {
     let best: Breach | null = null;
     let bestDistance = radius;
@@ -661,7 +671,7 @@ export class ShipDamage {
     return best;
   }
 
-  /** A tábua pregada mais próxima de um ponto local, ou `null`. */
+  /** The nailed plank nearest a local point, or `null`. */
   findPatchNear(local: THREE.Vector3, radius = PATCH_DISTANCE): Patch | null {
     let best: Patch | null = null;
     let bestDistance = radius;
@@ -677,17 +687,17 @@ export class ShipDamage {
   }
 
   /**
-   * Prega tábua num rombo. Chamar a cada frame enquanto o `F` estiver segurado.
+   * Nails a plank over a breach. Call it every frame while `F` is held.
    *
-   * **Idempotente por construção.** Um rombo que já saiu da lista não aceita
-   * mais trabalho, e o progresso nunca passa de 1. As duas coisas faltavam, e o
-   * que se via na tela era a consequência exata: o rombo fechava, quem estava
-   * segurando o botão continuava alimentando o mesmo objeto — que ainda existia,
-   * porque a peça interativa segurava a referência — e o prompt subia a 200%,
-   * 300%, sem teto e sem nada acontecer no casco.
+   * **Idempotent by construction.** A breach that has already left the list accepts
+   * no more work, and the progress never goes past 1. Both things were missing, and
+   * what you saw on screen was the exact consequence: the breach closed, whoever was
+   * holding the button kept feeding the same object — which still existed, because
+   * the interactable held the reference — and the prompt climbed to 200%, 300%, with
+   * no ceiling and nothing happening to the hull.
    *
-   * @returns `true` **só** no frame em que o rombo fecha, e nunca depois. É esse
-   *   contrato que permite a quem chama largar o alvo na hora certa.
+   * @returns `true` **only** on the frame the breach closes, and never afterwards. It
+   *   is that contract that lets the caller drop the target at the right moment.
    */
   repair(breach: Breach, dt: number): boolean {
     const index = this.breaches.indexOf(breach);
@@ -698,9 +708,9 @@ export class ShipDamage {
 
     this.breaches.splice(index, 1);
 
-    // A tábua herda o `id` do rombo, e não um contador próprio: é ele que
-    // semeia o sorteio da pose no desenho, então a tábua fica no mesmo lugar
-    // quadro após quadro em vez de tremer.
+    // The plank inherits the breach's `id`, and not a counter of its own: it is what
+    // seeds the pose draw in the render, so the plank stays in the same place frame
+    // after frame instead of jittering.
     this.patches.push({
       local: breach.local.clone(),
       normal: breach.normal.clone(),
@@ -713,19 +723,20 @@ export class ShipDamage {
   }
 
   /**
-   * Um passo de alagamento.
+   * One flooding step.
    *
-   * A ordem é: entra água pelos rombos, sai água pela bomba, o volume vira um
-   * plano d'água, e o plano vira peso aplicado no centróide.
+   * The order is: water comes in through the breaches, water goes out through the
+   * pump, the volume becomes a water plane, and the plane becomes weight applied at
+   * the centroid.
    */
   fixedUpdate(dt: number, body: ShipBody, waves: WaveField): void {
     this.orientToWorld(body);
-    // Zerado aqui e reescrito só se houver água: senão o porão esgotado
-    // continuaria pesando o valor do passo anterior para sempre.
+    // Zeroed here and rewritten only if there is water: otherwise a drained hold
+    // would keep weighing the previous step's value forever.
     body.floodedMass = 0;
 
-    // O quanto o mar sobe e desce agora. É a escala do embarque por onda nos
-    // rombos que estão acima da linha d'água — ver `breachInflow`.
+    // How much the sea rises and falls right now. It is the scale of the wave
+    // shipping on the breaches above the waterline — see `breachInflow`.
     const sigma = waves.getElevationSigma();
 
     let inflow = 0;
@@ -733,9 +744,10 @@ export class ShipDamage {
       body.localToWorld(breach.local, _worldPoint);
       const depth = waves.sampleHeight(_worldPoint.x, _worldPoint.z) - _worldPoint.y;
 
-      // Rombo submerso bebe por Torricelli; rombo acima da linha bebe o que a
-      // crista lhe joga dentro. Adernar para o bordo são continua sendo manobra,
-      // e não estética: ela tira o buraco da água nos dois regimes.
+      // A submerged breach drinks by Torricelli; a breach above the line drinks
+      // what the crest throws into it. Heeling toward the sound side is still a
+      // maneuver, and not decoration: it takes the hole out of the water in both
+      // regimes.
       breach.inflow = breachInflow(breach.area, depth, sigma);
       inflow += breach.inflow;
     }
@@ -758,39 +770,39 @@ export class ShipDamage {
       return;
     }
 
-    // O peso da água é vertical no mundo e cai no centróide do volume — que fica
-    // do lado para onde o navio já está adernando. É esse braço que faz o efeito
-    // de superfície livre existir.
+    // The water's weight is vertical in the world and lands at the volume's centroid
+    // — which is on the side the ship is already heeling toward. It is that lever arm
+    // that makes the free-surface effect exist.
     body.localToWorld(_centroid, _worldPoint);
     _force.set(0, -WATER_DENSITY * GRAVITY * volume, 0);
     body.applyForceAtPoint(_force, _worldPoint);
 
-    // A água também vai junto na aceleração: sem isto o navio alagado ficaria
-    // *mais* ágil, porque ganharia peso sem ganhar massa.
+    // The water goes along in the acceleration too: without this a flooded ship
+    // would get *more* agile, because it would gain weight without gaining mass.
     body.floodedMass = WATER_DENSITY * volume;
 
     this.updateSinking(dt, body);
   }
 
   /**
-   * Recalcula o plano d'água a partir do volume que já está em `floodVolume`.
+   * Recomputes the water plane from the volume already in `floodVolume`.
    *
-   * ⚠️ **Existe por causa do duelo em rede, e a falta dele deixava o porão do
-   * cliente que não simula seco para sempre.** O volume de água chega
-   * autoritativo no instantâneo — o HUD subia, o navio calava mais fundo, tudo
-   * certo —, mas quem desenha a lâmina lê `waterPlane`, e `waterPlane` só era
-   * resolvido dentro de `fixedUpdate`, que é o caminho de quem simula. O
-   * jogador do outro lado descia ao porão com o casco furado e encontrava
-   * assoalho seco: "abri rombo e não entra água".
+   * ⚠️ **It exists because of the networked duel, and its absence left the hold of
+   * the client that does not simulate dry forever.** The water volume arrives
+   * authoritative in the snapshot — the HUD climbed, the ship sat deeper, all
+   * correct — but whoever draws the sheet reads `waterPlane`, and `waterPlane` was
+   * only solved inside `fixedUpdate`, which is the simulating side's path. The player
+   * on the other side went below with a holed hull and found a dry floor: "I opened a
+   * breach and no water comes in".
    *
-   * Separado em vez de deixar `fixedUpdate` inteiro rodar no guest porque o
-   * resto de `fixedUpdate` **decide** o alagamento (vazão, bomba, peso da
-   * água), e decidir aqui seria abrir uma segunda verdade sobre o mesmo casco.
-   * Isto aqui só olha.
+   * Separated instead of letting the whole of `fixedUpdate` run on the guest because
+   * the rest of `fixedUpdate` **decides** the flooding (inflow, pump, the water's
+   * weight), and deciding here would open a second truth about the same hull. This
+   * only looks.
    *
-   * @param body o corpo do navio, para saber onde é "para cima" no referencial
-   *   local. Omitido, reaproveita a vertical do último passo — que é o que
-   *   `fixedUpdate` quer, porque ele já a mediu.
+   * @param body the ship's body, to know where "up" is in the local frame. Omitted,
+   *   it reuses the last step's vertical — which is what `fixedUpdate` wants, because
+   *   it has already measured it.
    */
   solveWaterPlane(body?: ShipBody): void {
     if (body) this.orientToWorld(body);
@@ -801,12 +813,12 @@ export class ShipDamage {
     this.waterPlane = this.solvePlane(this.floodVolume, this.localUp);
   }
 
-  /** Mede a vertical do mundo no referencial do casco. */
+  /** Measures the world's vertical in the hull's frame. */
   private orientToWorld(body: ShipBody): void {
     body.worldDirToLocal(WORLD_UP, this.localUp);
   }
 
-  /** Zera tudo — usado no respawn e ao montar uma partida nova. */
+  /** Zeroes everything — used on respawn and when assembling a fresh match. */
   reset(): void {
     this.breaches.length = 0;
     this.patches.length = 0;
@@ -818,9 +830,9 @@ export class ShipDamage {
   }
 
   /**
-   * Altura da água do porão no eixo central, em coordenadas locais.
-   * O visual da lâmina d'água usa isto para se posicionar. `-Infinity` quando
-   * não há água.
+   * Height of the hold's water on the centerline, in local coordinates.
+   * The water sheet's visuals use this to position themselves. `-Infinity` when there
+   * is no water.
    */
   getWaterHeightAtCenter(): number {
     if (!Number.isFinite(this.waterPlane)) return -Infinity;
@@ -828,12 +840,11 @@ export class ShipDamage {
   }
 
   /**
-   * Altura no mundo da superfície da água do porão, ou `-Infinity` se o porão
-   * está seco.
+   * World height of the hold water's surface, or `-Infinity` if the hold is dry.
    *
-   * Sai da definição do plano: os pontos da superfície satisfazem `p·up = H`, e
-   * a altura de um ponto local no mundo é `(p − com)·up + comPosition.y`. Juntar
-   * as duas elimina `p` e sobra uma conta de três termos.
+   * It comes from the plane's definition: the surface's points satisfy `p·up = H`,
+   * and a local point's height in the world is `(p − com)·up + comPosition.y`.
+   * Putting the two together eliminates `p` and leaves a three-term calculation.
    */
   getWorldSurfaceY(body: ShipBody): number {
     if (!Number.isFinite(this.waterPlane)) return -Infinity;
@@ -841,8 +852,8 @@ export class ShipDamage {
   }
 
   /**
-   * Avança o naufrágio e, se ele já começou, embarca a água que passa por cima do
-   * convés — o termo que de fato leva o navio ao fundo (ver `SWAMP_MASS`).
+   * Advances the sinking and, if it has already started, ships the water that comes
+   * over the deck — the term that actually takes the ship down (see `SWAMP_MASS`).
    */
   private updateSinking(dt: number, body: ShipBody): void {
     if (this.sinkTime <= 0) {
@@ -852,27 +863,27 @@ export class ShipDamage {
 
     this.sinkTime = Math.min(this.sinkTime + dt, SINK_DURATION);
 
-    // Cresce com o quadrado do tempo: o convés entra na água devagar e, quando a
-    // borda passa, a vazão dispara. É a mesma realimentação do resto do arquivo —
-    // quanto mais fundo, mais rápido — e é o que faz o último segundo do naufrágio
-    // ser o rápido, em vez de o navio descer numa rampa constante.
+    // It grows with the square of time: the deck enters the water slowly and, once
+    // the sheer goes under, the inflow takes off. It is the same feedback as the rest
+    // of the file — the deeper, the faster — and it is what makes the sinking's last
+    // second the fast one, instead of the ship going down on a constant ramp.
     const progress = clamp01(this.sinkTime / SINK_DURATION);
     this.swampMass = SWAMP_MASS * progress * progress;
 
     _force.set(0, -this.swampMass * GRAVITY, 0);
     body.applyForce(_force);
-    // Somada à inércia também: um casco cheio de água não só afunda, ele fica
-    // pesado de mexer. É o que tira a resposta do leme nos últimos segundos.
+    // Added to the inertia too: a hull full of water does not only sink, it gets
+    // heavy to move. It is what takes the helm's response away in the last seconds.
     body.floodedMass += this.swampMass;
   }
 
   /**
-   * Acha o plano d'água que contém exatamente `target` de volume.
+   * Finds the water plane that contains exactly `target` of volume.
    *
-   * Bisseção porque a relação entre nível e volume não tem inversa fechada — a
-   * seção do porão muda com a altura *e* com a inclinação do navio. Vinte voltas
-   * sobre uma faixa de 7 m dão precisão de micrômetros, e cada volta custa uma
-   * varredura das 24 colunas.
+   * Bisection because the relationship between level and volume has no closed-form
+   * inverse — the hold's section changes with height *and* with the ship's tilt.
+   * Twenty rounds over a 7 m range give micrometer precision, and each round costs
+   * one sweep of the 24 columns.
    */
   private solvePlane(target: number, up: THREE.Vector3): number {
     let low = -4;
@@ -888,15 +899,15 @@ export class ShipDamage {
   }
 
   /**
-   * Volume d'água abaixo do plano `p · up = offset`, e o centróide dele.
+   * Water volume below the plane `p · up = offset`, and its centroid.
    *
-   * Cada coluna cruza o plano numa altura própria: `y = (offset − x·upX − z·upZ)
-   * / upY`. É essa dependência de `x` que põe mais água no bordo baixo quando o
-   * navio aderna.
+   * Each column crosses the plane at a height of its own:
+   * `y = (offset − x·upX − z·upZ) / upY`. It is that dependence on `x` that puts more
+   * water on the low side when the ship heels.
    */
   private sampleAtPlane(offset: number, up: THREE.Vector3, centroid: THREE.Vector3 | null): number {
-    // Emborcado, `upY` tende a zero e a divisão explode. O piso mantém a conta
-    // finita; a essa altura o navio já está perdido de qualquer forma.
+    // Capsized, `upY` tends to zero and the division blows up. The floor keeps the
+    // arithmetic finite; by then the ship is lost anyway.
     const upY = Math.max(up.y, 0.2);
 
     let total = 0;

@@ -1,33 +1,33 @@
 /**
- * Painéis de tela cheia: menu, ajustes, controles e fim de partida.
+ * Full-screen panels: menu, settings, controls and end of match.
  *
- * ## O elemento que carrega a tela
+ * ## The element that carries the screen
  *
- * A folha do menu é **um pergaminho pregado numa tábua**. Não é uma metáfora
- * solta: o pergaminho tem borda comida e manchas de água, a tábua tem veio, e
- * onde os dois se encontram há quatro pregos de latão com cabeça martelada. É o
- * único lugar da interface em que gastamos ornamento, e por isso ele pode ser
- * elaborado — tudo em volta fica quieto.
+ * The menu sheet is **a parchment nailed to a plank**. That is not a loose
+ * metaphor: the parchment has an eaten edge and water stains, the plank has
+ * grain, and where the two meet there are four brass nails with hammered heads.
+ * It is the one place in the interface where ornament gets spent, and that is
+ * why it can be elaborate — everything around it stays quiet.
  *
- * A alternativa era o retângulo escuro translúcido com borda dourada de 1 px,
- * que é o que todo menu de jogo náutico faz. Ele funciona, é legível e não diz
- * nada. Um pergaminho pregado numa tábua diz onde a gente está.
+ * The alternative was the translucent dark rectangle with a 1 px gold border,
+ * which is what every nautical game menu does. It works, it is legible and it
+ * says nothing. A parchment nailed to a plank says where you are.
  *
- * ## A borda comida, e por que ela é máscara
+ * ## The eaten edge, and why it is a mask
  *
- * A irregularidade do papel sai de uma `mask-image` com um punhado de gradientes
- * radiais mordendo as quatro bordas. Máscara, e não `clip-path`: o clip mudaria
- * a caixa de layout e levaria o texto junto, e o que se quer é o papel rasgado
- * **por cima** de um bloco de texto que continua alinhado.
+ * The paper's irregularity comes out of a `mask-image` with a handful of radial
+ * gradients biting into the four edges. A mask, not `clip-path`: the clip would
+ * change the layout box and take the text with it, and what is wanted is torn
+ * paper **on top of** a block of text that stays aligned.
  *
- * ## A regra tipográfica
+ * ## The typographic rule
  *
- * Cinzel só no logotipo. Cabeçalhos e rótulos em IM Fell English SC — versaletes
- * de gravura, que dão hierarquia sem precisar de peso nem de cor. Texto corrido
- * em IM Fell English. Números em monoespaçada. Nada de uma quinta escolha.
+ * Cinzel only in the logotype. Headings and labels in IM Fell English SC —
+ * engraver's small caps, which give hierarchy without needing weight or color.
+ * Running text in IM Fell English. Numbers in monospace. No fifth choice.
  */
 
-/* --- véu e folha ------------------------------------------------------------- */
+/* --- veil and sheet ---------------------------------------------------------- */
 
 .overlay {
   position: absolute;
@@ -35,15 +35,15 @@
   display: grid;
   place-items: center;
   padding: var(--espaco-8);
-  /* Mais escuro embaixo: a folha se apoia no peso e o horizonte fica respirando no
-     topo, o que mantém a cena legível como plano de fundo.
+  /* Darker at the bottom: the sheet rests on the weight and the horizon keeps
+     breathing at the top, which keeps the scene legible as a backdrop.
 
-     Os valores foram medidos numa captura, não escolhidos: a primeira tentativa
-     tinha 0,9 de opacidade na borda e 0,55 no centro, e o resultado foi um menu
-     bonito sobre um retângulo preto — a Chalupa navegando atrás simplesmente
-     desaparecia, o que joga fora a melhor coisa que a tela de título tem. Com 0,74
-     na borda e 0,28 no centro o casco e o mar voltam a aparecer, e o texto continua
-     legível porque a folha traz o próprio fundo claro. */
+     The values were measured on a capture, not picked: the first attempt had 0.9
+     opacity at the edge and 0.55 in the center, and the result was a pretty menu
+     over a black rectangle — the Sloop sailing behind it simply disappeared,
+     which throws away the best thing the title screen has. At 0.74 on the edge
+     and 0.28 in the center the hull and the sea come back, and the text stays
+     legible because the sheet brings its own light background. */
   background:
     radial-gradient(ellipse at 50% 34%, rgba(4, 12, 18, 0.28) 0%, rgba(3, 9, 14, 0.74) 72%),
     linear-gradient(180deg, rgba(3, 9, 14, 0.3), rgba(2, 6, 10, 0.84));
@@ -74,7 +74,7 @@
   gap: var(--espaco-6);
   padding: clamp(var(--espaco-8), 4.5vw, 3.6rem) clamp(var(--espaco-8), 5vw, 4.4rem);
 
-  /* A tábua: veio de carvalho escuro por baixo de tudo. */
+  /* The plank: dark oak grain underneath everything. */
   background:
     var(--veio-madeira),
     linear-gradient(174deg, var(--oak) 0%, var(--oak-deep) 55%, var(--oak-tar) 100%);
@@ -86,24 +86,24 @@
 }
 
 /**
- * A folha estreita, para as telas cuja informação é uma coluna só.
+ * The narrow sheet, for screens whose information is a single column.
  *
- * As setenta rem de largura padrão existem para as telas que **preenchem** a
- * folha: quatro cartas de capitão, três colunas de comandos, uma grade de
- * ajustes. Nas telas de rede o conteúdo é um campo e três botões, e a folha larga
- * virava uma moldura enorme em volta de uma tira de texto no meio — o olho lê a
- * madeira antes de achar o que clicar.
+ * The default seventy rem of width exist for the screens that **fill** the
+ * sheet: four captain cards, three columns of controls, a grid of settings. On
+ * the network screens the content is one field and three buttons, and the wide
+ * sheet turned into an enormous frame around a strip of text in the middle — the
+ * eye reads the wood before it finds what to click.
  */
 .sheet--narrow {
   width: min(42rem, 100%);
 }
 
 /**
- * O pergaminho: uma folha creme por cima da tábua, com as bordas comidas.
+ * The parchment: a cream sheet on top of the plank, with eaten edges.
  *
- * O recuo é maior em cima e embaixo que nos lados, de propósito — a folha sobra
- * da tábua em proporções diferentes nos dois eixos, como papel cortado à mão. É
- * esse desalinho que impede a leitura de "duas caixas empilhadas".
+ * The inset is larger top and bottom than at the sides, on purpose — the sheet
+ * overhangs the plank by different proportions on the two axes, like paper cut
+ * by hand. It is that misalignment that stops it reading as "two stacked boxes".
  */
 .sheet::before {
   content: '';
@@ -111,7 +111,7 @@
   inset: 1.6rem 1.3rem;
   z-index: 0;
   background:
-    /* Manchas de água e sujeira de uso, mais densas nas bordas. */
+    /* Water stains and the dirt of use, denser at the edges. */
     radial-gradient(ellipse at 12% 18%, rgba(120, 92, 44, 0.26), transparent 42%),
     radial-gradient(ellipse at 88% 74%, rgba(120, 92, 44, 0.22), transparent 46%),
     radial-gradient(ellipse at 62% 8%, rgba(92, 68, 30, 0.2), transparent 34%),
@@ -122,19 +122,18 @@
       var(--parchment-deep) 100%
     );
   /**
-   * A borda irregular do papel.
+   * The paper's irregular edge.
    *
-   * Um `clip-path` de dezesseis pontos, e não uma máscara com mordidas
-   * circulares. A primeira tentativa foi essa — radiais transparentes
-   * compostas por interseção — e o resultado na tela foram quatro discos
-   * pretos do tamanho de uma moeda flutuando **dentro** da folha: o
-   * `mask-composite` combina camadas em pares, então cada mordida virou um
-   * buraco em vez de uma reentrância de contorno.
+   * A sixteen-point `clip-path`, not a mask with circular bites. That was the
+   * first attempt — transparent radials composited by intersection — and what
+   * showed up on screen were four coin-sized black discs floating **inside**
+   * the sheet: `mask-composite` combines layers in pairs, so each bite became
+   * a hole instead of a notch in the outline.
    *
-   * O polígono não tem esse problema porque descreve o contorno diretamente, e
-   * a irregularidade fica onde tem de ficar: nas bordas. Os desvios são de
-   * menos de meio por cento, o suficiente para o olho registrar "cortado à mão"
-   * sem que o texto perto da margem corra risco de ser cortado junto.
+   * The polygon doesn't have that problem because it describes the outline
+   * directly, and the irregularity stays where it belongs: at the edges. The
+   * deviations are under half a percent, enough for the eye to register "cut by
+   * hand" without putting text near the margin at risk of being cut with it.
    */
   clip-path: polygon(
     0.4% 1.2%, 18% 0.2%, 37% 1.4%, 58% 0.3%, 79% 1.5%, 99.4% 0.6%,
@@ -146,12 +145,12 @@
 }
 
 /**
- * Os quatro pregos que prendem a folha.
+ * The four nails that hold the sheet down.
  *
- * Dois pseudoelementos não bastariam para quatro cabeças, então elas vêm de um
- * único `background` com quatro gradientes radiais posicionados nos cantos. Cada
- * cabeça tem um realce no alto à esquerda e uma sombra embaixo à direita: é a
- * leitura mínima de "metal martelado" e ela sobrevive em qualquer tamanho.
+ * Two pseudo-elements would not be enough for four heads, so they come from a
+ * single `background` with four radial gradients positioned at the corners. Each
+ * head has a highlight at the top left and a shadow at the bottom right: it is
+ * the minimum reading of "hammered metal" and it survives at any size.
  */
 .sheet::after {
   content: '';
@@ -167,7 +166,7 @@
   pointer-events: none;
 }
 
-/* O conteúdo fica acima do pergaminho, abaixo dos pregos. */
+/* The content sits above the parchment, below the nails. */
 .sheet > * {
   position: relative;
   z-index: 1;
@@ -185,7 +184,7 @@
   }
 }
 
-/* --- cabeçalho --------------------------------------------------------------- */
+/* --- header ------------------------------------------------------------------ */
 
 .brand {
   text-align: center;
@@ -195,32 +194,33 @@
   margin: 0;
   font-family: var(--fonte-titulo);
   font-weight: 900;
-  /* Escala fluida: o título é o objeto mais pesado da tela e precisa dominar num
-     ultrawide sem estourar num notebook. */
+  /* Fluid scale: the title is the heaviest object on screen and has to dominate on
+     an ultrawide without blowing out on a laptop. */
   font-size: clamp(2.2rem, 6.4vw, 5rem);
   line-height: 1.02;
   letter-spacing: 0.14em;
-  /* Recuo do último caractere: entreletra larga acrescenta um vão à direita que
-     desalinha o título do centro óptico. */
+  /* Indent for the last character: wide letter spacing adds a gap on the right that
+     pulls the title off the optical center. */
   text-indent: 0.14em;
   text-transform: uppercase;
   color: var(--ink);
-  /* Letra **gravada no pergaminho**, e não em relevo dourado.
-     O texto vazado com gradiente de latão é o efeito de título mais copiado que
-     existe, e sobre papel ele é errado duas vezes: papel não é metal, e a folha
-     já traz a cor quente que o dourado tentaria dar. Tinta escura com um filete
-     claro embaixo lê como sulco no papel — que é o que uma prensa faz. */
+  /* Lettering **engraved into the parchment**, not raised in gold.
+     Knocked-out text with a brass gradient is the most copied title effect there
+     is, and on paper it is wrong twice over: paper is not metal, and the sheet
+     already brings the warm color the gold would be reaching for. Dark ink with a
+     light hairline under it reads as a groove in the paper — which is what a press
+     does. */
   text-shadow:
     0 1px 0 rgba(255, 246, 214, 0.55),
     0 -1px 0 rgba(0, 0, 0, 0.25);
 }
 
 /**
- * A régua sob o título: uma rosa dos ventos entre dois filetes.
+ * The rule under the title: a compass rose between two hairlines.
  *
- * O losango genérico virou a rosa porque ela **é** o assunto: o jogo inteiro
- * gira em torno de rumo e vento, e a mesma marca aparece na fita da bússola do
- * HUD. Duas aparições da mesma forma amarram menu e jogo.
+ * The generic diamond became the rose because the rose **is** the subject: the
+ * whole game turns on heading and wind, and the same mark shows up on the HUD's
+ * compass strip. Two appearances of the same shape tie menu and game together.
  */
 .brand__rule {
   display: flex;
@@ -246,7 +246,7 @@
   width: 1.1rem;
   height: 1.1rem;
   background: var(--brass-dark);
-  /* Estrela de quatro pontas: a rosa dos ventos reduzida ao essencial. */
+  /* Four-pointed star: the compass rose reduced to the essentials. */
   clip-path: polygon(
     50% 0%, 60% 40%, 100% 50%, 60% 60%,
     50% 100%, 40% 60%, 0% 50%, 40% 40%
@@ -262,7 +262,7 @@
   color: var(--ink-soft);
 }
 
-/* --- seções ------------------------------------------------------------------ */
+/* --- sections ---------------------------------------------------------------- */
 
 .section {
   width: 100%;
@@ -287,15 +287,15 @@
   background: linear-gradient(90deg, rgba(92, 74, 46, 0.5), transparent);
 }
 
-/* --- cartas de modo (tela de título) ----------------------------------------- */
+/* --- mode cards (title screen) ----------------------------------------------- */
 
 /**
- * As duas cartas da primeira tela.
+ * The two cards on the first screen.
  *
- * `auto-fit` com base larga, e não duas colunas fixas: em telefone deitado as duas
- * empilham sozinhas, e a de cima continua sendo a principal — que é a ordem em que
- * elas já estão no DOM. Hierarquia por posição sobrevive a qualquer largura;
- * hierarquia por coluna, não.
+ * `auto-fit` with a wide basis, not two fixed columns: on a phone in landscape the
+ * two stack on their own, and the top one is still the primary — which is the order
+ * they are already in in the DOM. Hierarchy by position survives any width;
+ * hierarchy by column does not.
  */
 .modes {
   display: grid;
@@ -304,12 +304,13 @@
 }
 
 /**
- * Uma carta de modo, no mesmo papel das cartas de capitão — mas com a tarja.
+ * A mode card, on the same paper as the captain cards — but with the badge.
  *
- * A tarja é o elemento que faz esta tela funcionar. "Online" e "Offline" gravados
- * em latão respondem, antes do nome e da frase, a única pergunta que trava alguém
- * na tela de título: isto aqui precisa de internet e de outra pessoa? Sem ela, o
- * jogador tem de ler duas frases inteiras para descobrir em qual dos dois clicar.
+ * The badge is the element that makes this screen work. "Online" and "Offline"
+ * engraved in brass answer, before the name and the blurb, the one question that
+ * stalls someone on the title screen: does this need the internet and another
+ * person? Without it, the player has to read two whole sentences to work out which
+ * of the two to click.
  */
 .mode {
   position: relative;
@@ -338,17 +339,17 @@
   box-shadow: 0 12px 24px rgba(20, 12, 4, 0.45);
 }
 
-/* A principal é a mesma carta com o filete de latão no alto — não uma cor nova.
-   Mesma regra do `.button--primary`: destaque por acabamento, não por paleta. */
+/* The primary is the same card with the brass hairline along the top — not a new
+   color. Same rule as `.button--primary`: emphasis by finish, not by palette. */
 .mode--primary {
   box-shadow:
     0 3px 10px rgba(40, 26, 10, 0.32),
     0 3px 0 var(--brass-dark) inset;
 }
 
-/* Modo indisponível (sem servidor de sala configurado): a carta fica de papel
-   velho e o cursor diz que não há o que clicar. Continua legível — é ela que
-   carrega o motivo. */
+/* Unavailable mode (no room server configured): the card goes to old paper and the
+   cursor says there is nothing to click. It stays legible — it is the card that
+   carries the reason. */
 .mode:disabled {
   filter: grayscale(0.55) brightness(0.94);
   opacity: 0.72;
@@ -371,8 +372,8 @@
   text-shadow: 0 1px 0 rgba(255, 246, 214, 0.4);
 }
 
-/* A tarja do modo sem rede é tinta sobre papel, e não latão: latão é o metal que
-   este menu usa para o que está ativo, e gastá-lo nos dois apagaria a diferença. */
+/* The badge on the offline mode is ink on paper, not brass: brass is the metal this
+   menu uses for what is live, and spending it on both would erase the difference. */
 .mode:not(.mode--primary) .mode__badge {
   color: var(--ink-soft);
   background: rgba(255, 250, 232, 0.55);
@@ -393,7 +394,7 @@
   color: var(--ink-soft);
 }
 
-/* --- cartões de dificuldade -------------------------------------------------- */
+/* --- difficulty cards -------------------------------------------------------- */
 
 .choices {
   display: grid;
@@ -402,10 +403,10 @@
 }
 
 /**
- * Cada capitão é uma **carta de bordo**: papel mais claro, tinta, e um vinco de
- * dobra no alto. O cartão escuro com borda dourada foi trocado por isto porque
- * ele estava competindo com o pergaminho embaixo — dois materiais diferentes na
- * mesma folha, um dentro do outro, sem motivo.
+ * Each captain is a **ship's card**: lighter paper, ink, and a fold crease near
+ * the top. The dark card with a gold border was swapped for this because it was
+ * competing with the parchment underneath — two different materials on the same
+ * sheet, one inside the other, for no reason.
  */
 .choice {
   position: relative;
@@ -426,7 +427,7 @@
     box-shadow var(--transicao-rapida);
 }
 
-/* O vinco de dobra: uma linha clara com sombra logo abaixo, no terço superior. */
+/* The fold crease: a light line with a shadow right below it, in the top third. */
 .choice::before {
   content: '';
   position: absolute;
@@ -438,13 +439,14 @@
 }
 
 /**
- * A marca de seleção: um **carimbo de lacre** no canto.
+ * The selection mark: a **wax seal stamp** in the corner.
  *
- * Existe porque foco e seleção são estados diferentes e precisam de marcas
- * diferentes — o foco é o anel do navegador, a seleção é este lacre. Ele não
- * depende de cor para ser lido (é uma forma que aparece do nada) e não entra na
- * árvore de acessibilidade, porque `aria-checked` já anuncia a escolha e um
- * glifo em `::after` viraria parte do nome acessível do botão.
+ * It exists because focus and selection are different states and need different
+ * marks — focus is the browser's ring, selection is this seal. It doesn't depend
+ * on color to be read (it is a shape that appears out of nothing) and it doesn't
+ * enter the accessibility tree, because `aria-checked` already announces the
+ * choice and a glyph in `::after` would become part of the button's accessible
+ * name.
  */
 .choice::after {
   content: '';
@@ -493,8 +495,8 @@
   color: var(--ink);
 }
 
-/* As não escolhidas recuam meio tom. Contraste por subtração: em vez de gritar na
-   selecionada, cala nas outras. */
+/* The unchosen ones step back half a tone. Contrast by subtraction: instead of
+   shouting on the selected one, it goes quiet on the others. */
 .choice[aria-checked='false'] .choice__name {
   color: var(--ink-soft);
 }
@@ -505,8 +507,8 @@
   color: var(--ink-soft);
 }
 
-/* Barrinhas de aferição do capitão. Comunicam a diferença sem números — três
-   valores comparáveis lado a lado dizem mais que "sigma 0,018 rad". */
+/* Little gauge bars for the captain. They get the difference across without
+   numbers — three comparable values side by side say more than "sigma 0.018 rad". */
 .choice__meters {
   display: flex;
   flex-direction: column;
@@ -525,8 +527,8 @@
   color: var(--ink-soft);
 }
 
-/* Trilho de tinta sobre papel, não de vidro sobre preto: a barra vive dentro da
-   carta, e uma pista escura ali seria um buraco na folha. */
+/* An ink-on-paper track, not glass on black: the bar lives inside the card, and a
+   dark trough there would be a hole in the sheet. */
 .meter__track {
   height: 5px;
   background: rgba(92, 74, 46, 0.22);
@@ -541,7 +543,7 @@
   transition: transform var(--transicao-media);
 }
 
-/* --- botões ------------------------------------------------------------------ */
+/* --- buttons ----------------------------------------------------------------- */
 
 .actions {
   display: flex;
@@ -552,13 +554,13 @@
 }
 
 /**
- * Os botões são **placas de latão parafusadas na tábua**.
+ * The buttons are **brass plates screwed to the plank**.
  *
- * Daí vêm as três coisas que os distinguem de um botão comum: chapa escovada em
- * vez de gradiente liso, dois parafusos nas pontas, e texto gravado (tinta
- * escura com filete claro embaixo) em vez de texto claro sobre fundo escuro.
- * Apertar afunda a placa e apaga o brilho de cima — que é literalmente o que
- * acontece quando se aperta uma peça de metal contra madeira.
+ * That is where the three things that set them apart from an ordinary button come
+ * from: brushed plate instead of a smooth gradient, two screws at the ends, and
+ * engraved text (dark ink with a light hairline under it) instead of light text on
+ * a dark fill. Pressing sinks the plate and kills the highlight along the top —
+ * which is literally what happens when a piece of metal is pressed into wood.
  */
 .button {
   position: relative;
@@ -581,7 +583,7 @@
     box-shadow var(--transicao-rapida);
 }
 
-/* Os dois parafusos. Mesmo desenho da cabeça dos pregos da folha, menores. */
+/* The two screws. Same drawing as the sheet's nail heads, smaller. */
 .button::before,
 .button::after {
   content: '';
@@ -621,7 +623,7 @@
     0 2px 6px rgba(0, 0, 0, 0.4) inset;
 }
 
-/* O botão principal é a mesma placa, maior e mais quente — não uma cor nova. */
+/* The primary button is the same plate, bigger and warmer — not a new color. */
 .button--primary {
   font-size: 1.15rem;
   padding: var(--espaco-4) var(--espaco-12);
@@ -634,12 +636,12 @@
 }
 
 /**
- * Fileira de botões empilhada, para telas em que cada ação é uma escolha de rumo
- * e não uma confirmação.
+ * A stacked row of buttons, for screens where each action is a choice of course
+ * rather than a confirmation.
  *
- * Na tela de rede as três saídas são alternativas de peso parecido, e lado a lado
- * elas viravam uma barra de ferramentas: o olho varre e não decide. Empilhadas e
- * com a mesma largura, viram uma lista — que é o que elas são.
+ * On the network screen the three exits are alternatives of similar weight, and
+ * side by side they turned into a toolbar: the eye scans and doesn't decide.
+ * Stacked and at the same width, they become a list — which is what they are.
  */
 .actions--stacked {
   flex-direction: column;
@@ -650,13 +652,13 @@
   width: min(26rem, 100%);
 }
 
-/* --- campo de apelido -------------------------------------------------------- */
+/* --- nickname field ---------------------------------------------------------- */
 
 .nickname {
-  /* A mesma largura dos botões empilhados logo abaixo: o campo e as três saídas
-     formam uma coluna só, e é isso que faz a tela ser lida de cima para baixo em
-     vez de como duas regiões soltas. Esticado na folha inteira, um campo de
-     dezesseis caracteres parecia caber num parágrafo. */
+  /* The same width as the stacked buttons right below it: the field and the three
+     exits form a single column, and that is what makes the screen read top to
+     bottom instead of as two loose regions. Stretched across the whole sheet, a
+     sixteen-character field looked like it would fit a paragraph. */
   display: block;
   width: min(26rem, 100%);
   margin: 0 auto;
@@ -665,8 +667,8 @@
   font-size: 1.15rem;
   letter-spacing: 0.08em;
   color: var(--ink);
-  /* Papel um tom mais claro que a folha, com o vinco de tinta embaixo: a mesma
-     leitura de "linha para escrever" que uma ficha de bordo tem. */
+  /* Paper one tone lighter than the sheet, with the ink crease along the bottom:
+     the same "line to write on" reading a ship's form has. */
   background: rgba(255, 250, 232, 0.55);
   border: 1px solid rgba(92, 74, 46, 0.35);
   border-bottom-color: var(--brass-dark);
@@ -677,7 +679,7 @@
   border-color: var(--brass-dark);
 }
 
-/* --- código de sala ---------------------------------------------------------- */
+/* --- room code --------------------------------------------------------------- */
 
 .code {
   display: flex;
@@ -687,12 +689,12 @@
 }
 
 /**
- * Uma casa do código.
+ * One slot of the code.
  *
- * É uma **placa de latão gravada**, do mesmo material dos botões, porque é isso
- * que ela é: um controle que se aperta. Monoespaçada e larga o bastante para o
- * caractere não dançar quando ele troca — com fonte proporcional, um `W` no lugar
- * de um `J` empurraria as três casas seguintes a cada passo do d-pad.
+ * It is an **engraved brass plate**, the same material as the buttons, because
+ * that is what it is: a control you press. Monospaced and wide enough that the
+ * character doesn't dance when it changes — with a proportional font, a `W` in
+ * place of a `J` would shove the next three slots over on every d-pad step.
  */
 .code__slot {
   width: 4.2rem;
@@ -711,24 +713,25 @@
   transition: transform var(--transicao-rapida), filter var(--transicao-rapida);
 }
 
-/* A casa focada sobe e acende: com quatro placas idênticas, saber em qual delas o
-   d-pad vai bater é a única informação que a tela precisa dar. O anel de foco do
-   navegador continua vindo por cima — isto se soma a ele, não o substitui. */
+/* The focused slot lifts and lights up: with four identical plates, knowing which
+   one the d-pad will land on is the only information the screen has to give. The
+   browser's focus ring still comes over the top — this adds to it, doesn't replace
+   it. */
 .code__slot:focus-visible {
   transform: translateY(-3px);
   filter: brightness(1.18);
 }
 
-/* --- sala de espera ---------------------------------------------------------- */
+/* --- waiting room ------------------------------------------------------------ */
 
 /**
- * O título da sala de espera.
+ * The waiting room title.
  *
- * Versalete de 1,9 rem, e **não** o corpo do título de fim de partida. A diferença
- * importa porque esta linha carrega um nome que outra pessoa escolheu: em caixa
- * alta de 3 rem, um apelido de dezesseis caracteres quebrava em três linhas e
- * empurrava o resto da tela para fora da folha. O versalete já dá a formalidade
- * sem depender do tamanho.
+ * Small caps at 1.9 rem, and **not** the body of the end-of-match title. The
+ * difference matters because this line carries a name someone else chose: in 3 rem
+ * uppercase, a sixteen-character nickname broke onto three lines and pushed the
+ * rest of the screen off the sheet. Small caps already give the formality without
+ * leaning on size.
  */
 .room__title {
   margin: 0;
@@ -765,11 +768,11 @@
 }
 
 /**
- * O código, do tamanho de quem vai ditá-lo por voz.
+ * The code, sized for someone about to dictate it over voice.
  *
- * Entreletra larga porque o número existe para ser **lido em voz alta** para
- * outra pessoa: junto, `AB` e `48` viram um borrão numa chamada de voz. Cada
- * caractere separado é um caractere ditado.
+ * Wide letter spacing because the number exists to be **read out loud** to
+ * another person: run together, `AB` and `48` turn into a blur on a voice call.
+ * Each separated character is one dictated character.
  */
 .code-display__value {
   font-family: var(--fonte-numero);
@@ -782,14 +785,15 @@
 }
 
 .code-display__copy {
-  /* Fixa a largura no rótulo mais longo ("Copy failed"): sem isso, a confirmação
-     empurra o código para o lado no instante em que alguém está copiando ele. */
+  /* Pins the width to the longest label ("Copy failed"): without it, the
+     confirmation shoves the code sideways at the exact moment someone is copying
+     it. */
   min-width: 9.5rem;
   padding: var(--espaco-2) var(--espaco-4);
   font-size: 0.86rem;
 }
 
-/* O relógio da espera. Tabular para os dígitos não dançarem a cada segundo. */
+/* The waiting clock. Tabular so the digits don't dance every second. */
 .code-display__timer {
   font-family: var(--fonte-numero);
   font-size: 1.1rem;
@@ -802,7 +806,7 @@
   display: none;
 }
 
-/* --- ajustes ----------------------------------------------------------------- */
+/* --- settings ---------------------------------------------------------------- */
 
 .settings {
   display: grid;
@@ -826,7 +830,7 @@
   font-family: var(--fonte-numero);
   font-size: 0.8rem;
   color: var(--ink-soft);
-  /* Tabular para o número não empurrar o rótulo enquanto o cursor arrasta. */
+  /* Tabular so the number doesn't shove the label while the thumb is dragging. */
   font-variant-numeric: tabular-nums;
 }
 

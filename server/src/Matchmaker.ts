@@ -1,24 +1,24 @@
 /**
- * A fila: quem chega sozinho espera, quem chega depois entra na sala de quem
- * esperava.
+ * The queue: whoever arrives alone waits, whoever arrives next joins the room of
+ * the one who was waiting.
  *
- * O objeto inteiro guarda **um campo**, e ainda assim ele é a peça que justifica
- * usar Durable Objects em vez de qualquer outra coisa: cada Durable Object é uma
- * instância única e de execução serializada, então "há alguém esperando?" e
- * "então sou eu que pego" acontecem sem que dois pedidos simultâneos possam
- * responder sim aos dois. É exclusão mútua sem transação, sem trava e sem banco.
+ * The whole object holds **one field**, and even so it is the piece that justifies
+ * using Durable Objects instead of anything else: each Durable Object is a single
+ * instance with serialized execution, so "is anyone waiting?" and "then I'm the
+ * one who takes it" happen without two simultaneous requests both getting a yes.
+ * It is mutual exclusion with no transaction, no lock and no database.
  *
- * Custa **dois requests por duelo** — um de cada capitão.
+ * Costs **two requests per duel** — one from each captain.
  *
- * ## Duas rotas
+ * ## Two routes
  *
- * | rota | quem chama | o que faz |
+ * | route | who calls | what it does |
  * |---|---|---|
- * | `/claim` | o Worker, quando alguém entra na fila | devolve a sala de quem esperava, ou abre uma |
- * | `/release?code=` | a sala, quando fica vazia | tira aquela sala da fila |
+ * | `/claim` | the Worker, when someone queues | returns the waiting player's room, or opens one |
+ * | `/release?code=` | the room, when it goes empty | takes that room out of the queue |
  *
- * A segunda existe porque uma vaga que ninguém ocupa precisa sair da fila **no
- * instante em que o dono dela desiste**, e não quando um prazo vence. Ver
+ * The second exists because a slot nobody occupies has to leave the queue **the
+ * instant its owner gives up**, and not when a deadline expires. See
  * `WAITING_TTL_MS`.
  */
 
@@ -30,24 +30,24 @@ interface Waiting {
 }
 
 /**
- * Prazo de validade de uma vaga na fila.
+ * Expiry for a slot in the queue.
  *
- * ⚠️ **Dez minutos, e já foram sessenta segundos** — o que quebrava a fila
- * inteira no caso mais comum que ela tem: dois amigos combinando de jogar.
+ * ⚠️ **Ten minutes, and it was sixty seconds once** — which broke the whole
+ * queue in the most common case it sees: two friends arranging to play.
  *
- * O primeiro clica em "partida rápida", o objeto abre a sala `X` e o guarda como
- * quem espera. O segundo clica um minuto e meio depois, quando `X` já venceu — e
- * em vez de entrar em `X`, ele **abre a sala `Y`** e passa a esperar nela. Os
- * dois ficam sentados em salas diferentes, para sempre, cada um vendo a mesma
- * tela de "procurando adversário". E não há nada que os junte depois: quem
- * chegou primeiro não está mais na fila, e quem chegou por último está numa vaga
- * nova que só o terceiro jogador reclamaria.
+ * The first one clicks "quick match", the object opens room `X` and stores him
+ * as the one waiting. The second clicks a minute and a half later, when `X` has
+ * already expired — and instead of joining `X`, he **opens room `Y`** and starts
+ * waiting in it. The two sit in different rooms, forever, each watching the same
+ * "searching for an opponent" screen. And there is nothing to bring them
+ * together afterwards: the first to arrive is no longer in the queue, and the
+ * last to arrive is in a new slot that only a third player would claim.
  *
- * Dez minutos é o mesmo prazo com que a sala se declara abandonada, o que faz os
- * dois relógios contarem a mesma história. E o prazo deixou de ser a defesa
- * principal contra vaga morta: hoje é `/release` que a tira da fila assim que
- * ela esvazia, e isto aqui é só a rede de segurança para o caso de a sala morrer
- * sem conseguir avisar.
+ * Ten minutes is the same deadline the room uses to declare itself abandoned,
+ * which makes both clocks tell the same story. And the deadline is no longer the
+ * main defense against a dead slot: today it's `/release` that takes it out of
+ * the queue as soon as it empties, and this here is only the safety net for the
+ * case where the room dies without managing to say so.
  */
 const WAITING_TTL_MS = 10 * 60 * 1000;
 
@@ -62,14 +62,14 @@ export class Matchmaker implements DurableObject {
     return this.claim();
   }
 
-  /** Alguém entrou na fila. */
+  /** Someone joined the queue. */
   private async claim(): Promise<Response> {
     const waiting = await this.state.storage.get<Waiting>('waiting');
     const now = Date.now();
 
-    // Havia alguém esperando, e a vaga ainda vale: manda os dois para a mesma
-    // sala e limpa a fila no mesmo passo — ninguém mais pode reclamar esta vaga
-    // porque este objeto atende um pedido de cada vez.
+    // Someone was waiting and the slot is still good: send both to the same room
+    // and clear the queue in the same step — nobody else can claim this slot
+    // because this object serves one request at a time.
     if (waiting && now - waiting.since < WAITING_TTL_MS) {
       await this.state.storage.delete('waiting');
       return Response.json({ code: waiting.code, waited: true });
@@ -81,13 +81,13 @@ export class Matchmaker implements DurableObject {
   }
 
   /**
-   * Uma sala avisou que esvaziou.
+   * A room reported that it went empty.
    *
-   * O `code` é conferido antes de apagar: entre a saída do jogador e a chegada
-   * deste aviso, outra pessoa pode ter entrado na fila e tomado a vaga com um
-   * código novo. Apagar sem olhar tiraria da fila alguém que acabou de entrar
-   * nela, e o sintoma seria o mesmo defeito que este método existe para
-   * consertar.
+   * The `code` is checked before deleting: between the player leaving and this
+   * notice arriving, someone else may have joined the queue and taken the slot
+   * with a new code. Deleting without looking would pull someone who had just
+   * joined the queue right back out of it, and the symptom would be the very
+   * defect this method exists to fix.
    */
   private async release(code: string | null): Promise<Response> {
     if (!code) return Response.json({ released: false });

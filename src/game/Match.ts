@@ -1,28 +1,27 @@
 /**
- * A partida: dois navios, um duelo, e o que acontece quando um deles vai ao fundo.
+ * The match: two ships, one duel, and what happens when one of them goes down.
  *
- * Este módulo é dono de **tudo que é jogo** — os dois cascos, o capitão inimigo, as
- * balas no ar, os efeitos, o jogador a bordo e as peças que ele usa. O que fica
- * fora dele é a *apresentação*: renderizador, cena, câmera, ambiente, motor e
- * entrada continuam sendo do `main.ts`. A divisa é útil na prática: reiniciar uma
- * partida é um método daqui, e não uma reconstrução do mundo — o oceano, o céu e as
- * texturas do navio nunca são refeitos, e trocar de dificuldade custa poucos
- * milissegundos em vez dos décimos de segundo que `createShipAssets` leva.
+ * This module owns **everything that is game** — both hulls, the enemy captain, the
+ * balls in the air, the effects, the player aboard and the parts they use. What stays
+ * outside it is the *presentation*: renderer, scene, camera, environment, engine and
+ * input still belong to `main.ts`. The boundary is useful in practice: restarting a
+ * match is a method in here, not a rebuild of the world — the ocean, the sky and the
+ * ship's textures are never remade, and switching difficulty costs a few milliseconds
+ * instead of the tenths of a second `createShipAssets` takes.
  *
- * ## A ordem do passo de física, que não é arbitrária
+ * ## The order of the physics step, which is not arbitrary
  *
- * 1. **Contato entre cascos**, antes de tudo. As forças ficam acumuladas em
- *    `ShipBody` e entram no passo que começa agora — ver a nota em `HullContact`.
- * 2. **O capitão inimigo**, antes do navio dele. Timão, pontaria e gatilho deste
- *    passo têm de valer neste passo, e não no seguinte.
- * 3. **Os navios**, cada um integrando a própria física.
- * 4. **As balas**, por último, porque o teste de acerto lê a pose que os navios
- *    acabaram de escrever. Ao contrário, a bala atravessaria um casco de um passo
- *    atrás.
+ * 1. **Contact between hulls**, before anything else. The forces are accumulated in
+ *    `ShipBody` and enter the step that is starting now — see the note in `HullContact`.
+ * 2. **The enemy captain**, before their ship. This step's helm, aim and trigger have
+ *    to apply on this step, not on the next one.
+ * 3. **The ships**, each one integrating its own physics.
+ * 4. **The balls**, last, because the hit test reads the pose the ships have just
+ *    written. The other way round, the ball would go through a hull from one step ago.
  *
- * Trocar 2 e 3 dá um inimigo que reage sempre um passo tarde; trocar 3 e 4 dá balas
- * que erram por 1,6 m. Nenhuma das duas aparece como bug óbvio, e é por isso que a
- * ordem está escrita aqui.
+ * Swapping 2 and 3 gives an enemy that always reacts one step late; swapping 3 and 4
+ * gives balls that miss by 1.6 m. Neither one shows up as an obvious bug, and that is
+ * why the order is written down here.
  */
 
 import * as THREE from 'three';
@@ -51,120 +50,120 @@ import type { MatchEvent, ShipSlot } from './MatchEvents';
 export type MatchState = 'menu' | 'fighting' | 'won' | 'lost';
 
 /**
- * Quem manda na simulação.
+ * Who is in charge of the simulation.
  *
- * `solo` e `host` percorrem exatamente o mesmo caminho de código — a única
- * diferença é de onde vem a entrada do segundo navio. `guest` é o cliente magro:
- * ele não integra casco nenhum, recebe a pose pronta e simula só o próprio corpo.
+ * `solo` and `host` walk exactly the same code path — the only difference is where the
+ * second ship's input comes from. `guest` is the thin client: it integrates no hull at
+ * all, receives the pose ready-made and simulates only its own body.
  */
 export type MatchRole = 'solo' | 'host' | 'guest';
 
-/** A entrada de um passo, um quadro por navio. */
+/** One step's input, one frame per ship. */
 export interface MatchInputs {
   readonly player: InputFrame;
-  /** `null` quando quem pilota o navio inimigo é o `ShipAI`. */
+  /** `null` when the one flying the enemy ship is the `ShipAI`. */
   readonly enemy: InputFrame | null;
 }
 
-/** Nome dos navios. É o mesmo `owner` que os tiros de cada um carregam. */
+/** The ships' names. It is the same `owner` each one's shots carry. */
 const PLAYER_SHIP = 'player-sloop';
 const ENEMY_SHIP = 'enemy-sloop';
 
 /**
- * Distância inicial entre os dois, em metros.
+ * Initial distance between the two, in meters.
  *
- * 220 m é escolhido pelo relógio, não pela régua: fora do alcance de tiro de
- * qualquer dificuldade (a Lenda abre fogo a 155 m), e a ~5 m/s de aproximação
- * mútua dá perto de meio minuto antes do primeiro tiro. É o tempo de o jogador
- * assumir o timão, descer e carregar as duas peças e voltar ao convés — a partida
- * começa com uma tarefa, não com um susto.
+ * 220 m is chosen by the clock, not by the ruler: outside firing range at any
+ * difficulty (the Legend opens fire at 155 m), and at ~5 m/s of mutual approach it
+ * gives close to half a minute before the first shot. It is the time to take the helm,
+ * go below and load both guns and come back on deck — the match starts with a task, not
+ * with a fright.
  */
 const SPAWN_RANGE = 220;
 
 /**
- * Marcação em que o inimigo nasce, relativa à proa do jogador.
+ * The bearing the enemy is born on, relative to the player's bow.
  *
- * Negativa é boreste, e é de propósito: `PlayerController` põe a cabeça do jogador
- * virada 24° para boreste no spawn, para a primeira vista do jogo mostrar o convés
- * em vez do mastro. Pondo a vela inimiga no mesmo lado, a primeira coisa que ele vê
- * ao aparecer no convés é com quem vai brigar.
+ * Negative is starboard, and that is on purpose: `PlayerController` puts the player's
+ * head turned 24° to starboard at spawn, so the game's first view shows the deck instead
+ * of the mast. Putting the enemy sail on the same side makes the first thing they see on
+ * appearing on deck the one they are going to fight.
  */
 const SPAWN_BEARING = -0.45;
 
 /**
- * Tingimento da vela inimiga: carmim sujo, quase seco.
+ * The enemy sail's tint: dirty crimson, almost dry.
  *
- * Escuro o bastante para a silhueta ler como ameaça contra céu claro, e ainda
- * assim visível contra o mar à noite — a vela crua do jogador some no cinza da
- * bruma, esta não. Ver `tintSail` para o porquê de ser multiplicação.
+ * Dark enough for the silhouette to read as a threat against a bright sky, and still
+ * visible against the sea at night — the player's raw canvas vanishes into the gray of
+ * the haze, this one does not. See `tintSail` for why it is a multiplication.
  */
 const ENEMY_SAIL = 0x8a2f28;
 
 /**
- * O personagem, em disco. Um arquivo para os dois corpos a bordo.
+ * The character, on disk. One file for both bodies aboard.
  *
- * `BASE_URL` é o prefixo com que o Vite publica o `public/` — em produção ele
- * pode não ser a raiz do domínio, e um caminho absoluto cravado aqui daria um
- * 404 silencioso que só apareceria como "os piratas sumiram" depois do deploy.
+ * `BASE_URL` is the prefix Vite publishes `public/` under — in production it may not be
+ * the root of the domain, and an absolute path hardcoded here would give a silent 404
+ * that would only show up as "the pirates are gone" after the deploy.
  */
 const CHARACTER_MODEL = `${import.meta.env.BASE_URL}models/pirate.glb`;
 
-/** Números da partida, para a tela de fim. */
+/** The match's numbers, for the end screen. */
 export interface MatchStats {
-  /** Segundos de combate. */
+  /** Seconds of combat. */
   duration: number;
-  /** Tiros que o jogador deu. */
+  /** Shots the player fired. */
   shotsFired: number;
-  /** Tiros do jogador que encontraram o casco ou o mastro inimigo. */
+  /** The player's shots that found the enemy hull or mast. */
   shotsLanded: number;
-  /** Rombos que o jogador abriu no inimigo. */
+  /** Breaches the player opened in the enemy. */
   breachesDealt: number;
-  /** Rombos que o jogador levou. */
+  /** Breaches the player took. */
   breachesTaken: number;
 }
 
 /**
- * Avisos da partida para quem quiser reagir — áudio e interface.
+ * The match's notices for whoever wants to react — audio and UI.
  *
- * Callbacks opcionais em vez de um emissor de eventos: são cinco avisos, todos com
- * assinatura própria, e um `Map<string, Function[]>` aqui só trocaria checagem de
- * tipo por texto solto.
+ * Optional callbacks instead of an event emitter: there are five notices, each with its
+ * own signature, and a `Map<string, Function[]>` here would only trade type checking for
+ * loose strings.
  */
 export interface MatchListener {
-  /** Um canhão disparou. `byPlayer` distingue o estrondo perto do longe. */
+  /** A cannon fired. `byPlayer` tells the near bang from the far one. */
   onShot?(position: THREE.Vector3, direction: THREE.Vector3, byPlayer: boolean): void;
   onSplash?(position: THREE.Vector3, speed: number): void;
-  /** Bala na madeira. `flooded` é `true` quando abriu rombo que alaga. */
+  /** Ball into wood. `flooded` is `true` when it opened a breach that floods. */
   onHullHit?(position: THREE.Vector3, speed: number, onPlayer: boolean, flooded: boolean): void;
   onMastHit?(position: THREE.Vector3, speed: number): void;
-  /** Os dois cascos se encostaram. */
+  /** The two hulls touched. */
   onCollision?(position: THREE.Vector3, speed: number): void;
   onStateChange?(state: MatchState, previous: MatchState): void;
 }
 
 /**
- * Velocidade de aproximação a partir da qual o encontro dos cascos soa, em m/s.
+ * Closing speed from which the hulls meeting makes a sound, in m/s.
  *
- * Abaixo disso os dois estão apenas encostados, e o mar mexe com eles o tempo todo:
- * um estrondo a cada balanço seria ruído, não informação.
+ * Below that the two are merely touching, and the sea works on them the whole time: a
+ * crash on every roll would be noise, not information.
  */
 const COLLISION_SPEED = 0.4;
 
 /**
- * Segundos de rearme entre duas pancadas que abrem casco.
+ * Seconds of rearm between two impacts that open a hull.
  *
- * É o que separa "bateram de novo" de "continuam raspando". Num costado a costado a
- * onda faz a velocidade de aproximação subir e descer várias vezes por segundo, e
- * sem rearme um atracamento abriria rombo a cada passo — sessenta por segundo. Um
- * segundo e meio é mais que o tempo de os dois cascos se separarem e voltarem, então
- * uma investida nova sempre conta, e um rangido contínuo conta uma vez.
+ * It is what separates "they hit again" from "they are still grinding". Side to side the
+ * wave makes the closing speed rise and fall several times a second, and without a rearm
+ * a grapple would open a breach on every step — sixty a second. A second and a half is
+ * more than the time for the two hulls to separate and come back, so a fresh charge
+ * always counts, and a continuous creak counts once.
  */
 const RAM_COOLDOWN = 1.5;
 
-/** Lista vazia de navios, para o passo do guest. Ver `fixedUpdateRemote`. */
+/** An empty list of ships, for the guest's step. See `fixedUpdateRemote`. */
 const EMPTY_SHIPS: readonly Ship[] = [];
 
-/** Teto da fila de eventos à espera de instantâneo. Ver `collectNetEvents`. */
+/** Ceiling of the event queue waiting for a snapshot. See `collectNetEvents`. */
 const MAX_NET_EVENTS = 64;
 
 const _muzzleDirection = new THREE.Vector3();
@@ -180,35 +179,34 @@ export class Match {
   difficulty: DifficultyPreset = DIFFICULTIES.corsair;
 
   /**
-   * Passos desde o início desta partida.
+   * Steps since this match started.
    *
-   * O relógio do duelo, e não o do processo — `Engine.tick` conta desde que a
-   * página abriu. É este que carimba entrada e instantâneo na rede, porque é este
-   * que os dois lados podem zerar juntos.
+   * The duel's clock, not the process's — `Engine.tick` counts from when the page
+   * opened. This is the one that stamps input and snapshot on the network, because
+   * this is the one both sides can zero together.
    */
   tick = 0;
 
   /**
-   * O que aconteceu neste passo. Drenado em `update`. Ver `MatchEvents`.
+   * What happened on this step. Drained in `update`. See `MatchEvents`.
    */
   readonly events: MatchEvent[] = [];
 
   /**
-   * Os eventos que ainda não foram pelo fio, quando este é o lado que simula.
+   * The events that have not gone over the wire yet, when this is the simulating side.
    *
-   * ⚠️ **Existe porque os dois relógios não batem, e isso custou o duelo em rede
-   * inteiro.** `events` é do **quadro**: `drainEvents` o esvazia em toda chamada
-   * de `update`, que roda uma vez por quadro do monitor. O instantâneo, ao
-   * contrário, sai a cada **quatro passos**. A 60 fps são quatro esvaziamentos
-   * para cada instantâneo, e o instantâneo só encontrava na lista o que tinha
-   * acontecido depois do último deles — três de cada quatro tiros, respingos e
-   * impactos nunca chegavam ao outro lado. Como é do evento de tiro que nasce a
-   * bala do guest, o efeito era um adversário que atirava sem bala, sem estrondo
-   * e sem fumaça, três vezes em cada quatro.
+   * ⚠️ **It exists because the two clocks do not agree, and that cost the whole
+   * networked duel.** `events` belongs to the **frame**: `drainEvents` empties it on
+   * every call to `update`, which runs once per monitor frame. The snapshot, by
+   * contrast, goes out every **four steps**. At 60 fps that is four drains per
+   * snapshot, and the snapshot only found in the list what had happened after the last
+   * of them — three out of every four shots, splashes and impacts never reached the
+   * other side. Since the guest's ball is born from the fire event, the effect was an
+   * opponent firing with no ball, no bang and no smoke, three times out of four.
    *
-   * Esta lista é do **instantâneo**: quem a esvazia é `HostSession`, depois de
-   * escrevê-la no fio. Guardar a mesma referência nas duas é seguro — todo vetor
-   * que entra num evento já é clonado por quem o cria.
+   * This list belongs to the **snapshot**: what empties it is `HostSession`, after
+   * writing it to the wire. Keeping the same reference in both is safe — every vector
+   * that goes into an event is already cloned by whoever creates it.
    */
   readonly netEvents: MatchEvent[] = [];
 
@@ -216,46 +214,47 @@ export class Match {
   readonly playerShip: Ship;
   readonly enemyShip: Ship;
   /**
-   * Todos os navios. **A ordem importa em dois lugares:** a esteira centra a área
-   * coberta no primeiro, e o teste de acerto pula quem tem o mesmo nome do dono do
-   * tiro. O jogador vem primeiro.
+   * All the ships. **The order matters in two places:** the wake centers its covered
+   * area on the first, and the hit test skips whoever has the same name as the shot's
+   * owner. The player comes first.
    */
   readonly ships: readonly Ship[];
 
   /**
-   * Os dois marujos, na mesma ordem de `ships`. O índice 0 é sempre o local.
+   * The two sailors, in the same order as `ships`. Index 0 is always the local one.
    *
-   * O segundo existe mesmo contra a máquina, e não é desperdício: é ele que dá ao
-   * navio inimigo um corpo e uma lista de peças idênticas às do jogador, de modo
-   * que trocar o `ShipAI` por uma pessoa não muda nada além de onde a entrada vem.
+   * The second one exists even against the machine, and it is not waste: it is what
+   * gives the enemy ship a body and a list of parts identical to the player's, so that
+   * swapping the `ShipAI` for a person changes nothing beyond where the input comes
+   * from.
    */
   readonly crew: readonly [Crewman, Crewman];
 
   /**
-   * O corpo do jogador. Carrega sozinho e em paralelo: é o único asset binário
-   * do projeto, e o jogo tem de estar jogável antes de ele chegar.
+   * The player's body. It loads on its own and in parallel: it is the project's only
+   * binary asset, and the game has to be playable before it arrives.
    */
   readonly avatar = new PlayerAvatar();
 
   /**
-   * O corpo do adversário, pendurado no casco dele.
+   * The opponent's body, hanging off their hull.
    *
-   * Mesma classe, mesmos clipes, mesmo arquivo — o que muda é só de onde vem o
-   * controlador que o alimenta: no host ele é simulado aqui com a entrada que
-   * chega pela rede, e no cliente que não simula a pose vem pronta no
-   * instantâneo e `PlayerController.applyRemoteStep` a converte nos relógios de
-   * animação. Ver `CharacterAsset` para o porquê de os dois corpos saírem de um
-   * download só.
+   * Same class, same clips, same file — all that changes is where the controller
+   * feeding it comes from: on the host it is simulated here with the input arriving
+   * over the network, and on the client that does not simulate the pose arrives ready
+   * in the snapshot and `PlayerController.applyRemoteStep` converts it into the
+   * animation clocks. See `CharacterAsset` for why both bodies come out of a single
+   * download.
    *
-   * Fica **escondido fora do duelo em rede**: contra a máquina quem comanda o
-   * outro casco é o `ShipAI`, que não move marujo nenhum, e um pirata plantado
-   * no convés sem nunca dar um passo é pior que nenhum pirata.
+   * It stays **hidden outside the networked duel**: against the machine the other hull
+   * is commanded by `ShipAI`, which moves no sailor at all, and a pirate planted on the
+   * deck without ever taking a step is worse than no pirate.
    */
   readonly enemyAvatar = new PlayerAvatar();
   readonly cannonballs: CannonballPool;
   readonly effects: Effects;
 
-  /** O capitão inimigo. `null` quando quem comanda o outro casco é uma pessoa. */
+  /** The enemy captain. `null` when the other hull is commanded by a person. */
   ai: ShipAI | null;
 
   readonly contact: ContactReport = createContactReport();
@@ -269,23 +268,23 @@ export class Match {
   };
 
   private readonly damageViews: readonly DamageView[];
-  /** Rombos de cada navio no passo anterior, para detectar os novos. */
+  /** Each ship's breaches on the previous step, to detect the new ones. */
   private previousBreaches = { player: 0, enemy: 0 };
-  /** Segundos até a próxima pancada poder abrir casco. Ver `RAM_COOLDOWN`. */
+  /** Seconds until the next impact can open a hull. See `RAM_COOLDOWN`. */
   private ramCooldown = 0;
 
   constructor(
     scene: THREE.Scene,
     /**
-     * Mar, vento e céu. Público em leitura porque o duelo depende dele para ser
-     * o mesmo dos dois lados — o teste de determinismo o compara, e o
-     * instantâneo de rede carrega o vento que sai daqui.
+     * Sea, wind and sky. Publicly readable because the duel depends on it being the
+     * same on both sides — the determinism test compares it, and the network
+     * snapshot carries the wind that comes out of here.
      */
     readonly environment: Environment,
     private readonly listener: MatchListener = {},
   ) {
-    // A parte caríssima da inicialização, e roda uma vez só: texturas em canvas
-    // 2D mais a varredura do casco. Os dois navios compartilham tudo isso.
+    // The very expensive part of the initialization, and it runs exactly once:
+    // textures on a 2D canvas plus the hull sweep. Both ships share all of it.
     this.assets = createShipAssets();
 
     this.playerShip = new Ship(this.assets, PLAYER_SHIP);
@@ -294,8 +293,8 @@ export class Match {
 
     for (const ship of this.ships) {
       scene.add(ship.model.root);
-      // Sem isto o oceano é desenhado por dentro do casco e o porão fica cheio de
-      // mar mesmo com o navio seco.
+      // Without this the ocean is drawn inside the hull and the hold is full of sea
+      // even with the ship dry.
       environment.addHullClip(ship.model.root);
     }
 
@@ -309,56 +308,57 @@ export class Match {
 
     this.ai = new ShipAI(this.enemyShip, this.difficulty);
 
-    // Filhos do modelo de cada navio, não da cena: assim eles acompanham jogo,
-    // adernada e avanço sem ninguém recompor nada — a mesma razão de `CameraRig`
-    // compor com `ship.model.root`.
+    // Children of each ship's model, not of the scene: that way they follow roll,
+    // heel and surge without anyone recomposing anything — the same reason
+    // `CameraRig` composes with `ship.model.root`.
     this.avatar.attach(this.playerShip.model.root);
     this.enemyAvatar.attach(this.enemyShip.model.root);
-    // Um pedido só de rede para os dois: o segundo `load` encontra o mesmo
-    // `Promise` e instancia uma cópia. Ver `CharacterAsset`.
+    // A single network request for both: the second `load` finds the same `Promise`
+    // and instantiates a copy. See `CharacterAsset`.
     void this.avatar.load(CHARACTER_MODEL);
     void this.enemyAvatar.load(CHARACTER_MODEL);
-    // Só aparece em rede — ver a nota do campo.
+    // Only shows up over the network — see the field's note.
     this.enemyAvatar.hidden = true;
 
     this.deploy();
   }
 
-  /** `true` quando a física e os comandos devem correr. */
+  /** `true` when the physics and the commands should run. */
   get running(): boolean {
     return this.state === 'fighting';
   }
 
-  /** O marujo local: o corpo que a câmera segue e o que o jogador comanda. */
+  /** The local sailor: the body the camera follows and the one the player commands. */
   get player(): PlayerController {
     return this.crew[0].controller;
   }
 
-  /** O foco contextual do marujo local, que os prompts desenham. */
+  /** The local sailor's contextual focus, which the prompts draw. */
   get interaction(): Interaction {
     return this.crew[0].interaction;
   }
 
   /**
-   * Distância entre os dois navios, em metros. O HUD desenha a partir daqui.
+   * Distance between the two ships, in meters. The HUD draws from here.
    *
-   * Medida aqui, e não lida de `ai.range`: sem capitão da máquina não haveria de
-   * onde ler, e a distância entre dois cascos nunca dependeu de haver um bot.
+   * Measured here, and not read off `ai.range`: with no machine captain there would be
+   * nowhere to read it from, and the distance between two hulls never depended on
+   * there being a bot.
    */
   get range(): number {
     return this.playerShip.body.comPosition.distanceTo(this.enemyShip.body.comPosition);
   }
 
-  // -- ciclo de vida -----------------------------------------------------------
+  // -- life cycle --------------------------------------------------------------
 
-  /** Começa um duelo novo contra o capitão escolhido. */
+  /** Starts a fresh duel against the chosen captain. */
   startSolo(id: DifficultyId): void {
     this.role = 'solo';
     this.enemyAvatar.hidden = true;
     this.difficulty = DIFFICULTIES[id];
-    // Refeito porque os artilheiros nascem amarrados ao preset — e porque uma
-    // semente nova por partida seria o contrário do que se quer: o duelo tem de
-    // ser reproduzível para uma queixa de "esse tiro era impossível" ser apurável.
+    // Remade because the gunners are born tied to the preset — and because a fresh
+    // seed per match would be the opposite of what we want: the duel has to be
+    // reproducible for a complaint of "that shot was impossible" to be checkable.
     this.ai = new ShipAI(this.enemyShip, this.difficulty);
 
     this.deploy();
@@ -366,16 +366,16 @@ export class Match {
   }
 
   /**
-   * Começa um duelo contra outra pessoa.
+   * Starts a duel against another person.
    *
-   * O capitão da máquina é **descartado**, e não desligado: ele mantém sementes e
-   * relógios próprios, e um `ShipAI` vivo em segundo plano num duelo em rede é
-   * uma segunda mão escrevendo nos mesmos comandos que a pessoa do outro lado.
+   * The machine captain is **discarded**, not switched off: it keeps seeds and clocks
+   * of its own, and a live `ShipAI` in the background of a networked duel is a second
+   * hand writing into the same controls as the person on the other side.
    */
   startOnline(role: Exclude<MatchRole, 'solo'>): void {
     this.role = role;
-    // E o adversário ganha corpo: do outro lado do fio há alguém que anda,
-    // corre, sobe a escada e prega tábua, e agora isso se vê.
+    // And the opponent gets a body: on the other side of the wire there is somebody
+    // who walks, runs, climbs the ladder and nails planks, and now you can see it.
     this.enemyAvatar.hidden = false;
     this.ai = null;
     this.deploy();
@@ -383,18 +383,19 @@ export class Match {
   }
 
   /**
-   * Encerra um duelo em rede com o resultado que a sala anunciou.
+   * Ends a networked duel with the result the room announced.
    *
-   * ⚠️ **Sem isto, o duelo do cliente que não simula nunca acabava.** Quem
-   * decide o fim é o host, e a notícia chega pelo lobby; deste lado o estado
-   * continuava em `fighting` e o mundo seguia rodando atrás da tela de
-   * resultado. Pior: a sessão de rede é desligada junto com o anúncio, e sem
-   * ela o passo do quadro seguinte cai no caminho de **quem simula** — com o
-   * capitão da máquina descartado e nenhuma entrada para o segundo casco. Os
-   * dois navios voltavam a integrar física local, do nada, sob a tela de fim.
+   * ⚠️ **Without this, the duel never ended on the client that does not simulate.**
+   * The one who decides the end is the host, and the news arrives through the lobby;
+   * on this side the state stayed at `fighting` and the world kept running behind the
+   * result screen. Worse: the network session is switched off along with the
+   * announcement, and without it the next frame's step falls onto the **simulating**
+   * path — with the machine captain discarded and no input for the second hull. Both
+   * ships went back to integrating local physics, out of nowhere, under the end
+   * screen.
    *
-   * Não passa por `checkOutcome` porque o veredito não é nosso: aqui só se
-   * escreve o que já foi decidido do outro lado do fio.
+   * It does not go through `checkOutcome` because the verdict is not ours: here we
+   * only write down what has already been decided on the other side of the wire.
    */
   endOnline(won: boolean): void {
     if (this.role === 'solo') return;
@@ -402,12 +403,12 @@ export class Match {
   }
 
   /**
-   * Volta ao menu, com o mundo intacto para servir de plano de fundo.
+   * Back to the menu, with the world intact to serve as a backdrop.
    *
-   * O papel volta a ser `solo` junto, e não é arrumação: enquanto ele ficasse em
-   * `guest`, o mundo de fundo continuaria contando estatística de eventos que já
-   * não vêm de lugar nenhum, e `collectNetEvents` continuaria enchendo a fila do
-   * instantâneo de um duelo que acabou.
+   * The role goes back to `solo` along with it, and that is not tidying: while it
+   * stayed at `guest`, the background world would keep counting statistics from events
+   * that no longer come from anywhere, and `collectNetEvents` would keep filling the
+   * snapshot queue of a duel that is over.
    */
   toMenu(): void {
     this.role = 'solo';
@@ -416,12 +417,12 @@ export class Match {
     this.setState('menu');
   }
 
-  /** Repõe tudo no lugar de partida. */
+  /** Puts everything back at its starting place. */
   private deploy(): void {
     const waves = this.environment.waveField;
 
-    // O jogador nasce com o vento em popa: o rumo mais rápido da Chalupa, e o que
-    // deixa a vela cheia e quieta na primeira vista do jogo.
+    // The player is born with the wind astern: the Sloop's fastest heading, and the one
+    // that leaves the sail full and quiet in the game's first view.
     const heading = downwindHeading(waves);
     this.playerShip.spawn(0, 0, heading, waves);
 
@@ -429,7 +430,7 @@ export class Match {
     this.enemyShip.spawn(
       -Math.sin(bearing) * SPAWN_RANGE,
       -Math.cos(bearing) * SPAWN_RANGE,
-      // De proa para o jogador: ele vem brigar, não passeia.
+      // Bow-on toward the player: they are coming to fight, not to cruise.
       bearing + Math.PI,
       waves,
     );
@@ -463,24 +464,24 @@ export class Match {
     this.listener.onStateChange?.(state, previous);
   }
 
-  // -- passo de física ---------------------------------------------------------
+  // -- physics step ------------------------------------------------------------
 
   fixedUpdate(dt: number, inputs: MatchInputs): void {
     const waves = this.environment.waveField;
-    // Onde a lista está **antes** deste passo. O que for empilhado daqui para a
-    // frente é deste passo, e é o que precisa ser copiado para `netEvents` — ver
-    // a nota lá. Ler o comprimento em vez de zerar a lista mantém intacto o que
-    // um passo anterior do mesmo quadro deixou para o `drainEvents` desenhar.
+    // Where the list stands **before** this step. Anything stacked up from here on
+    // belongs to this step, and is what needs copying into `netEvents` — see the note
+    // over there. Reading the length instead of clearing the list keeps intact
+    // whatever an earlier step of the same frame left for `drainEvents` to draw.
     const eventsBefore = this.events.length;
     this.environment.fixedUpdate(dt);
 
-    // A pose das peças móveis antes que alguém mire ou gire a roda. Ver
-    // `Ship.beginStep` — tem de vir antes dos marujos, não dentro dos navios.
+    // The moving parts' pose before anybody aims or turns the wheel. See
+    // `Ship.beginStep` — it has to come before the sailors, not inside the ships.
     for (const ship of this.ships) ship.beginStep();
 
     if (!this.running) {
-      // No menu e nas telas de fim o mundo continua vivo — o mar mexe, o dia
-      // corre, os dois navios flutuam. O que para é o duelo.
+      // In the menu and on the end screens the world stays alive — the sea moves, the
+      // day runs, both ships float. What stops is the duel.
       for (const ship of this.ships) ship.fixedUpdate(dt, waves);
       return;
     }
@@ -488,27 +489,27 @@ export class Match {
     this.tick++;
     this.stats.duration += dt;
 
-    // 1. Contato: forças acumuladas antes de qualquer um integrar.
+    // 1. Contact: forces accumulated before anyone integrates.
     const contactsBefore = this.contact.contacts;
     resolveHullContact(this.playerShip, this.enemyShip, this.contact);
     this.registerCollision(dt, contactsBefore);
 
-    // 2. Quem comanda, antes dos navios que eles comandam. Timão, pontaria e
-    //    gatilho deste passo têm de valer neste passo, e não no seguinte.
+    // 2. Whoever commands, before the ships they command. This step's helm, aim and
+    //    trigger have to apply on this step, not on the next one.
     this.crew[0].fixedUpdate(dt, inputs.player, waves);
     if (inputs.enemy) this.crew[1].fixedUpdate(dt, inputs.enemy, waves);
     else this.ai?.fixedUpdate(dt, this.playerShip, waves);
-    // Logo depois deles, enquanto o respingo ainda é deste passo. Ver
+    // Right after them, while the splash still belongs to this step. See
     // `PlayerController.splashSpeed`.
     this.drainSplashes();
 
-    // 3. Os navios.
+    // 3. The ships.
     for (const ship of this.ships) {
       ship.fixedUpdate(dt, waves);
       this.drainShots(ship);
     }
 
-    // 4. As balas, sobre a pose recém-integrada.
+    // 4. The balls, over the freshly integrated pose.
     this.cannonballs.fixedUpdate(dt, this.ships, waves);
 
     this.countNewBreaches();
@@ -518,23 +519,24 @@ export class Match {
   }
 
   /**
-   * Traduz o contato deste passo em baque e em avaria.
+   * Translates this step's contact into a thud and into damage.
    *
-   * ## Quem abre casco é a pancada, e ela abre nos dois
+   * ## What opens a hull is the impact, and it opens both
    *
-   * `HullContact` faz os cascos se recusarem a ocupar o mesmo lugar, e isso sozinho
-   * é só uma cerca: chegar perto para de ser impossível e continua não custando
-   * nada. Duas chalupas de 37 t se encontrando a 3 m/s trocam 157 kJ — mais energia
-   * do que quase qualquer bala do jogo entrega —, e a madeira cede. O estrago é
-   * simétrico de propósito: quem investe leva o que dá, e é isso que mantém o
-   * abalroamento como risco em vez de estratégia ótima. Ver `ShipDamage.ram`.
+   * `HullContact` makes the hulls refuse to occupy the same place, and that on its own
+   * is just a fence: getting close stops being impossible and goes on costing nothing.
+   * Two 37 t sloops meeting at 3 m/s trade 157 kJ — more energy than almost any ball in
+   * the game delivers — and the wood gives. The damage is symmetric on purpose:
+   * whoever charges takes what they give, and that is what keeps ramming a risk instead
+   * of the optimal strategy. See `ShipDamage.ram`.
    *
-   * O limiar de velocidade mora lá, e não aqui: é `ram` que devolve zero quando o
-   * encontro foi só um encostão, e é desse zero que sai a decisão de nem armar o
-   * rearme. Uma regra, um lugar.
+   * The speed threshold lives over there, not here: it is `ram` that returns zero when
+   * the encounter was only a nudge, and it is from that zero that the decision not to
+   * even arm the rearm comes. One rule, one place.
    *
-   * @param before quantos contatos havia no passo anterior. É o que distingue o
-   *   primeiro instante de um encontro do meio de um rangido que já dura.
+   * @param before how many contacts there were on the previous step. It is what
+   *   distinguishes the first instant of an encounter from the middle of a creak that
+   *   has been going on for a while.
    */
   private registerCollision(dt: number, before: number): void {
     this.ramCooldown = Math.max(0, this.ramCooldown - dt);
@@ -551,25 +553,25 @@ export class Match {
       if (opened > 0) this.ramCooldown = RAM_COOLDOWN;
     }
 
-    // O baque sai no primeiro passo do encontro e em toda pancada nova. Um rangido
-    // que já está acontecendo não repete o estrondo sessenta vezes por segundo.
+    // The thud goes out on the encounter's first step and on every fresh impact. A
+    // creak that is already happening does not repeat the crash sixty times a second.
     if (opened === 0 && (before > 0 || closingSpeed <= COLLISION_SPEED)) return;
 
-    // ⚠️ **Clonado**, e antes não era. `netEvents` guarda este objeto por até quatro
-    // passos à espera do instantâneo, e `contact.point` é reescrito a cada passo:
-    // sem a cópia, o abalroamento chegava ao outro lado no lugar em que os cascos
-    // estavam quatro passos depois. É a mesma regra que todo evento daqui segue —
-    // ver `MatchEvents`.
+    // ⚠️ **Cloned**, and it did not use to be. `netEvents` holds this object for up to
+    // four steps waiting for the snapshot, and `contact.point` is rewritten every
+    // step: without the copy, the ramming reached the other side at the place the
+    // hulls were four steps later. It is the same rule every event in here follows —
+    // see `MatchEvents`.
     this.events.push({ kind: 'collision', position: point.clone(), speed: closingSpeed });
   }
 
   /**
-   * Copia os eventos deste passo para a fila do instantâneo.
+   * Copies this step's events into the snapshot's queue.
    *
-   * O teto é uma rede de segurança, não um orçamento: `HostSession` esvazia a
-   * fila a cada quatro passos, então ela nunca passa de uma dúzia num duelo
-   * saudável. Se um dia alguém parar de esvaziá-la, o que se quer é um evento
-   * antigo perdido, e não memória crescendo até a aba morrer.
+   * The ceiling is a safety net, not a budget: `HostSession` empties the queue every
+   * four steps, so it never goes past a dozen in a healthy duel. If one day somebody
+   * stops emptying it, what we want is an old event lost, and not memory growing until
+   * the tab dies.
    */
   private collectNetEvents(from: number): void {
     for (let i = from; i < this.events.length; i++) {
@@ -579,21 +581,21 @@ export class Match {
   }
 
   /**
-   * O passo de quem **não** simula.
+   * The step for the side that does **not** simulate.
    *
-   * Curto de propósito, e explicitamente separado de `fixedUpdate` em vez de um
-   * punhado de `if` dentro dele: o caminho de quem simula tem de ficar idêntico
-   * ao do duelo contra a máquina, byte por byte, ou o modo offline regride toda
-   * vez que o netcode mexer em alguma coisa.
+   * Short on purpose, and explicitly separated from `fixedUpdate` instead of a handful
+   * of `if`s inside it: the simulating side's path has to stay identical to the duel
+   * against the machine, byte for byte, or the offline mode regresses every time the
+   * netcode touches something.
    *
-   * Aqui não há empuxo, vela, leme, arrasto, contato nem detecção de acerto — a
-   * pose dos dois cascos chega pronta e é escrita por `GuestSession`. O que roda
-   * é o corpo do jogador local, que é a única coisa que ele controla, e as balas
-   * de enfeite, que voam pela mesma balística sem acertar nada.
+   * There is no buoyancy, sail, rudder, drag, contact or hit detection here — both
+   * hulls' poses arrive ready and are written by `GuestSession`. What runs is the local
+   * player's body, which is the only thing they control, and the decorative balls,
+   * which fly by the same ballistics without hitting anything.
    *
-   * ⚠️ **A fila de tiros é esvaziada sem ser usada.** O canhão local dispara de
-   * verdade (recuo, som, munição), mas a bala dele é decidida do outro lado — se
-   * ela virasse projétil aqui também, o jogador veria duas.
+   * ⚠️ **The shot queue is emptied without being used.** The local cannon really does
+   * fire (recoil, sound, ammunition), but its ball is decided on the other side — if it
+   * became a projectile here too, the player would see two.
    */
   fixedUpdateRemote(dt: number, frame: InputFrame): void {
     for (const ship of this.ships) ship.beginStep();
@@ -604,46 +606,48 @@ export class Match {
 
     const waves = this.environment.waveField;
     this.crew[0].fixedUpdate(dt, frame, waves);
-    // ⚠️ **O respingo do próprio tombo é descartado aqui**, pela mesma razão que a
-    // fila de tiros logo abaixo: o host anuncia esse evento no instantâneo, e
-    // levantar a coluna d'água dos dois lados daria dois respingos no mesmo ponto.
-    // O preço é o respingo aparecer meia ida-e-volta depois do salto; a alternativa
-    // é ele aparecer duas vezes.
+    // ⚠️ **The splash from your own fall is discarded here**, for the same reason as
+    // the shot queue just below: the host announces that event in the snapshot, and
+    // raising the water column on both sides would give two splashes at the same
+    // point. The price is the splash showing up half a round trip after the jump; the
+    // alternative is it showing up twice.
     this.crew[0].controller.splashSpeed = 0;
 
-    // ⚠️ **Depois do marujo, e é o que faz o timão funcionar deste lado.** Ele
-    // acabou de escrever `controls.wheel`; sem alguém integrando esse comando, a
-    // roda não gira, as mãos não giram e o painel diz `wheel 0%` enquanto o
-    // navio guina lá longe por decisão do host. Ver `Ship.fixedUpdateRemote`.
+    // ⚠️ **After the sailor, and it is what makes the helm work on this side.** They
+    // have just written `controls.wheel`; with nobody integrating that command, the
+    // wheel does not turn, the hands do not turn and the panel says `wheel 0%` while
+    // the ship yaws away in the distance by the host's decision. See
+    // `Ship.fixedUpdateRemote`.
     //
-    // Roda para os **dois** cascos: o do adversário não tem comando local (a roda
-    // dele fica em zero aqui), e a pose autoritativa dele é escrita logo em
-    // seguida por `GuestSession.applyShipParts`, que roda depois deste método e
-    // ganha de qualquer coisa que se tenha calculado.
+    // It runs for **both** hulls: the opponent's has no local command (its wheel stays
+    // at zero here), and its authoritative pose is written right afterwards by
+    // `GuestSession.applyShipParts`, which runs after this method and beats anything
+    // that may have been computed.
     for (const ship of this.ships) ship.fixedUpdateRemote(dt, waves);
 
     for (const ship of this.ships) ship.pendingShots.length = 0;
 
-    // Sem navios na lista: nenhuma bala tem contra o que resolver acerto, que é
-    // exatamente o que se quer. Ver `CannonballPool.spawnGhost`.
+    // With no ships in the list: no ball has anything to resolve a hit against, which
+    // is exactly what we want. See `CannonballPool.spawnGhost`.
     this.cannonballs.fixedUpdate(dt, EMPTY_SHIPS, this.environment.waveField);
 
-    // Os rombos chegam prontos do host, e contá-los é a única parte das
-    // estatísticas que este lado consegue medir sozinho. Sem esta linha a tela
-    // de fim de quem não simula mostrava quatro zeros — o duelo inteiro sem
-    // número nenhum.
+    // The breaches arrive ready from the host, and counting them is the only part of
+    // the statistics this side can measure on its own. Without this line the end
+    // screen on the non-simulating side showed four zeros — the whole duel with no
+    // numbers at all.
     this.countNewBreaches();
   }
 
   /**
-   * Transforma um marujo caindo no mar no **mesmo** evento de respingo da bala.
+   * Turns a sailor falling into the sea into the **same** splash event as the ball's.
    *
-   * Reaproveitar o evento em vez de inventar um segundo é o que faz o tombo já
-   * chegar pronto: `Effects.waterSplash` levanta a coluna d'água, `GameAudio.splash`
-   * toca, e o instantâneo carrega o evento para o outro lado sem um byte novo — o
-   * adversário vê o respingo de quem caiu porque ele já sabia ver respingo.
+   * Reusing the event instead of inventing a second one is what makes the fall arrive
+   * ready-made: `Effects.waterSplash` raises the water column, `GameAudio.splash`
+   * plays, and the snapshot carries the event to the other side without a single new
+   * byte — the opponent sees the splash of whoever fell because it already knew how to
+   * see a splash.
    *
-   * Percorre os **dois** marujos porque no host os dois são simulados aqui.
+   * It walks **both** sailors because on the host both are simulated here.
    */
   private drainSplashes(): void {
     for (const crewman of this.crew) {
@@ -659,21 +663,21 @@ export class Match {
   }
 
   /**
-   * Esvazia a fila de tiros de um navio, pondo cada um no ar.
+   * Empties a ship's shot queue, putting each one in the air.
    *
-   * A fila é do **passo**, não do quadro: o canhão empurra o recuo e enfileira o
-   * tiro dentro de `fixedUpdate`, e ele vira projétil aqui, com a mesma pose que
-   * produziu o recuo. Esvaziar é obrigação de quem consome.
+   * The queue belongs to the **step**, not to the frame: the cannon pushes the recoil
+   * and queues the shot inside `fixedUpdate`, and it becomes a projectile here, with
+   * the same pose that produced the recoil. Emptying it is the consumer's duty.
    */
   private drainShots(vessel: Ship): void {
     const slot: ShipSlot = vessel === this.playerShip ? 0 : 1;
     for (const shot of vessel.pendingShots) {
       this.cannonballs.spawn(shot);
-      // A velocidade já traz a do navio somada, mas ela é duas ordens de grandeza
-      // menor que a de boca: normalizar dá o eixo do cano.
+      // The velocity already has the ship's added in, but that is two orders of
+      // magnitude smaller than the muzzle velocity: normalizing gives the bore's axis.
       _muzzleDirection.copy(shot.velocity).normalize();
-      // Anotado, não desenhado: quem faz fumaça e estrondo é `update`. Os vetores
-      // são clonados porque `shot` volta para o pool no passo seguinte.
+      // Noted down, not drawn: what makes smoke and bang is `update`. The vectors are
+      // cloned because `shot` goes back to the pool on the next step.
       this.events.push({
         kind: 'shot',
         ship: slot,
@@ -703,7 +707,7 @@ export class Match {
     if (hit.part === 'mast') {
       this.events.push({ kind: 'mast', ship: slot, position: impact.position.clone(), speed });
     } else {
-      // A normal vem em coordenadas do navio; as lascas voam no mundo.
+      // The normal comes in ship coordinates; the splinters fly in the world.
       target.body.localDirToWorld(hit.normal, _impactNormal);
       this.events.push({
         kind: 'hull',
@@ -715,12 +719,12 @@ export class Match {
       });
     }
 
-    // `hit` é rascunho compartilhado e só vale durante esta chamada — quem guardar
-    // algo dele copia. `registerHit` clona o que precisa.
+    // `hit` is a shared scratch value and is only good during this call — whoever
+    // keeps something from it copies. `registerHit` clones what it needs.
     target.damage.registerHit(hit);
   }
 
-  /** Conta os rombos que apareceram neste passo, para as estatísticas. */
+  /** Counts the breaches that appeared on this step, for the statistics. */
   private countNewBreaches(): void {
     const player = this.playerShip.damage.breaches.length;
     const enemy = this.enemyShip.damage.breaches.length;
@@ -737,11 +741,11 @@ export class Match {
   }
 
   /**
-   * Fim de partida.
+   * End of match.
    *
-   * `isSunk` só vira `true` sete segundos depois do ponto de não retorno, então o
-   * jogador **assiste** ao naufrágio antes de a tela aparecer — o que é metade da
-   * recompensa de ganhar, e a outra metade da lição de perder.
+   * `isSunk` only becomes `true` seven seconds after the point of no return, so the
+   * player **watches** the sinking before the screen shows up — which is half the
+   * reward of winning, and the other half of the lesson of losing.
    */
   private checkOutcome(): void {
     if (this.enemyShip.damage.isSunk) {
@@ -751,41 +755,41 @@ export class Match {
     if (this.playerShip.damage.isSunk) this.setState('lost');
   }
 
-  // -- passo de quadro ---------------------------------------------------------
+  // -- frame step --------------------------------------------------------------
 
   /**
-   * O quadro: pose interpolada, efeitos e som. Nenhuma decisão de jogo mora aqui.
+   * The frame: interpolated pose, effects and sound. No game decision lives here.
    *
-   * Não recebe mais `input` nem `controlling` — quem comanda o marujo é o passo
-   * fixo, e quem decide se ele recebe comando é quem monta o `InputFrame`. Um
-   * `if` a menos aqui é um caminho a menos em que o duelo em rede pode divergir
-   * do local.
+   * It no longer receives `input` or `controlling` — the sailor is commanded by the
+   * fixed step, and whether they receive a command is decided by whoever assembles the
+   * `InputFrame`. One `if` less here is one less path along which the networked duel
+   * can diverge from the local one.
    *
-   * @param lookResidualX olhar horizontal que o jogador já fez e nenhum passo
-   *   consumiu ainda, em radianos. É o que mantém a câmera na taxa do monitor
-   *   com a simulação a 60 Hz — ver `PlayerController.syncView`.
-   * @param lookResidualY idem, vertical.
+   * @param lookResidualX horizontal look the player has already made and no step has
+   *   consumed yet, in radians. It is what keeps the camera at the monitor's rate with
+   *   the simulation at 60 Hz — see `PlayerController.syncView`.
+   * @param lookResidualY the same, vertical.
    */
   update(dt: number, alpha: number, lookResidualX = 0, lookResidualY = 0): void {
     this.crew[0].controller.syncView(alpha, lookResidualX, lookResidualY, this.playerShip);
-    // O marujo de lá não tem resíduo: ninguém olha pelos olhos dele, e o que se vê
-    // dele é o corpo, não a câmera.
+    // The sailor over there has no residual: nobody looks through their eyes, and what
+    // you see of them is the body, not the camera.
     this.crew[1].controller.syncView(alpha, 0, 0, this.enemyShip);
 
     for (const ship of this.ships) ship.syncModel(alpha);
     this.cannonballs.syncModel(alpha);
 
-    // O corpo do adversário mora aqui, e o do jogador no laço principal, porque
-    // só o segundo depende da câmera: é `main.ts` que sabe se ela está nos olhos
-    // dele. Ninguém olha pelos olhos deste, então ele é sempre visto de fora — e
-    // depois do `syncView` acima, que é quem escreve a pose do quadro.
+    // The opponent's body lives here, and the player's in the main loop, because only
+    // the second depends on the camera: it is `main.ts` that knows whether it is at
+    // their eyes. Nobody looks through this one's eyes, so it is always seen from
+    // outside — and after the `syncView` above, which is what writes the frame's pose.
     this.enemyAvatar.update(dt, this.crew[1].controller, false);
 
     this.drainEvents();
 
-    // `update` primeiro (é ele que abre a janela do rastro), depois as emissões do
-    // quadro, e a janela fecha no fim — assim o rastro tem a mesma densidade a 30 e
-    // a 144 fps.
+    // `update` first (it is what opens the trail's window), then the frame's
+    // emissions, and the window closes at the end — that way the trail has the same
+    // density at 30 and at 144 fps.
     this.effects.update(dt);
     this.cannonballs.forEachActive((position, velocity) =>
       this.effects.ballTrail(position, velocity),
@@ -797,16 +801,18 @@ export class Match {
   }
 
   /**
-   * Transforma o que o passo anotou em fumaça, respingo e som, e esvazia a fila.
+   * Turns what the step noted down into smoke, splash and sound, and empties the queue.
    *
-   * É o único lugar do jogo que liga simulação a apresentação, e é de propósito:
-   * no duelo em rede, o cliente que não simula recebe esta mesma lista pelo fio,
-   * empilha no mesmo array e chama este mesmo método. Um caminho, dois papéis.
+   * It is the only place in the game that connects simulation to presentation, and
+   * that is on purpose: in a networked duel, the client that does not simulate
+   * receives this same list over the wire, stacks it into the same array and calls this
+   * same method. One path, two roles.
    */
   private drainEvents(): void {
-    // Quem não simula não tem `drainShots` nem `onImpact` para contar tiro — o
-    // que ele tem é esta lista, que chega pronta do host com os índices já
-    // traduzidos para "0 é o meu". É a mesma contagem, medida de onde dá.
+    // The side that does not simulate has neither `drainShots` nor `onImpact` to count
+    // shots with — what it has is this list, which arrives ready from the host with the
+    // indices already translated into "0 is mine". It is the same count, measured from
+    // wherever it can be.
     const counting = this.role === 'guest';
 
     for (const event of this.events) {
@@ -844,17 +850,17 @@ export class Match {
   }
 
   /**
-   * Lascas saltando dos dois cascos no ponto do abalroamento.
+   * Splinters flying off both hulls at the point of the ramming.
    *
-   * A normal não viaja no evento e não precisa viajar: ela é a direção do centro de
-   * cada navio para o ponto de contato, achatada na horizontal, e os dois lados do
-   * fio têm a pose dos dois cascos. Dois punhados de lasca em sentidos opostos é o
-   * que um encontro de madeira contra madeira parece — e sai de graça, sem um byte
-   * a mais no instantâneo.
+   * The normal does not travel in the event and does not need to: it is the direction
+   * from each ship's center to the contact point, flattened horizontally, and both
+   * sides of the wire have both hulls' poses. Two handfuls of splinters in opposite
+   * directions is what a meeting of wood against wood looks like — and it comes for
+   * free, without a single extra byte in the snapshot.
    *
-   * A força vem da velocidade numa escala própria: 4 m/s é o encontrão que arranca
-   * tudo o que há para arrancar. Ver `Effects.splinters` para por que ela não é a
-   * mesma escala da bala.
+   * The force comes from the speed on a scale of its own: 4 m/s is the collision that
+   * tears off everything there is to tear off. See `Effects.splinters` for why it is
+   * not the same scale as the ball's.
    */
   private splinterCollision(position: THREE.Vector3, speed: number): void {
     const power = Math.min(speed / 4, 1.2);
@@ -866,14 +872,15 @@ export class Match {
     }
   }
 
-  /** Os esguichos que entram pelos rombos abertos, vistos do porão. */
+  /** The jets coming in through the open breaches, seen from the hold. */
   private updateWaterJets(vessel: Ship): void {
     for (const breach of vessel.damage.breaches) {
       if (breach.inflow <= 0) continue;
       vessel.body.localToWorld(breach.local, _jetPosition);
       vessel.body.localDirToWorld(breach.normal, _jetDirection);
-      // `waterJet` esguicha *contra* a direção recebida, e a normal aponta para
-      // fora do casco — é a mesma convenção: a água entra empurrando para dentro.
+      // `waterJet` sprays *against* the direction it receives, and the normal points
+      // outward from the hull — it is the same convention: the water comes in pushing
+      // inward.
       this.effects.waterJet(_jetPosition, _jetDirection, breach.inflow);
     }
   }
@@ -881,9 +888,9 @@ export class Match {
   dispose(): void {
     this.avatar.dispose();
     this.enemyAvatar.dispose();
-    // Depois dos dois, sempre: a malha e as texturas são compartilhadas por
-    // eles, e liberá-las antes tiraria o chão de debaixo do que ainda estivesse
-    // na cena. Ver `CharacterAsset.disposeCharacterAsset`.
+    // After both, always: the mesh and the textures are shared by them, and releasing
+    // them earlier would pull the floor out from under whatever was still in the
+    // scene. See `CharacterAsset.disposeCharacterAsset`.
     disposeCharacterAsset(CHARACTER_MODEL);
     for (const view of this.damageViews) view.dispose();
     for (const ship of this.ships) ship.dispose();

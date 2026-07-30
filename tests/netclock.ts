@@ -1,27 +1,27 @@
 /**
- * Teste do relógio de rede — o comando do cliente chega ao passo certo do host?
+ * Net clock test — does the client's command reach the right step on the host?
  *
- * Roda no navegador como os outros, e **também** fora dele: este é o único teste
- * que não toca em Three.js, então dá para bundlá-lo e rodar no Node, o que o
- * torna útil quando não há navegador à mão.
+ * Runs in the browser like the others, and **also** outside it: this is the only
+ * test that doesn't touch Three.js, so it can be bundled and run under Node,
+ * which makes it useful when there's no browser at hand.
  *
  * ```js
  * const t = await import('/tests/netclock.ts');
  * console.table(t.runNetClockTests().cases);
  * ```
  *
- * **O que se prova aqui, e por que ele existe.** O cliente que não simula carimba
- * cada comando com o passo em que ele deve valer, e o host guarda esses comandos
- * numa fila até chegar a vez. Se os dois relógios não andarem juntos, o host fica
- * sem comando para consumir — e como ele não pode pular um passo à espera da
- * rede, ele repete o último. O jogador do outro lado vira um boneco que anda
- * sozinho e não obedece.
+ * **What this proves, and why it exists.** The client that doesn't simulate
+ * stamps every command with the step it is meant to take effect on, and the host
+ * holds those commands in a queue until their turn comes. If the two clocks don't
+ * run together, the host has no command to consume — and since it can't skip a
+ * step waiting for the network, it repeats the last one. The player on the other
+ * side turns into a puppet that walks off on its own and won't obey.
  *
- * O teste nasceu de um bug real: o carimbo era calculado como `hostTick + lead`,
- * e `hostTick` só avança quando chega um instantâneo — a cada quatro passos.
- * Três de cada quatro comandos saíam com o carimbo repetido, eram descartados
- * como duplicata, e o host passava fome com a rede perfeita. `starves` na casa
- * dos milhares foi o que denunciou.
+ * The test was born from a real bug: the stamp was computed as
+ * `hostTick + lead`, and `hostTick` only advances when a snapshot arrives —
+ * every four steps. Three out of every four commands went out with a repeated
+ * stamp, were dropped as duplicates, and the host starved on a perfect network.
+ * `starves` in the thousands was what gave it away.
  */
 
 import { createInputFrame, InputBit, type InputFrame } from '../src/core/InputFrame';
@@ -49,25 +49,25 @@ export interface TestReport {
   cases: TestCase[];
 }
 
-/** Instantâneo a cada quatro passos, como no jogo. */
+/** Snapshot every four steps, as in the game. */
 const SNAPSHOT_EVERY = 4;
-/** Lote de comandos a cada dois passos, como no jogo. */
+/** Command batch every two steps, as in the game. */
 const SEND_EVERY = 2;
-/** Passos simulados. Dez segundos. */
+/** Simulated steps. Ten seconds. */
 const TICKS = 600;
 
 /**
- * As bordas com que cada passo se identifica, em rodízio.
+ * The edges each step identifies itself with, in rotation.
  *
- * Quatro bits distintos, um por passo. É o que permite provar, do lado do host,
- * **quais** apertos chegaram — e não só quantos quadros. Ver a nota em
- * `simulate`.
+ * Four distinct bits, one per step. That's what makes it possible to prove, on
+ * the host side, **which** presses arrived — and not just how many frames. See
+ * the note in `simulate`.
  */
 const STEP_MARKS = [InputBit.Fire, InputBit.Jump, InputBit.Reload, InputBit.Interact];
 
 /**
- * O relógio do cliente, na versão **corrigida**: anda um por passo e é ajustado
- * pelo instantâneo, em vez de derivado dele.
+ * The client clock, in the **corrected** version: it advances one per step and is
+ * adjusted by the snapshot instead of derived from it.
  */
 class GuestClock {
   localTick = 0;
@@ -76,9 +76,9 @@ class GuestClock {
   private sinceAdjust = 0;
 
   /**
-   * @param depth quantos comandos o host tem em fila. É o sinal que faz o avanço
-   *   se ajustar sozinho à latência de verdade — sem ele, o avanço fixo de quatro
-   *   passos não cobre uma rede lenta e o host passa fome para sempre.
+   * @param depth how many commands the host has queued. It's the signal that makes
+   *   the lead adjust itself to the real latency — without it, the fixed four-step
+   *   lead doesn't cover a slow network and the host starves forever.
    */
   onSnapshot(hostTick: number, depth: number): void {
     this.hostTick = hostTick;
@@ -87,8 +87,8 @@ class GuestClock {
       return;
     }
 
-    // O ajuste do avanço é bem mais raro que o do relógio no jogo (dois
-    // segundos); aqui ele corre a cada instantâneo para o teste caber em dez.
+    // The lead adjustment is far rarer than the clock's in the game (two
+    // seconds); here it runs on every snapshot so the test fits in ten.
     this.sinceAdjust++;
     if (this.sinceAdjust >= 2) {
       this.sinceAdjust = 0;
@@ -106,7 +106,7 @@ class GuestClock {
   }
 }
 
-/** O relógio quebrado de antes, para o teste provar que ele **não** serve. */
+/** The old broken clock, so the test can prove it **doesn't** work. */
 class BrokenClock {
   hostTick = 0;
   lead = 4;
@@ -121,18 +121,18 @@ class BrokenClock {
 }
 
 /**
- * Um relógio que **corrige a fase o tempo todo**, para exercitar a costura.
+ * A clock that **corrects its phase all the time**, to exercise the stitching.
  *
- * O `GuestClock` acima acaba se assentando: passado o aquecimento, o avanço
- * encontra a latência e a correção some, então ele nunca chega a exercitar o
- * caso que interessa. E o caso que interessa é o normal num duelo de verdade —
- * dois cristais de quartzo em máquinas diferentes derivam sempre, e cada ajuste
- * de avanço reabre a correção.
+ * The `GuestClock` above eventually settles: once the warmup is over the lead
+ * finds the latency and the correction disappears, so it never gets to exercise
+ * the case that matters. And the case that matters is the normal one in a real
+ * duel — two quartz crystals in different machines always drift, and every lead
+ * adjustment reopens the correction.
  *
- * Este aqui força a mão: ele sobe e desce um passo alternadamente, com a
- * frequência que uma rede instável produziria numa tarde inteira. Cada subida é
- * um carimbo pulado e cada descida é um carimbo repetido — que era exatamente
- * um comando perdido, de um jeito ou de outro.
+ * This one forces the issue: it goes up and down one step alternately, at the
+ * rate an unstable network would produce over a whole afternoon. Every step up
+ * is a skipped stamp and every step down is a repeated stamp — which was exactly
+ * one lost command, one way or the other.
  */
 class DriftingClock {
   localTick = 0;
@@ -141,14 +141,14 @@ class DriftingClock {
   private snapshots = 0;
   private direction = 1;
   /**
-   * ⚠️ Uma bandeira, e **não** `localTick === 0`.
+   * ⚠️ A flag, and **not** `localTick === 0`.
    *
-   * O relógio anda desde o primeiro passo, e o primeiro instantâneo chega
-   * dezenas de passos depois — então a comparação com zero nunca é verdadeira e
-   * o alinhamento inicial nunca acontece. É o mesmo erro que `GuestSession`
-   * cometia, e ele foi reproduzido aqui por acidente ao escrever este teste: o
-   * host passou fome em cem por cento dos passos, que é exatamente o sintoma
-   * que o defeito original produzia.
+   * The clock runs from the first step, and the first snapshot arrives dozens of
+   * steps later — so the comparison against zero is never true and the initial
+   * alignment never happens. It's the same mistake `GuestSession` made, and it
+   * was reproduced here by accident while writing this test: the host starved on
+   * a hundred percent of the steps, which is exactly the symptom the original
+   * defect produced.
    */
   private started = false;
 
@@ -160,8 +160,8 @@ class DriftingClock {
       return;
     }
 
-    // Um empurrão a cada três instantâneos: cinco por segundo, alternando de
-    // lado. É mais castigo do que uma rede real dá, e é o ponto.
+    // One nudge every three snapshots: five per second, alternating sides. It's
+    // more punishment than a real network hands out, and that's the point.
     this.snapshots++;
     if (this.snapshots % 3 !== 0) return;
     this.localTick += this.direction;
@@ -179,10 +179,10 @@ interface ClockLike {
 }
 
 /**
- * Roda o vaivém completo: cliente carimba, empacota, envia; host desempacota,
- * enfileira, consome. Sem atalho — passa pelo codec de verdade.
+ * Runs the full round trip: client stamps, packs, sends; host unpacks, queues,
+ * consumes. No shortcut — it goes through the real codec.
  *
- * @returns quantas vezes o host ficou sem comando.
+ * @returns how many times the host ran out of commands.
  */
 function simulate(
   clock: ClockLike,
@@ -192,17 +192,17 @@ function simulate(
   consumed: number;
   lateStarves: number;
   lateConsumed: number;
-  /** Bordas que o jogador produziu e o host de fato aplicou. */
+  /** Edges the player produced and the host actually applied. */
   delivered: number;
-  /** Bordas que o jogador produziu na janela contada. */
+  /** Edges the player produced inside the counted window. */
   stamped: number;
 } {
   /**
-   * Passos que não contam para o regime.
+   * Steps that don't count toward the steady state.
    *
-   * Os primeiros são a partida se acertando: o cliente ainda não sabe onde o host
-   * está, e o avanço ainda não encontrou a latência. Contar isso como defeito
-   * seria reprovar o sistema justamente pelo que ele faz de certo — se ajustar.
+   * The first ones are the match settling in: the client doesn't know yet where
+   * the host is, and the lead hasn't found the latency. Counting that as a defect
+   * would fail the system for the very thing it gets right — adjusting.
    */
   const WARMUP = 200;
 
@@ -210,7 +210,7 @@ function simulate(
   let starvesAtWarmup = 0;
   const outbox = new InputOutbox();
 
-  /** Pacotes em trânsito: chegam `latencyTicks` depois de saírem. */
+  /** Packets in flight: they arrive `latencyTicks` after leaving. */
   const wire: { at: number; data: ArrayBuffer }[] = [];
   const incoming: InputFrame[] = Array.from({ length: 8 }, createInputFrame);
 
@@ -218,33 +218,33 @@ function simulate(
   let consumed = 0;
 
   /**
-   * As **bordas** que o jogador produziu em cada tick, e as que chegaram lá.
+   * The **edges** the player produced on each tick, and the ones that got there.
    *
-   * É a medida que interessa de verdade, e chegar a ela levou duas tentativas.
-   * Contar fome mede o host, não o jogador. Contar *ticks entregues* também não
-   * basta, e foi a primeira versão deste teste: quando um carimbo se repete, o
-   * tick chega — com o comando do outro passo faltando dentro dele. O contador
-   * dizia "entregue" e o `F` no timão tinha sumido.
+   * It's the measurement that really matters, and getting to it took two tries.
+   * Counting starvation measures the host, not the player. Counting *delivered
+   * ticks* isn't enough either, and that was the first version of this test: when
+   * a stamp repeats, the tick arrives — with the other step's command missing
+   * inside it. The counter said "delivered" and the `F` at the helm was gone.
    *
-   * Borda é o que o jogador aperta, e é onde a perda dói: um tiro que não sai,
-   * um posto que não se assume, um pulo que não acontece. A expectativa é a
-   * **união** das bordas de um mesmo tick, porque dois passos que caem no mesmo
-   * carimbo são dois apertos que precisam valer os dois.
+   * An edge is what the player presses, and it's where the loss hurts: a shot
+   * that doesn't go off, a station nobody takes, a jump that doesn't happen. The
+   * expectation is the **union** of the edges on one same tick, because two steps
+   * landing on the same stamp are two presses that both have to count.
    */
   const expected = new Map<number, number>();
   const arrived = new Map<number, number>();
   /**
-   * O último passo em que carimbar ainda conta.
+   * The last step on which stamping still counts.
    *
-   * O cliente corre à frente do host, então os comandos dos últimos passos ainda
-   * estão no fio ou na fila quando a corrida termina — cobrá-los seria reprovar
-   * o sistema por não ter viajado no tempo. A folga cobre o avanço, a rede e a
-   * granularidade do lote.
+   * The client runs ahead of the host, so the commands from the final steps are
+   * still on the wire or in the queue when the run ends — charging for them would
+   * fail the system for not having traveled in time. The margin covers the lead,
+   * the network and the batch granularity.
    */
   const LAST_COUNTED = TICKS - latencyTicks - 24;
 
   for (let step = 0; step < TICKS; step++) {
-    // --- host: entrega o que chegou ---
+    // --- host: deliver what arrived ---
     for (let i = wire.length - 1; i >= 0; i--) {
       const packet = wire[i]!;
       if (packet.at > step) continue;
@@ -253,19 +253,19 @@ function simulate(
       for (let k = 0; k < count; k++) buffer.push(incoming[k]!);
     }
 
-    // --- cliente: um passo ---
+    // --- client: one step ---
     const tick = clock.next();
     const frame = createInputFrame();
     frame.tick = tick;
     frame.held = InputBit.MoveForward;
     frame.moveY = 1;
-    // Uma borda por passo, e a marca sai do **passo**, não do tick.
+    // One edge per step, and the mark comes from the **step**, not from the tick.
     //
-    // A distinção é o que dá dentes ao teste, e a primeira versão errou nela: com
-    // a marca vindo do tick, dois passos que caem no mesmo carimbo — que é
-    // exatamente o que uma correção de relógio para baixo produz — apertavam o
-    // mesmo botão. O comando perdido era indistinguível do comando entregue, e o
-    // contador dizia zero perdas enquanto a costura estava desligada.
+    // The distinction is what gives the test teeth, and the first version got it
+    // wrong: with the mark coming from the tick, two steps landing on the same
+    // stamp — which is exactly what a downward clock correction produces —
+    // pressed the same button. The lost command was indistinguishable from the
+    // delivered one, and the counter said zero losses while the stitching was off.
     frame.pressed = STEP_MARKS[step % STEP_MARKS.length]!;
     if (step >= WARMUP && step < LAST_COUNTED) {
       expected.set(tick, (expected.get(tick) ?? 0) | frame.pressed);
@@ -276,7 +276,7 @@ function simulate(
       wire.push({ at: step + latencyTicks, data: encodeInput(outbox.batch) });
     }
 
-    // --- host: consome o passo dele ---
+    // --- host: consume its own step ---
     hostTick++;
     const applied = buffer.consume(hostTick);
     consumed++;

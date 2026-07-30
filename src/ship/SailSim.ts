@@ -1,30 +1,31 @@
 /**
- * A vela: o pano que se mexe e a força que empurra o navio.
+ * The sail: the cloth that moves and the force that drives the ship.
  *
- * São dois problemas separados, resolvidos separadamente de propósito.
+ * Two separate problems, solved separately on purpose.
  *
- * **O pano** é um tecido de Verlet numa grade 13 × 11, rodando no referencial do
- * navio (o mesh é filho do casco, então as posições já estão nesse sistema). Não
- * sentir a aceleração do navio é o certo aqui: uma vela içada e cheia não bate
- * porque o casco subiu numa vaga, ela bate porque o vento mudou.
+ * **The cloth** is a Verlet fabric on a 13 × 11 grid, running in the ship's frame
+ * (the mesh is a child of the hull, so the positions are already in that system).
+ * Not feeling the ship's acceleration is the right call here: a hoisted, full sail
+ * doesn't flap because the hull rode up a swell, it flaps because the wind changed.
  *
- * **A força** é analítica, e não a soma da pressão sobre os quads do tecido.
- * Somar do tecido soa mais puro, mas na prática o empuxo passaria a oscilar na
- * frequência do solver e a velocidade máxima do navio dependeria da resolução da
- * malha — o jogador sentiria o navio "tremendo" sem nenhuma causa visível. Aqui o
- * pano é a leitura visual do vento e a força é o modelo; os dois leem exatamente
- * o mesmo vetor de vento, então nunca discordam do que está acontecendo.
+ * **The force** is analytical, not the sum of the pressure over the fabric's
+ * quads. Summing from the fabric sounds purer, but in practice the thrust would
+ * start oscillating at the solver's frequency and the ship's top speed would
+ * depend on the mesh resolution — the player would feel the ship "shuddering"
+ * with no visible cause. Here the cloth is the visual read on the wind and the
+ * force is the model; both read exactly the same wind vector, so they never
+ * disagree about what is happening.
  *
- * ## Como a curva de velocidade foi calibrada
+ * ## How the speed curve was calibrated
  *
- * A Chalupa é a **mais lenta** de popa e de través, e a **menos lenta** de proa
- * ao vento — é por isso que fugir contra o vento é o manual da chalupa perseguida
- * ([fóruns e guias do Sea of Thieves](https://www.sportskeeda.com/mmo/sea-thieves-ship-speeds-explained)).
- * Vento a favor continua sendo o rumo mais rápido para ela; o que ela faz melhor
- * que brigue e galeão é *perder pouco* contra o vento.
+ * The Sloop is the **slowest** downwind and on the beam, and the **least slow**
+ * bow to the wind — which is why running upwind is the manual for a chased sloop
+ * ([Sea of Thieves forums and guides](https://www.sportskeeda.com/mmo/sea-thieves-ship-speeds-explained)).
+ * Downwind is still her fastest heading; what she does better than brigantine and
+ * galleon is *lose little* against the wind.
  *
- * Com o vento padrão (15,1 m/s) e o arrasto de `HullDrag`, o equilíbrio dá:
- * **popa 5,3 m/s (10,2 nós) · través 4,9 · proa 3,4 (65% da máxima)**.
+ * With the default wind (15.1 m/s) and `HullDrag`'s drag, equilibrium gives:
+ * **downwind 5.3 m/s (10.2 knots) · beam 4.9 · bow 3.4 (65% of top speed)**.
  */
 
 import * as THREE from 'three';
@@ -34,19 +35,19 @@ import { SAIL_FRAME, mastClearance, sailRestPoint, sailVertexIndex } from './Shi
 import type { ShipBody } from './ShipBody';
 import type { WaveField } from '../world/WaveField';
 
-// --- vento -------------------------------------------------------------------
+// --- wind --------------------------------------------------------------------
 
-/** Velocidade do vento com `windStrength = 0`, em m/s. */
+/** Wind speed with `windStrength = 0`, in m/s. */
 const WIND_BASE_SPEED = 6;
-/** Quanto `windStrength = 1` acrescenta, em m/s. */
+/** How much `windStrength = 1` adds, in m/s. */
 const WIND_SPEED_RANGE = 14;
 
 /**
- * Vento verdadeiro no mundo, em m/s, a partir do estado do mar.
+ * True wind in world space, in m/s, from the sea state.
  *
- * O `WaveField` guarda o vento como direção mais uma intensidade de 0 a 1, que é
- * o que o espectro de ondas precisa. Quem faz força precisa de metros por
- * segundo, e a conversão mora aqui para existir num lugar só.
+ * `WaveField` stores the wind as a direction plus a strength from 0 to 1, which
+ * is what the wave spectrum needs. Whatever makes force needs meters per second,
+ * and the conversion lives here so that it exists in exactly one place.
  */
 export function getTrueWind(waves: WaveField, target: THREE.Vector3): THREE.Vector3 {
   const speed = WIND_BASE_SPEED + clamp01(waves.windStrength) * WIND_SPEED_RANGE;
@@ -56,133 +57,136 @@ export function getTrueWind(waves: WaveField, target: THREE.Vector3): THREE.Vect
 }
 
 /**
- * Rumo em que o vento fica exatamente em popa — o mais rápido da Chalupa.
+ * Heading that puts the wind dead astern — the Sloop's fastest.
  *
- * `windDirection` é o ângulo **para onde** o vento sopra, com o vetor
- * `(cos wd, 0, sen wd)`. Vento em popa é a proa apontando no mesmo sentido do
- * vento; como a proa é −Z local, o rumo que satisfaz isso é `atan2(−cos, −sen)`.
+ * `windDirection` is the angle the wind blows **toward**, with the vector
+ * `(cos wd, 0, sin wd)`. Wind astern is the bow pointing the same way as the
+ * wind; since the bow is local −Z, the heading that satisfies it is
+ * `atan2(−cos, −sin)`.
  *
- * Mora aqui, e não na IA, porque é conhecimento sobre o vento — e porque a
- * bancada de testes de `main.ts` precisa exatamente do mesmo número. Duas cópias
- * dessa conta é uma cópia a mais.
+ * It lives here and not in the AI because it is knowledge about the wind — and
+ * because the test bench in `main.ts` needs exactly the same number. Two copies
+ * of that math is one copy too many.
  */
 export function downwindHeading(waves: WaveField): number {
   return Math.atan2(-Math.cos(waves.windDirection), -Math.sin(waves.windDirection));
 }
 
 /**
- * Eficiência da vela num rumo, sem simular nada.
+ * Sail efficiency on a heading, without simulating anything.
  *
- * É a mesma curva de `applyThrust`, reescrita em função do rumo: o alinhamento
- * entre proa e vento é o cosseno do desvio em relação ao rumo de popa. Serve ao
- * timoneiro bot para escolher entre dois cursos que servem à tática, e ao HUD para
- * desenhar a rosa de vento.
+ * Same curve as `applyThrust`, rewritten as a function of heading: the alignment
+ * between bow and wind is the cosine of the deviation from the downwind heading.
+ * It serves the bot helmsman choosing between two courses that suit the tactic,
+ * and the HUD drawing the wind rose.
  *
- * Usa o vento **verdadeiro**, não o aparente: a correção de vento aparente
- * depende da velocidade que o navio ainda não tem no rumo que está sendo
- * avaliado, e incluí-la exigiria resolver o equilíbrio inteiro para responder
- * "esse bordo é bom?".
+ * Uses the **true** wind, not the apparent: the apparent-wind correction depends
+ * on the speed the ship does not have yet on the heading being evaluated, and
+ * including it would mean solving the whole equilibrium to answer "is this tack
+ * any good?".
  *
- * @returns de `MIN_EFFICIENCY` (vento pela proa) a 1 (vento em popa).
+ * @returns from `MIN_EFFICIENCY` (wind on the bow) to 1 (wind astern).
  */
 export function efficiencyAtHeading(heading: number, waves: WaveField): number {
   const alignment = Math.cos(heading - downwindHeading(waves));
   return MIN_EFFICIENCY + (1 - MIN_EFFICIENCY) * (1 + alignment) * 0.5;
 }
 
-// --- propulsão ---------------------------------------------------------------
+// --- propulsion --------------------------------------------------------------
 
 /**
- * Área efetiva do aparelho, em m².
+ * Effective rig area, in m².
  *
- * Bem maior que os ~36 m² de lona desenhada, e assumidamente: o Sea of Thieves
- * estiliza a vela da chalupa pequena, mas move um casco de 37 toneladas a mais de
- * 10 nós, o que aquele pano não faria em vento nenhum. Entre falsear a área e
- * falsear o coeficiente de arrasto, falsear a área é o menor dos males — 124 m²
- * é o que um cúter de 16 m realmente carrega, então todo o resto da conta
- * continua sendo física de verdade em cima de um número plausível.
+ * Far larger than the ~36 m² of canvas actually drawn, and openly so: Sea of
+ * Thieves styles the sloop's sail small, yet moves a 37-tonne hull at more than
+ * 10 knots, which that cloth would not do in any wind. Between faking the area
+ * and faking the drag coefficient, faking the area is the lesser evil — 124 m²
+ * is what a 16 m cutter really carries, so all the rest of the math stays real
+ * physics on top of a plausible number.
  */
 const RIG_AREA = 124;
-/** Arrasto de uma vela redonda cheia. Placa porosa e curva fica perto de 1,6. */
+/** Drag of a full square sail. A porous, curved plate lands near 1.6. */
 const SAIL_CD = 1.62;
 
 /**
- * Quanto da própria velocidade do navio a vela sente como vento a menos.
+ * How much of the ship's own speed the sail feels as wind subtracted.
  *
- * Com vento aparente puro (1,0) a vela seria um freio: de popa o empuxo cairia
- * junto com a velocidade e o navio empacaria em ~4,4 m/s, com apenas 12% de
- * diferença entre navegar de popa e de proa — reta demais para dar leitura de
- * rumo ao jogador. O valor parcial representa o que um modelo puramente de
- * arrasto não consegue produzir: uma vela redonda também gera sustentação, e é
- * ela que faz um veleiro de pano quadrado andar bem acima do que o arrasto
- * sozinho explicaria.
+ * With pure apparent wind (1.0) the sail would be a brake: downwind the thrust
+ * would fall along with the speed and the ship would bog down at ~4.4 m/s, with
+ * only 12% difference between sailing downwind and into the wind — far too flat
+ * to give the player any read on heading. The partial value stands in for what a
+ * pure drag model cannot produce: a square sail also generates lift, and it is
+ * lift that makes a square-rigged vessel sail well above what drag alone would
+ * explain.
  */
 const APPARENT_RELIEF = 0.45;
 
 /**
- * Eficiência mínima, com o vento na cara.
+ * Minimum efficiency, with the wind in your face.
  *
- * Não é zero porque o vento nunca fica exatamente na proa e porque a chalupa
- * precisa continuar governando de bolina — é este número que define os 65% de
- * velocidade contra o vento que caracterizam o barco.
+ * Not zero because the wind never sits exactly on the bow and because the sloop
+ * has to keep steering close-hauled — this number is what sets the 65% upwind
+ * speed that characterizes the boat.
  */
 const MIN_EFFICIENCY = 0.25;
 
-/** Centro de esforço da vela, em coordenadas locais. */
+/** Center of effort of the sail, in local coordinates. */
 const SAIL_CENTER = new THREE.Vector3(0, (SAIL_FRAME.topY + SAIL_FRAME.bottomY) * 0.5, SAIL_FRAME.z);
 
 /**
- * Área e arrasto do que não é vela: obras mortas, mastro, cordame e a componente
- * tangencial do próprio pano.
+ * Area and drag of everything that is not sail: topsides, mast, rigging and the
+ * tangential component of the cloth itself.
  *
- * Existe porque a vela é fixa e sua força é puramente longitudinal — sem este
- * termo o vento não daria **nenhuma** banda nem abatimento, e o navio andaria
- * como se estivesse num trilho. É pequeno de propósito: seu papel é inclinar e
- * derivar, não propelir.
+ * It exists because the sail is fixed and its force is purely longitudinal —
+ * without this term the wind would give **no** heel and no leeway at all, and the
+ * ship would move as if it were on rails. It is small on purpose: its job is to
+ * heel and to drift, not to propel.
  *
- * 7 m² é o que sobra de área frontal acima d'água num casco de 5 m de boca com
- * 1,5 m de borda livre, mais mastro e cordame. Medido: rende ~830 N a 15 m/s, um
- * décimo do empuxo da vela — a proporção certa para um termo de correção. Já
- * esteve em 26 m², e aí o navio andava a 3 nós de vela ferrada, o que é absurdo.
+ * 7 m² is what is left of frontal area above water on a 5 m beam hull with 1.5 m
+ * of freeboard, plus mast and rigging. Measured: yields ~830 N at 15 m/s, a tenth
+ * of the sail's thrust — the right proportion for a correction term. It was once
+ * 26 m², and then the ship made 3 knots under furled sail, which is absurd.
  */
 const WINDAGE_AREA = 7;
 const WINDAGE_CD = 0.85;
 
 /**
- * Área lateral do mastro, verga e cordame, em m². Só serve de peso na média que
- * decide o centro de esforço abaixo — a intensidade da força vem de
- * `WINDAGE_AREA`.
+ * Side area of mast, yard and rigging, in m². It only serves as a weight in the
+ * average that decides the center of effort below — the magnitude of the force
+ * comes from `WINDAGE_AREA`.
  *
- * Mastro de 12,7 m afinando de 0,48 para 0,22 m de diâmetro dá ~4,4 m²; verga,
- * enfrechates e estais somam os outros ~2.
+ * A 12.7 m mast tapering from 0.48 to 0.22 m in diameter gives ~4.4 m²; yard,
+ * ratlines and stays add the other ~2.
  */
 const RIG_SIDE_AREA = 6.4;
 /**
- * Altura do centro dessa área. O mastro é mais grosso embaixo, então o centroide
- * dele fica abaixo do meio dos 12,7 m; a verga a 9 m puxa de volta para cima.
+ * Height of the center of that area. The mast is thicker at the foot, so its
+ * centroid sits below the middle of the 12.7 m; the yard at 9 m pulls it back up.
  */
 const RIG_CENTER_Y = 6.6;
 
 /**
- * Centro do esforço do vento sobre tudo que está acima d'água.
+ * Center of the wind's effort on everything that sits above water.
  *
- * **O `z` daqui é o que importa**, e é o único número da força do vento que gera
- * guinada: a parcela longitudinal, aplicada na linha de centro, só dá caturro.
- * Ele estava cravado no mastro, e o mastro fica 2,1 m à vante do centro de massa
- * — braço suficiente para o navio arribar sozinho a ~0,1°/s em qualquer amura,
- * com o leme no meio. Leme de sota permanente é defeito de projeto, não
- * característica.
+ * **The `z` here is what matters**, and it is the only number in the wind force
+ * that generates yaw: the longitudinal share, applied on the centerline, only
+ * gives pitch. It used to be pinned to the mast, and the mast sits 2.1 m forward
+ * of the center of mass — arm enough for the ship to bear away on its own at
+ * ~0.1°/s on either tack, with the rudder amidships. Permanent lee helm is a
+ * design defect, not a characteristic.
  *
- * O certo é a média ponderada de duas silhuetas: o costado, medido do mesmo
- * casco que tudo o mais lê (37,7 m², centro em z = −0,21), e a mastreação,
- * estreita e bem mais à vante (6,4 m² em z = −1,2). O costado ganha por área, o
- * centro resultante fica em −0,35 — praticamente a meia-nau, que é onde ele deve
- * estar — e o braço até o centro de massa cai de 2,11 para 1,26 m.
+ * The right answer is the weighted average of two silhouettes: the hull side,
+ * measured from the same hull everything else reads (37.7 m², center at
+ * z = −0.21), and the spars, narrow and much further forward (6.4 m² at
+ * z = −1.2). The hull side wins on area, the resulting center lands at −0.35 —
+ * practically amidships, which is where it belongs — and the arm to the center of
+ * mass drops from 2.11 to 1.26 m.
  *
- * Sobra leme de sota? Sobra, ~0,08°/s. E deve sobrar: o pano é fixo e quadrado,
- * o mastro está à vante, e barco largado nessas condições **arriba mesmo** até
- * cair de popa para o vento. Zerar isso exigiria inventar um número; o que dá
- * para fazer com honestidade é pôr a força onde a área está, e é o que está aqui.
+ * Is there lee helm left over? Some, ~0.08°/s. And there should be: the cloth is
+ * fixed and square, the mast is forward, and a boat left to itself in those
+ * conditions **does bear away** until it falls off with the wind astern. Zeroing
+ * that would mean inventing a number; what can be done honestly is to put the
+ * force where the area is, and that is what is here.
  */
 const WINDAGE_CENTER = (() => {
   const hull = measureWindageProfile();
@@ -194,21 +198,21 @@ const WINDAGE_CENTER = (() => {
   );
 })();
 
-// --- tecido ------------------------------------------------------------------
+// --- cloth -------------------------------------------------------------------
 
-/** Folga vertical do pano. É o que obriga a lona a embarrigar em vez de esticar. */
+/** Vertical slack of the cloth. What makes the canvas belly instead of stretch. */
 const VERTICAL_SLACK = 1.055;
-/** Folga diagonal. Menor que a vertical, para o pano resistir a cisalhar. */
+/** Diagonal slack. Smaller than the vertical, so the cloth resists shearing. */
 const SHEAR_SLACK = 1.02;
-/** Iterações de relaxamento por passo. Três já deixa a grade visualmente rígida. */
+/** Relaxation iterations per step. Three already makes the grid look rigid. */
 const RELAX_ITERATIONS = 3;
-/** Perda de energia por passo. Sem isso o pano vira gelatina permanente. */
+/** Energy lost per step. Without it the cloth becomes permanent jelly. */
 const CLOTH_DAMPING = 0.985;
-/** Aceleração da lona por unidade de pressão dinâmica do vento. */
+/** Canvas acceleration per unit of dynamic wind pressure. */
 const CLOTH_WIND = 0.085;
-/** Gravidade sentida pelo pano. Menor que a real: lona é leve e o ar segura. */
+/** Gravity the cloth feels. Less than real: canvas is light and air holds it. */
 const CLOTH_GRAVITY = 3.4;
-/** Amplitude do tremular quando a vela está a pano solto. */
+/** Flutter amplitude when the sail is flying loose. */
 const FLUTTER_GAIN = 0.55;
 
 interface ClothConstraint {
@@ -225,14 +229,14 @@ const _worldPoint = new THREE.Vector3();
 const _rest = new THREE.Vector3();
 
 export class SailSim {
-  /** 0 = aferrada, 1 = a toda vela. Ainda não há input; a força já respeita. */
+  /** 0 = furled, 1 = full sail. No input yet; the force already respects it. */
   trim = 1;
 
-  /** Empuxo longitudinal do último passo, em newtons. Telemetria e HUD. */
+  /** Longitudinal thrust from the last step, in newtons. Telemetry and HUD. */
   thrust = 0;
-  /** Eficiência do rumo em relação ao vento, 0,25 a 1. Alimenta o HUD de vento. */
+  /** Heading efficiency relative to the wind, 0.25 to 1. Feeds the wind HUD. */
   efficiency = 0;
-  /** Vento aparente no referencial do navio. A IA lê para escolher o rumo. */
+  /** Apparent wind in the ship's frame. The AI reads it to pick a heading. */
   readonly localWind = new THREE.Vector3();
 
   private readonly geometry: THREE.BufferGeometry | null;
@@ -243,8 +247,8 @@ export class SailSim {
   private clothTime = 0;
 
   /**
-   * @param mesh malha da vela, ou `null` para um navio sem pano visível (o mar
-   *   longe, onde o tecido não seria visto e não vale o custo).
+   * @param mesh sail mesh, or `null` for a ship with no visible cloth (the far
+   *   sea, where the fabric would not be seen and is not worth the cost).
    */
   constructor(mesh: THREE.Mesh | null) {
     this.geometry = mesh?.geometry ?? null;
@@ -257,13 +261,13 @@ export class SailSim {
     const { columns, rows } = SAIL_FRAME;
     this.pinned = new Uint8Array((columns + 1) * (rows + 1));
     for (let i = 0; i <= columns; i++) {
-      // Cabeça na verga e pé na retranca: as duas relingas ferradas ao pau.
+      // Head on the yard and foot on the boom: the two bolt ropes lashed to spars.
       this.pinned[sailVertexIndex(i, 0)] = 1;
       this.pinned[sailVertexIndex(i, rows)] = 1;
     }
 
-    // As valeiras (as bordas laterais) ficam soltas de propósito: é nelas que o
-    // tremular aparece, e é o que separa uma vela viva de um cartaz esticado.
+    // The leeches (the side edges) are left loose on purpose: that is where the
+    // flutter shows, and it is what separates a live sail from a stretched poster.
     const dx = (SAIL_FRAME.halfWidth * 2) / columns;
     const dy = (SAIL_FRAME.topY - SAIL_FRAME.bottomY) / rows;
     const diagonal = Math.hypot(dx, dy * VERTICAL_SLACK);
@@ -289,14 +293,14 @@ export class SailSim {
   }
 
   /**
-   * Passo fixo da vela: aplica as forças ao corpo e sacode o pano.
+   * Fixed step of the sail: applies the forces to the body and shakes the cloth.
    *
-   * @param waves fonte do vento verdadeiro.
+   * @param waves source of the true wind.
    */
   update(dt: number, body: ShipBody, waves: WaveField): void {
     getTrueWind(waves, _trueWind);
 
-    // Vento aparente parcial: ver `APPARENT_RELIEF`.
+    // Partial apparent wind: see `APPARENT_RELIEF`.
     _relativeWind.copy(_trueWind).addScaledVector(body.velocity, -APPARENT_RELIEF);
     body.worldDirToLocal(_relativeWind, _localWind);
     this.localWind.copy(_localWind);
@@ -306,7 +310,7 @@ export class SailSim {
     this.stepCloth(dt);
   }
 
-  /** Empuxo da vela: força longitudinal no centro de esforço. */
+  /** Sail thrust: longitudinal force at the center of effort. */
   private applyThrust(body: ShipBody): void {
     const windSpeed = _localWind.length();
     if (windSpeed < 0.01 || this.trim <= 0) {
@@ -315,8 +319,8 @@ export class SailSim {
       return;
     }
 
-    // A vela é fixa e atravessada, então sua normal é o eixo proa-popa do navio:
-    // -Z local é a proa. `alignment` é o cosseno entre o rumo e o vento.
+    // The sail is fixed and square across, so its normal is the ship's bow-stern
+    // axis: local -Z is the bow. `alignment` is the cosine between heading and wind.
     const alignment = -_localWind.z / windSpeed;
     this.efficiency = MIN_EFFICIENCY + (1 - MIN_EFFICIENCY) * (1 + alignment) * 0.5;
 
@@ -329,13 +333,13 @@ export class SailSim {
     body.applyForceAtPoint(_force, _worldPoint);
   }
 
-  /** Arrasto do vento sobre obras mortas e mastreação: banda e abatimento. */
+  /** Wind drag on topsides and spars: heel and leeway. */
   private applyWindage(body: ShipBody): void {
     const speed = _localWind.length();
     if (speed < 0.01) return;
 
-    // Sobre o vento *relativo*, no mundo: esta parcela empurra o navio para
-    // sotavento, não para a proa.
+    // On the *relative* wind, in world space: this share pushes the ship to
+    // leeward, not toward the bow.
     _force
       .copy(_relativeWind)
       .multiplyScalar(0.5 * AIR_DENSITY * WINDAGE_CD * WINDAGE_AREA * speed);
@@ -343,7 +347,7 @@ export class SailSim {
     body.applyForceAtPoint(_force, _worldPoint);
   }
 
-  /** Um passo de Verlet no tecido. */
+  /** One Verlet step on the fabric. */
   private stepCloth(dt: number): void {
     const positions = this.positions;
     const previous = this.previous;
@@ -352,30 +356,31 @@ export class SailSim {
 
     this.clothTime += dt;
 
-    // Pressão sobre o pano: **a mesma eficiência que faz a força**.
+    // Pressure on the cloth: **the same efficiency that makes the force**.
     //
-    // Aqui estava o defeito que se via como "a vela está do lado errado". A
-    // pressão saía de `-localWind.z` cru, ou seja, do sinal do vento — e com o
-    // vento pela proa esse sinal inverte: a lona era empurrada para ré, achatava
-    // contra o mastro e o navio ficava sem vela nenhuma, uma casca fina enrolada
-    // no tronco. Só que a física deste jogo **não** para com vento de proa: a
-    // eficiência tem piso em `MIN_EFFICIENCY` e a chalupa continua a 65% da
-    // velocidade, que é a característica que define o barco. As duas descrições
-    // discordavam, e a que o jogador vê é a errada.
+    // This is where the defect lived that read as "the sail is on the wrong
+    // side". The pressure came out of raw `-localWind.z`, that is, out of the
+    // sign of the wind — and with the wind on the bow that sign flips: the canvas
+    // was pushed aft, flattened against the mast and the ship had no sail at all,
+    // a thin skin wrapped around the trunk. Except this game's physics does
+    // **not** stop with the wind on the bow: efficiency has a floor at
+    // `MIN_EFFICIENCY` and the sloop keeps 65% of its speed, which is the
+    // characteristic that defines the boat. The two descriptions disagreed, and
+    // the one the player sees is the wrong one.
     //
-    // Lendo a mesma `efficiency` da propulsão, o pano infla sempre para vante e
-    // a barriga vira o **medidor** do rumo: cheia de popa, média de través,
-    // rasa de proa. Nada de sinal para inverter, e nunca mais meia vela de cada
-    // lado do pau.
+    // Reading the same `efficiency` the propulsion reads, the cloth always bellies
+    // forward and the belly becomes the **gauge** of the heading: full downwind,
+    // medium on the beam, shallow on the bow. No sign to flip, and never again
+    // half a sail on each side of the spar.
     const windSpeed = Math.max(_localWind.length(), 0.001);
     const drive = windSpeed * this.efficiency * this.trim;
     const pressure = CLOTH_WIND * drive * drive;
 
-    // Vela cheia fica dura e quieta; vela mal orientada bate. `luff` vai de 0
-    // (vento em popa) a 1 (vento na cara), e o tremular sai da pressão dinâmica
-    // **total** — e não da parcela que empurra —, porque uma vela tomada de
-    // contravento chacoalha com toda a força do vento, justo por não estar
-    // trabalhando.
+    // A full sail is stiff and quiet; a badly trimmed sail flaps. `luff` runs from
+    // 0 (wind astern) to 1 (wind in your face), and the flutter comes out of the
+    // **total** dynamic pressure — not out of the share that pushes — because a
+    // sail taken aback shakes with the wind's full force, precisely because it is
+    // not working.
     const alignment = -_localWind.z / windSpeed;
     const luff = clamp01((1 - alignment) * 0.5);
     const flutter = FLUTTER_GAIN * luff * CLOTH_WIND * windSpeed * windSpeed;
@@ -414,9 +419,9 @@ export class SailSim {
         const length = Math.hypot(dx, dy, dz);
         if (length < 1e-6) continue;
 
-        // Só encurta, nunca estica: lona não é elástico. Deixar a restrição
-        // empurrar quando o pano está frouxo é o que criaria aquela ondulação
-        // de plástico que denuncia tecido mal simulado.
+        // Only shortens, never stretches: canvas is not elastic. Letting the
+        // constraint push when the cloth is slack is what would create that
+        // plastic ripple that gives away badly simulated fabric.
         if (length <= constraint.rest) continue;
 
         const correction = (length - constraint.rest) / length / 2;

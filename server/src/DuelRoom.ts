@@ -1,30 +1,32 @@
 /**
- * Uma sala: dois capitães, e o cano entre eles.
+ * A room: two captains, and the pipe between them.
  *
- * ## O que esta sala **não** faz
+ * ## What this room does **not** do
  *
- * Ela não simula nada. Não conhece navio, onda, bala nem rombo, e não abre um só
- * dos quadros binários que passa de um lado ao outro. A razão é a conta do plano
- * gratuito: um Durable Object cobra por **request**, e um laço de 60 Hz aqui
- * dentro não seria um laço — seria uma cadeia de `alarm()`, um request cada, uns
- * 36.000 por partida. Retransmitindo, o mesmo duelo custa ~685. A diferença entre
- * três partidas por dia e cento e quarenta e cinco.
+ * It simulates nothing. It knows no ship, wave, cannonball or breach, and it does
+ * not open a single one of the binary frames it passes from one side to the other.
+ * The reason is the free plan's math: a Durable Object charges per **request**,
+ * and a 60 Hz loop in here would not be a loop — it would be a chain of
+ * `alarm()`, one request each, some 36,000 per match. Relaying, the same duel
+ * costs ~685. The difference between three matches a day and a hundred and
+ * forty-five.
  *
- * Quem simula é um dos dois jogadores. Qual deles é a única decisão de jogo que
- * este arquivo toma, e ela sai de `perfScore` — porque a máquina do host carrega
- * a física dos dois cascos, e uma máquina fraca no comando engasga os dois.
+ * The one who simulates is one of the two players. Which of them is the only game
+ * decision this file makes, and it comes out of `perfScore` — because the host's
+ * machine carries the physics of both hulls, and a weak machine in command
+ * stutters for both.
  *
- * ## Hibernação não é otimização, é o que torna a conta viável
+ * ## Hibernation is not an optimization, it's what makes the math work
  *
- * `state.acceptWebSocket` em vez de `ws.accept()`. Com a API de hibernação, o
- * objeto sai da memória quando fica dez segundos sem receber nada e volta na
- * mensagem seguinte, sem derrubar as conexões. Sem ela, uma sala esperando um
- * segundo jogador ficaria residente cobrando *duration* o tempo todo — e uma sala
- * esperando é justamente o estado em que uma sala passa mais tempo.
+ * `state.acceptWebSocket` instead of `ws.accept()`. With the hibernation API the
+ * object leaves memory after ten seconds of receiving nothing and comes back on
+ * the next message, without dropping the connections. Without it, a room waiting
+ * for a second player would stay resident charging *duration* the whole time —
+ * and waiting is precisely the state a room spends the most time in.
  *
- * O preço é que **campos de instância não sobrevivem**. Por isso tudo que precisa
- * durar mora em dois lugares: o que é da conexão vai no `serializeAttachment` do
- * próprio socket, e o que é da sala vai no `storage`.
+ * The price is that **instance fields do not survive**. So everything that has to
+ * last lives in two places: what belongs to the connection goes in the socket's
+ * own `serializeAttachment`, and what belongs to the room goes in `storage`.
  */
 
 import {
@@ -34,84 +36,85 @@ import {
   type ServerMessage,
 } from '../../shared/protocol';
 
-/** O que se guarda de cada conexão. Sobrevive à hibernação no próprio socket. */
+/** What is kept for each connection. Survives hibernation on the socket itself. */
 interface PeerData {
   nickname: string;
   perfScore: number;
-  /** Definido quando o segundo entra. `null` enquanto se está sozinho. */
+  /** Set when the second one joins. `null` while alone in the room. */
   role: 'host' | 'guest' | null;
   ready: boolean;
   /**
-   * Quando o `hello` deste capitão chegou, em milissegundos.
+   * When this captain's `hello` arrived, in milliseconds.
    *
-   * É o desempate de `pairIfReady`, e ele existe porque a ordem de
-   * `getWebSockets()` **não é** a de chegada — a plataforma não promete ordem
-   * nenhuma. Enquanto a preferência de quem abriu a sala se apoiava nessa ordem,
-   * ela era sorteio: um jogador com a nota máxima abriu a sala e recebeu o papel
-   * de convidado, que é justamente o que a regra deveria impedir.
+   * It is the tie-breaker in `pairIfReady`, and it exists because the order of
+   * `getWebSockets()` is **not** arrival order — the platform promises no order
+   * at all. While the preference for whoever opened the room leaned on that
+   * order, it was a lottery: a player with the top score opened the room and got
+   * the guest role, which is exactly what the rule is supposed to prevent.
    */
   joinedAt: number;
 }
 
-/** O que se guarda da sala. Sobrevive no `storage`. */
+/** What is kept for the room. Survives in `storage`. */
 interface RoomData {
   code: string;
   phase: 'waiting' | 'playing' | 'over';
   seed: number;
   /**
-   * `true` quando esta sala foi aberta por alguém entrando na **fila**.
+   * `true` when this room was opened by someone joining the **queue**.
    *
-   * Só essas salas têm uma vaga reservada no `Matchmaker`, e só elas precisam
-   * devolvê-la quando esvaziam. Uma sala aberta por código nunca esteve na fila
-   * e não tem o que liberar.
+   * Only those rooms hold a slot reserved in the `Matchmaker`, and only they need
+   * to give it back when they empty out. A room opened by code was never in the
+   * queue and has nothing to release.
    */
   queued?: boolean;
 }
 
 /**
- * Teto de um quadro de simulação, em bytes.
+ * Ceiling for a simulation frame, in bytes.
  *
- * O maior instantâneo previsto — dois cascos, vinte e quatro rombos, uma dúzia de
- * eventos — fica perto de 1 KB. Quatro é folga de sobra para o formato crescer e
- * ainda assim recusa qualquer coisa que não seja um quadro deste jogo.
+ * The largest snapshot expected — two hulls, twenty-four breaches, a dozen
+ * events — lands near 1 KB. Four is plenty of headroom for the format to grow and
+ * still refuses anything that isn't a frame of this game.
  */
 const MAX_FRAME_BYTES = 4096;
 
 /**
- * Teto de mensagens por segundo, por conexão.
+ * Ceiling on messages per second, per connection.
  *
- * O cliente manda 30 de entrada ou 15 de instantâneo. 120 é quatro vezes o pior
- * caso legítimo: alto o bastante para nunca atrapalhar um duelo de verdade, baixo
- * o bastante para um cliente enlouquecido não torrar a cota do dia em minutos.
+ * The client sends 30 of input or 15 of snapshot. 120 is four times the worst
+ * legitimate case: high enough never to get in the way of a real duel, low enough
+ * that a client gone mad can't burn through the day's quota in minutes.
  */
 const MAX_MESSAGES_PER_SECOND = 120;
 
-/** Uma sala com um só capitão morre depois disto. Ver `alarm`. */
+/** A room with a single captain dies after this. See `alarm`. */
 const ABANDONED_MS = 10 * 60 * 1000;
 
 /**
- * Vantagem mínima de desempenho para trocar quem simula.
+ * Minimum performance advantage needed to switch who simulates.
  *
- * Sem uma margem, duas máquinas parecidas trocariam de papel por causa de ruído
- * de medição — e quem abriu a sala perderia o comando dela por um ponto de
- * diferença. Vinte pontos numa escala de cem é uma diferença que se sente.
+ * Without a margin, two similar machines would swap roles because of measurement
+ * noise — and whoever opened the room would lose command of it over a single
+ * point of difference. Twenty points on a scale of a hundred is a difference you
+ * can feel.
  */
 const HOST_SWAP_MARGIN = 20;
 
 export class DuelRoom implements DurableObject {
   /**
-   * Contagem de mensagens da janela de um segundo, por socket.
+   * Message count for the one-second window, per socket.
    *
-   * Em memória, e não no `storage`: uma escrita por mensagem custaria mais que o
-   * ataque que ela evita. Perder a contagem numa hibernação é inofensivo —
-   * hibernar exige dez segundos de silêncio, que é o oposto de um cliente
-   * inundando a sala.
+   * In memory, not in `storage`: one write per message would cost more than the
+   * attack it prevents. Losing the count to a hibernation is harmless —
+   * hibernating requires ten seconds of silence, which is the opposite of a
+   * client flooding the room.
    */
   private readonly rates = new WeakMap<WebSocket, { since: number; count: number }>();
 
   /**
-   * O `env` entra aqui porque a sala precisa **falar com a fila** quando
-   * esvazia. Ver `releaseQueueSlot`.
+   * `env` comes in here because the room needs to **talk to the queue** when it
+   * empties out. See `releaseQueueSlot`.
    */
   constructor(
     private readonly state: DurableObjectState,
@@ -127,26 +130,27 @@ export class DuelRoom implements DurableObject {
     const code = url.searchParams.get('code');
     if (!code) return new Response('Missing room code.', { status: 400 });
 
-    // ⚠️ **Um código que ninguém abriu não é uma sala vazia: é um engano.**
+    // ⚠️ **A code nobody opened is not an empty room: it's a mistake.**
     //
-    // `idFromName` sempre resolve, então digitar quatro letras erradas
-    // **criava** a sala daquelas letras e sentava o jogador nela. Ele ficava
-    // olhando um cronômetro esperando um adversário que não existe e nunca vai
-    // existir, sem nada na tela sugerindo que ele errou uma letra. É preciso
-    // distinguir "abrir uma sala" de "entrar numa sala", e só quem entra pode
-    // ser recusado.
+    // `idFromName` always resolves, so typing four wrong letters **created** the
+    // room for those letters and sat the player down in it. He sat there watching
+    // a timer, waiting for an opponent who doesn't exist and never will, with
+    // nothing on screen to suggest he got a letter wrong. "Opening a room" has to
+    // be told apart from "joining a room", and only the one joining can be
+    // refused.
     //
-    // A recusa sai daqui como status HTTP, e quem a traduz para o jogador é o
-    // Worker — ver `refuse` e `claimRoom` em `index.ts`. Nem toda recusa é para
-    // ser contada: a da fila é para ser **contornada**.
+    // The refusal leaves here as an HTTP status, and the one who translates it
+    // for the player is the Worker — see `refuse` and `claimRoom` in `index.ts`.
+    // Not every refusal is meant to be passed on: the queue's is meant to be
+    // **worked around**.
     if (url.searchParams.get('join') === '1' && !(await this.state.storage.get('room'))) {
       return new Response('No such room.', { status: 404 });
     }
 
     const room = await this.room(code, url.searchParams.get('queued') === '1');
 
-    // Duas pessoas por sala, e ponto. Um terceiro socket não vira espectador
-    // por acidente: ele receberia os quadros dos dois e ninguém saberia por quê.
+    // Two people per room, period. A third socket does not become a spectator by
+    // accident: it would receive both sides' frames and nobody would know why.
     const existing = this.state.getWebSockets();
     if (existing.length >= 2) return new Response('Room is full.', { status: 409 });
     if (room.phase !== 'waiting') {
@@ -156,7 +160,7 @@ export class DuelRoom implements DurableObject {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
 
-    // Hibernação: ver o cabeçalho. `acceptWebSocket`, nunca `server.accept()`.
+    // Hibernation: see the header. `acceptWebSocket`, never `server.accept()`.
     this.state.acceptWebSocket(server);
     server.serializeAttachment({
       nickname: 'Sailor',
@@ -166,18 +170,18 @@ export class DuelRoom implements DurableObject {
       joinedAt: 0,
     } satisfies PeerData);
 
-    // Um relógio para varrer a sala se ela for abandonada com um só capitão.
+    // A clock to sweep the room away if it's abandoned with a single captain.
     await this.state.storage.setAlarm(Date.now() + ABANDONED_MS);
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
   /**
-   * Uma mensagem de um dos dois.
+   * A message from one of the two.
    *
-   * Binário é **retransmitido sem ser lido** — é o caminho quente, e abrir um
-   * quadro aqui gastaria o orçamento de CPU da invocação em algo que nenhum dos
-   * dois lados pediu. Texto é lobby, e esse sim é interpretado.
+   * Binary is **relayed without being read** — it's the hot path, and opening a
+   * frame here would spend the invocation's CPU budget on something neither side
+   * asked for. Text is lobby, and that one does get parsed.
    */
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (!this.withinRate(ws)) {
@@ -214,11 +218,11 @@ export class DuelRoom implements DurableObject {
   }
 
   /**
-   * Varre a sala abandonada.
+   * Sweeps away the abandoned room.
    *
-   * O relógio é reposto a cada vez que alguém entra, então ele só dispara numa
-   * sala que passou dez minutos com um capitão só — que é uma sala que ninguém
-   * vai usar mais, ocupando um código que outra pessoa poderia querer.
+   * The clock is reset every time someone joins, so it only fires in a room that
+   * spent ten minutes with a single captain — which is a room nobody will use
+   * again, holding a code someone else might want.
    */
   async alarm(): Promise<void> {
     const sockets = this.state.getWebSockets();
@@ -254,9 +258,9 @@ export class DuelRoom implements DurableObject {
     ws: WebSocket,
     message: Extract<ClientMessage, { t: 'hello' }>,
   ): Promise<void> {
-    // Versão diferente é recusada na porta. Deixar entrar daria uma partida em
-    // que os dois lados leem os mesmos bytes com significados diferentes — e o
-    // sintoma disso não é um erro, é um adversário que se comporta como louco.
+    // A different version is refused at the door. Letting it in would give a
+    // match where both sides read the same bytes with different meanings — and
+    // the symptom of that is not an error, it's an opponent acting like a madman.
     if (message.v !== PROTOCOL_VERSION) {
       this.send(ws, {
         t: 'error',
@@ -269,12 +273,12 @@ export class DuelRoom implements DurableObject {
     const room = await this.room();
     const peer = this.peerData(ws);
     peer.nickname = sanitizeNickname(message.nickname);
-    // Nota fora de escala é nota inventada: um cliente adulterado que se declare
-    // com mil pontos ganharia o comando de toda sala em que entrasse.
+    // A score off the scale is a made-up score: a tampered client declaring
+    // itself at a thousand points would win command of every room it joined.
     peer.perfScore = Number.isFinite(message.perfScore)
       ? Math.max(0, Math.min(100, message.perfScore))
       : 0;
-    // Carimbado uma vez, no `hello`. Ver `PeerData.joinedAt`.
+    // Stamped once, on the `hello`. See `PeerData.joinedAt`.
     if (peer.joinedAt === 0) peer.joinedAt = Date.now();
     this.setPeerData(ws, peer);
 
@@ -289,12 +293,12 @@ export class DuelRoom implements DurableObject {
   }
 
   /**
-   * Decide quem simula e apresenta os dois, quando os dois estão presentes.
+   * Decides who simulates and introduces the two, once both are present.
    *
-   * A escolha por desempenho é a única regra de jogo desta sala, e ela existe
-   * porque num duelo host-autoritativo a máquina de quem hospeda dita a
-   * experiência dos **dois**. Quem abriu a sala tem preferência — só perde o
-   * comando para uma máquina visivelmente melhor. Ver `HOST_SWAP_MARGIN`.
+   * Choosing by performance is this room's only game rule, and it exists because
+   * in a host-authoritative duel the host's machine dictates the experience of
+   * **both**. Whoever opened the room gets preference — it only loses command to
+   * a visibly better machine. See `HOST_SWAP_MARGIN`.
    */
   private async pairIfReady(): Promise<void> {
     const sockets = this.state.getWebSockets();
@@ -305,33 +309,33 @@ export class DuelRoom implements DurableObject {
     const dataOther = this.peerData(other);
     if (dataOne.role !== null || dataOther.role !== null) return;
 
-    // ⚠️ **Os dois têm de ter se apresentado, e a falta desta linha quebrava a
-    // partida rápida em uma de cada duas tentativas.**
+    // ⚠️ **Both have to have introduced themselves, and the absence of this line
+    // broke quick match on one of every two attempts.**
     //
-    // Um socket entra em `getWebSockets()` no `acceptWebSocket` da `fetch`, muito
-    // antes de o `hello` dele chegar. Quando os dois capitães clicam em "procurar"
-    // no mesmo instante — que é o caso mais comum que a fila tem, dois amigos
-    // combinando de jogar —, as quatro coisas se intercalam como *aceita A, aceita
-    // B, hello de A, hello de B*, e este método rodava no terceiro passo: com dois
-    // sockets na sala, dois papéis nulos, e o segundo capitão ainda sem nome nem
-    // nota.
+    // A socket enters `getWebSockets()` at the `acceptWebSocket` in `fetch`, long
+    // before its `hello` arrives. When both captains click "search" at the same
+    // instant — which is the most common case the queue sees, two friends
+    // arranging to play — the four things interleave as *accept A, accept B, hello
+    // from A, hello from B*, and this method ran on the third step: two sockets in
+    // the room, two null roles, and the second captain still without a name or a
+    // score.
     //
-    // O estrago era duplo e nenhuma das duas metades aparecia como erro. O
-    // desempate de `joinedAt` lia zero para quem não falou, então **quem chegou
-    // primeiro era tratado como o segundo** e perdia o comando da sala para uma
-    // máquina de nota zero. E o `hello` de verdade, ao chegar, encontrava os papéis
-    // já decididos e caía na saída acima — ou seja, o segundo capitão **nunca
-    // recebia o `peer`**. Ele ficava no cronômetro de procura para sempre, enquanto
-    // o outro ficava em "adversário a bordo" esperando um `ready` que não vinha. O
-    // sinal de que era isto: o nome do adversário aparecia como `Sailor`.
+    // The damage was twofold and neither half showed up as an error. The
+    // `joinedAt` tie-breaker read zero for whoever hadn't spoken, so **whoever
+    // arrived first was treated as the second** and lost command of the room to a
+    // machine scoring zero. And the real `hello`, on arrival, found the roles
+    // already decided and fell into the exit above — that is, the second captain
+    // **never received the `peer`**. He stayed on the search timer forever, while
+    // the other sat at "opponent aboard" waiting for a `ready` that never came.
+    // The tell that this was it: the opponent's name showed up as `Sailor`.
     //
-    // Sair aqui é seguro porque este método é chamado por todo `hello`: o do
-    // atrasado pareia os dois com informação completa dos dois lados.
+    // Bailing out here is safe because this method is called by every `hello`: the
+    // late one pairs the two with complete information from both sides.
     if (dataOne.joinedAt === 0 || dataOther.joinedAt === 0) return;
 
-    // Quem chegou primeiro é o `first`, e isso é lido do carimbo do `hello` —
-    // **não** da ordem em que a plataforma devolve os sockets, que não é
-    // ordenada. Ver `PeerData.joinedAt`.
+    // Whoever arrived first is `first`, and that is read from the `hello` stamp —
+    // **not** from the order in which the platform hands back the sockets, which
+    // is not ordered. See `PeerData.joinedAt`.
     const oneFirst = dataOne.joinedAt <= dataOther.joinedAt;
     const first = oneFirst ? one : other;
     const second = oneFirst ? other : one;
@@ -348,7 +352,7 @@ export class DuelRoom implements DurableObject {
     this.send(second, { t: 'peer', nickname: a.nickname, role: b.role });
   }
 
-  /** Começa quando os dois disserem que carregaram o que tinham de carregar. */
+  /** Starts once both say they have loaded what they had to load. */
   private async onReady(ws: WebSocket): Promise<void> {
     const peer = this.peerData(ws);
     peer.ready = true;
@@ -363,9 +367,9 @@ export class DuelRoom implements DurableObject {
     room.phase = 'playing';
     await this.state.storage.put('room', room);
 
-    // O mundo sai daqui, e não das preferências de cada um. É o que impede um
-    // jogador em "tempestade" e outro em "calmaria" de navegarem mares
-    // diferentes — o vento entra na força da vela, então isso seria vantagem.
+    // The world comes from here, not from each player's preferences. It's what
+    // keeps a player on "storm" and one on "calm" from sailing different seas —
+    // wind feeds into sail force, so that would be an advantage.
     const start: ServerMessage = {
       t: 'start',
       seed: room.seed,
@@ -376,8 +380,8 @@ export class DuelRoom implements DurableObject {
   }
 
   private async onResult(ws: WebSocket, winner: 0 | 1): Promise<void> {
-    // Só o host declara o fim, porque só ele simula. Aceitar do outro daria a
-    // quem perdeu o poder de anunciar a própria vitória.
+    // Only the host declares the end, because only the host simulates. Accepting
+    // it from the other would give the loser the power to announce his own win.
     if (this.peerData(ws).role !== 'host') return;
 
     const room = await this.room();
@@ -390,9 +394,9 @@ export class DuelRoom implements DurableObject {
 
   private async onPeerGone(ws: WebSocket): Promise<void> {
     const room = await this.room();
-    // Caiu no meio do duelo: o outro fica sem adversário e sem quem simule.
-    // Sem reconexão no escopo de hoje, a partida acaba — e dizer isso na hora é
-    // melhor que deixar alguém sozinho num mar que parou de responder.
+    // Dropped mid-duel: the other one is left with no opponent and nobody to
+    // simulate. With no reconnect in today's scope, the match ends — and saying so
+    // right away beats leaving someone alone in a sea that stopped responding.
     if (room.phase === 'playing') {
       room.phase = 'over';
       await this.state.storage.put('room', room);
@@ -400,55 +404,56 @@ export class DuelRoom implements DurableObject {
       return;
     }
 
-    // Ainda esperando: quem sobrou volta a ser o único, e o papel dele volta a
-    // ser indefinido — senão a próxima pessoa a entrar seria pareada contra um
-    // papel decidido numa comparação que já não vale.
+    // Still waiting: whoever is left goes back to being the only one, and his role
+    // goes back to undefined — otherwise the next person to join would be paired
+    // against a role decided by a comparison that no longer holds.
     let remaining = 0;
     let dismissed = 0;
     for (const socket of this.state.getWebSockets()) {
       if (socket === ws) continue;
       remaining++;
       const peer = this.peerData(socket);
-      // Se ele já tinha papel, ele **já viu** a tela de "adversário a bordo" e
-      // mandou o `ready` dele. Zerar o papel em silêncio o deixava ali para
-      // sempre: sem cronômetro (a fase de espera já tinha acabado), sem erro e sem
-      // adversário, esperando um `start` que precisa de dois `ready` e nunca vai
-      // sair. É a janela curta entre o pareamento e o começo — meio segundo —, e
-      // quem cai nela não tem nem como saber que caiu.
+      // If he already had a role, he has **already seen** the "opponent aboard"
+      // screen and sent his `ready`. Clearing the role in silence left him there
+      // forever: no timer (the waiting phase was already over), no error and no
+      // opponent, waiting for a `start` that needs two `ready`s and is never
+      // coming. It's the short window between pairing and the start — half a
+      // second — and whoever falls into it has no way of knowing he did.
       const wasPaired = peer.role !== null;
       peer.role = null;
       peer.ready = false;
       this.setPeerData(socket, peer);
       if (!wasPaired) continue;
 
-      // O mesmo texto nas duas pontas de propósito: o cliente pinta a mensagem do
-      // `error` e, quando o socket fecha em seguida, pinta o motivo do fechamento
-      // por cima. Dois textos diferentes fariam o segundo apagar o primeiro com
-      // uma explicação pior. Ver `refuse` em `index.ts`, que segue a mesma regra.
+      // The same text at both ends on purpose: the client paints the `error`
+      // message and then, when the socket closes right after, paints the close
+      // reason over it. Two different texts would have the second erase the first
+      // with a worse explanation. See `refuse` in `index.ts`, which follows the
+      // same rule.
       const reason = 'The other captain left before the duel started.';
       this.send(socket, { t: 'error', reason });
       this.close(socket, 1000, reason);
       dismissed++;
     }
 
-    // Saiu o último — ou foi dispensado por causa dele. A vaga desta sala não
-    // serve mais a ninguém, e não se espera pelo `webSocketClose` de quem se
-    // acabou de mandar embora: a API de hibernação não promete chamá-lo para um
-    // fechamento que partiu daqui, e uma vaga morta na fila custa dez minutos de
-    // alguém olhando uma tela de procura que não vai encontrar nada.
+    // The last one left — or was dismissed because of him. This room's slot is no
+    // use to anybody now, and there is no waiting on the `webSocketClose` of
+    // someone just sent away: the hibernation API makes no promise to call it for
+    // a close that started here, and a dead slot in the queue costs ten minutes of
+    // someone staring at a search screen that will never find anything.
     if (remaining === dismissed) await this.releaseQueueSlot(room);
   }
 
-  // -- encanamento ---------------------------------------------------------------
+  // -- plumbing ------------------------------------------------------------------
 
-  /** Manda o quadro para o outro lado. É a única coisa quente deste arquivo. */
+  /** Sends the frame to the other side. The only hot thing in this file. */
   private relay(from: WebSocket, frame: ArrayBuffer): void {
     for (const socket of this.state.getWebSockets()) {
       if (socket === from) continue;
       try {
         socket.send(frame);
       } catch {
-        // Socket morrendo no meio do envio: `webSocketClose` cuida do resto.
+        // Socket dying mid-send: `webSocketClose` takes care of the rest.
       }
     }
   }
@@ -457,7 +462,7 @@ export class DuelRoom implements DurableObject {
     try {
       ws.send(JSON.stringify(message));
     } catch {
-      // Idem.
+      // Ditto.
     }
   }
 
@@ -475,7 +480,7 @@ export class DuelRoom implements DurableObject {
     try {
       ws.close(code, reason);
     } catch {
-      // Já fechado.
+      // Already closed.
     }
   }
 
@@ -494,11 +499,11 @@ export class DuelRoom implements DurableObject {
   }
 
   /**
-   * O estado da sala, criando-o na primeira vez.
+   * The room's state, creating it the first time around.
    *
-   * A semente nasce aqui, no servidor, e não em nenhum dos dois clientes: é ela
-   * que faz o mar, o vento e o clima serem os mesmos dos dois lados, e um número
-   * que sai de um dos jogadores é um número que aquele jogador escolhe.
+   * The seed is born here, on the server, and not in either of the two clients:
+   * it's what makes the sea, the wind and the weather the same on both sides, and
+   * a number that comes out of one of the players is a number that player picks.
    */
   private async room(code?: string, queued = false): Promise<RoomData> {
     const stored = await this.state.storage.get<RoomData>('room');
@@ -515,13 +520,13 @@ export class DuelRoom implements DurableObject {
   }
 
   /**
-   * Devolve à fila a vaga desta sala, quando ela fica sem ninguém.
+   * Gives this room's slot back to the queue, once the room has nobody left.
    *
-   * Sem isto, quem entra na fila e desiste deixa para trás uma vaga apontando
-   * para uma sala vazia — e o próximo a entrar na fila é mandado para lá, senta
-   * sozinho e espera um adversário que já foi embora. O prazo de validade da
-   * vaga cobriria isso eventualmente; "eventualmente" são dez minutos de alguém
-   * olhando para uma tela de procura que não vai encontrar nada.
+   * Without this, whoever joins the queue and gives up leaves behind a slot
+   * pointing at an empty room — and the next person to join the queue is sent
+   * there, sits down alone and waits for an opponent who already left. The slot's
+   * expiry would cover that eventually; "eventually" is ten minutes of someone
+   * staring at a search screen that will never find anything.
    */
   private async releaseQueueSlot(room: RoomData): Promise<void> {
     if (!room.queued) return;
@@ -529,12 +534,12 @@ export class DuelRoom implements DurableObject {
     try {
       await matchmaker.fetch(`https://matchmaker/release?code=${encodeURIComponent(room.code)}`);
     } catch {
-      // A fila que não recebeu o aviso cai no prazo de validade. Uma vaga a mais
-      // por alguns minutos é muito melhor que uma sala derrubada por causa dela.
+      // A queue that never got the notice falls back on the expiry. One extra
+      // slot for a few minutes is far better than a room torn down over it.
     }
   }
 
-  /** Janela deslizante de um segundo. Ver `MAX_MESSAGES_PER_SECOND`. */
+  /** Sliding one-second window. See `MAX_MESSAGES_PER_SECOND`. */
   private withinRate(ws: WebSocket): boolean {
     const now = Date.now();
     const entry = this.rates.get(ws);
@@ -547,7 +552,7 @@ export class DuelRoom implements DurableObject {
   }
 }
 
-/** As ligações declaradas em `wrangler.jsonc`. */
+/** The bindings declared in `wrangler.jsonc`. */
 export interface Env {
   DUEL_ROOM: DurableObjectNamespace;
   MATCHMAKER: DurableObjectNamespace;

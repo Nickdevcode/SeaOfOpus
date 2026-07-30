@@ -1,13 +1,13 @@
 /**
- * Tudo que fica **em cima** do casco: mastro, cordame, timão, cabrestante,
- * canhões, escada, âncora e lanternas.
+ * Everything that sits **on top of** the hull: mast, rigging, helm, capstan,
+ * cannons, stairs, anchor and lanterns.
  *
- * A divisão entre peça estática e peça móvel não é organizacional, é de
- * desempenho. O que nunca se mexe vai para um `GeometryBuilder` compartilhado
- * por material e vira uma malha só — o navio inteiro parado custa pouco mais de
- * meia dúzia de chamadas de desenho. O que gira (timão, cabrestante, canhões,
- * leme, âncora) precisa de transformação própria e ganha um `Group` cada um; são
- * poucos, e cada um é a interface de um sistema de jogo inteiro.
+ * The split between static part and moving part is not organizational, it's about
+ * performance. Whatever never moves goes into a `GeometryBuilder` shared per
+ * material and becomes a single mesh — the whole ship at rest costs a little over
+ * half a dozen draw calls. Whatever turns (helm, capstan, cannons, rudder,
+ * anchor) needs its own transform and gets a `Group` each; there are few of them,
+ * and each one is the interface to an entire game system.
  */
 
 import * as THREE from 'three';
@@ -46,7 +46,7 @@ import {
   type BoardingLadderSpec,
 } from './BoardingLadder';
 
-/** Materiais que as peças usam. Cada um vira, no máximo, uma malha. */
+/** Materials the parts use. Each one becomes, at most, one mesh. */
 export type PartMaterial =
   | 'hull'
   | 'interior'
@@ -80,16 +80,17 @@ export function createPartBuilders(): PartBuilders {
   return builders;
 }
 
-/** Geometria já fechada, por material. */
+/** Geometry already closed, per material. */
 export type PartGeometries = Partial<Record<PartMaterial, THREE.BufferGeometry>>;
 
 /**
- * Fecha os acumuladores em geometria.
+ * Closes the accumulators into geometry.
  *
- * Existe separado de `emitMeshes` porque a mesma geometria serve aos dois navios
- * da partida — o que muda de um para o outro é só a matriz do `Object3D`.
- * Acumulador vazio não vira geometria: `BufferGeometry` de zero vértice o three
- * aceita calado e só denuncia depois, ao calcular a esfera envolvente.
+ * Exists separately from `emitMeshes` because the same geometry serves both ships
+ * in the match — all that changes from one to the other is the `Object3D` matrix.
+ * An empty accumulator does not become geometry: three accepts a zero-vertex
+ * `BufferGeometry` without a word and only gives it away later, when it computes
+ * the bounding sphere.
  */
 export function toPartGeometries(builders: Partial<PartBuilders>): PartGeometries {
   const geometries: PartGeometries = {};
@@ -100,7 +101,7 @@ export function toPartGeometries(builders: Partial<PartBuilders>): PartGeometrie
   return geometries;
 }
 
-/** Cria uma malha por geometria e pendura tudo em `parent`. */
+/** Creates one mesh per geometry and hangs it all off `parent`. */
 export function meshesFromParts(
   geometries: PartGeometries,
   materials: ShipMaterials,
@@ -112,9 +113,9 @@ export function meshesFromParts(
     if (!geometry) continue;
 
     const mesh = new THREE.Mesh(geometry, materials[key]);
-    // Vidro e chama ficam fora do mapa de sombra: um é transparente e o outro é
-    // a própria fonte de luz — sombrear qualquer um dos dois só produziria um
-    // borrão escuro em volta da lanterna.
+    // Glass and flame stay out of the shadow map: one is transparent and the
+    // other is the light source itself — shadowing either one would only produce
+    // a dark smudge around the lantern.
     const casts = key !== 'glass' && key !== 'flame';
     mesh.castShadow = casts;
     mesh.receiveShadow = casts;
@@ -125,7 +126,7 @@ export function meshesFromParts(
   return meshes;
 }
 
-/** Atalho para as peças móveis, cuja geometria não é compartilhada. */
+/** Shortcut for the moving parts, whose geometry is not shared. */
 export function emitMeshes(
   builders: Partial<PartBuilders>,
   materials: ShipMaterials,
@@ -135,43 +136,44 @@ export function emitMeshes(
 }
 
 // ---------------------------------------------------------------------------
-// Medidas do aparelho de vela e do posto de comando
+// Measurements of the sail rig and of the command station
 // ---------------------------------------------------------------------------
 
-/** Z do mastro, no sistema local do navio. */
+/** Mast Z, in the ship's local frame. */
 export const MAST_Z = tToZ(STATIONS.mast);
-/** O mastro nasce no porão, sobre a sobrequilha — como num navio de verdade. */
+/** The mast starts in the hold, on the keelson — like on a real ship. */
 export const MAST_BASE_Y = HOLD_FLOOR_Y;
 export const MAST_TOP_Y = 12.2;
-/** Verga superior, que sustenta a vela. */
+/** Upper yard, which carries the sail. */
 const YARD_Y = 9.0;
 const YARD_HALF = 3.75;
-/** Retranca inferior, que estica o pé da vela. */
+/** Lower boom, which stretches the foot of the sail. */
 const BOOM_Y = 3.55;
 const BOOM_HALF = 3.6;
 const CROW_NEST_Y = 10.25;
 
 /**
- * Altura do eixo do timão e raio do aro.
+ * Height of the helm axle and radius of the rim.
  *
- * O raio caiu de 0,62 para 0,55 por causa da **linha do olho**, não de escala.
- * O timoneiro fica 85 cm a ré da roda com o olho a 3,48 m; com o aro em 0,62 e
- * punhos saindo 26 cm dele, o punho de cima terminava em 3,50 m — dois
- * centímetros acima do olho e bem no centro da tela. O jogador governava com uma
- * peça de madeira tapando exatamente o ponto para onde a proa aponta. Em 0,55, e
- * com os punhos mais curtos, o topo da roda cai para 3,34 m e a vista abre por
- * cima dela; 1,1 m de diâmetro continua sendo roda de chalupa, não de galeão.
+ * The radius dropped from 0.62 to 0.55 because of the **eye line**, not scale.
+ * The helmsman stands 85 cm aft of the wheel with his eye at 3.48 m; with the rim
+ * at 0.62 and spoke handles sticking 26 cm out of it, the top handle ended at
+ * 3.50 m — two centimeters above the eye and dead center on screen. The player
+ * steered with a piece of wood covering exactly the point the bow is aimed at. At
+ * 0.55, and with shorter handles, the top of the wheel drops to 3.34 m and the
+ * view opens above it; 1.1 m of diameter is still a sloop's wheel, not a
+ * galleon's.
  */
 export const WHEEL_Y = 2.62;
 const WHEEL_RADIUS = 0.55;
-/** Distância do eixo central aos montantes que seguram o eixo da roda. */
+/** Distance from the centerline to the posts that hold the wheel's axle. */
 const WHEEL_POST_X = 0.95;
 
 /**
- * Cantos da vela, no sistema local do navio.
+ * Corners of the sail, in the ship's local frame.
  *
- * Exportado porque `SailSim` prende as bordas do tecido exatamente aqui: se as
- * duas descrições divergissem, a vela nasceria solta da própria verga.
+ * Exported because `SailSim` pins the edges of the cloth exactly here: if the two
+ * descriptions diverged, the sail would start out loose from its own yard.
  */
 export const SAIL_FRAME = {
   topY: YARD_Y - 0.14,
@@ -183,24 +185,24 @@ export const SAIL_FRAME = {
 } as const;
 
 /**
- * Raio do mastro numa altura absoluta — o cordame precisa saber onde encostar, e
- * a detecção de impacto precisa saber onde a bala para.
+ * Mast radius at an absolute height — the rigging needs to know where to land,
+ * and impact detection needs to know where the cannonball stops.
  */
 export function mastRadius(y: number): number {
   const h = (y - MAST_BASE_Y) / (MAST_TOP_Y - MAST_BASE_Y);
   return 0.24 - 0.13 * Math.min(Math.max(h, 0), 1);
 }
 
-/** Altura do piso do tombadilho no eixo central, onde o timoneiro fica. */
+/** Height of the quarterdeck floor on the centerline, where the helmsman stands. */
 function quarterdeckCenterY(t: number): number {
   return QUARTERDECK_Y + deckCamber(0, deckHalfWidth(t));
 }
 
 // ---------------------------------------------------------------------------
-// Peças estáticas
+// Static parts
 // ---------------------------------------------------------------------------
 
-/** Uma lanterna do navio: onde ela está e se ela apaga de dia. */
+/** One of the ship's lanterns: where it is and whether it goes out by day. */
 export interface LanternSpot {
   position: THREE.Vector3;
   /**

@@ -1,44 +1,45 @@
 /**
- * Teste do servidor de sala — dois capitães de verdade, sem navegador.
+ * Room server test — two real captains, no browser.
  *
- * É o único teste do projeto que **não** roda no navegador, e por um motivo que
- * não é gosto: o que ele exercita é o Worker, e o Worker não está no bundle do
- * jogo. Ele abre WebSockets contra um `wrangler dev` vivo e conversa o mesmo
- * lobby que `RoomClient` conversa.
+ * It's the only test in the project that **doesn't** run in the browser, and
+ * for a reason that isn't taste: what it exercises is the Worker, and the Worker
+ * isn't in the game's bundle. It opens WebSockets against a live `wrangler dev`
+ * and talks the same lobby `RoomClient` talks.
  *
  * ```sh
- * npm run dev:server          # num terminal
- * npm run test:server         # no outro
+ * npm run dev:server          # in one terminal
+ * npm run test:server         # in the other
  * ```
  *
- * ## Por que ele existe
+ * ## Why it exists
  *
- * Porque a sala é a única parte do duelo que **não dá para testar jogando**. Um
- * defeito de física aparece na tela; um defeito de pareamento aparece como duas
- * pessoas em telas de espera diferentes, cada uma achando que o problema é a
- * internet da outra. Foi exatamente o que aconteceu com a partida rápida: a fila
- * entregava uma vaga que já não servia, quem a recebia sentava sozinho fora da
- * fila, e do lado de fora isso se lê como "não funciona" e mais nada.
+ * Because the room is the one part of the duel that **can't be tested by
+ * playing**. A physics defect shows up on screen; a matchmaking defect shows up
+ * as two people on different waiting screens, each one sure the problem is the
+ * other one's internet. That is exactly what happened with quick match: the
+ * queue handed out a slot that was no longer any good, whoever got it sat alone
+ * outside the queue, and from the outside that reads as "it doesn't work" and
+ * nothing else.
  *
- * Os casos daqui são todos regressões: cada um falhou de verdade em algum
- * momento, e o que se prova é a **conversa**, não o estado interno da sala —
- * nada aqui espia o `storage` de um Durable Object.
+ * The cases here are all regressions: each one really failed at some point, and
+ * what gets proven is the **conversation**, not the room's internal state —
+ * nothing here peeks at a Durable Object's `storage`.
  */
 
-/** Onde o `wrangler dev` está escutando. A porta é fixa; ver `wrangler.jsonc`. */
+/** Where `wrangler dev` is listening. The port is fixed; see `wrangler.jsonc`. */
 const BASE = process.env.ROOM_SERVER ?? 'ws://127.0.0.1:8930';
 
 /**
- * A versão do protocolo, escrita à mão de propósito.
+ * The protocol version, written by hand on purpose.
  *
- * Importar `PROTOCOL_VERSION` faria o teste concordar com o código por
- * construção — inclusive no dia em que o número subir sem o servidor ser
- * publicado, que é o único dia em que esta verificação teria alguma coisa a
- * dizer.
+ * Importing `PROTOCOL_VERSION` would make the test agree with the code by
+ * construction — including on the day the number goes up without the server
+ * being published, which is the one day this check would have anything to
+ * say.
  */
 const PROTOCOL_VERSION = 7;
 
-/** Quanto se espera por uma mensagem antes de desistir dela. */
+/** How long a message is waited for before it gets given up on. */
 const TIMEOUT_MS = 8000;
 
 function open(path) {
@@ -86,11 +87,11 @@ function opened(socket) {
 }
 
 /**
- * Espera uma mensagem daquele tipo e a **tira** da caixa.
+ * Waits for a message of that kind and **takes** it out of the inbox.
  *
- * Tirar importa: várias mensagens chegam em rajada (`welcome` e `peer` saem uma
- * atrás da outra quando o segundo capitão entra), e um teste que só olhasse a
- * última perderia metade delas.
+ * Taking it out matters: several messages arrive in a burst (`welcome` and
+ * `peer` come out one behind the other when the second captain joins), and a
+ * test that only looked at the last one would miss half of them.
  */
 async function expect(socket, kind) {
   const deadline = Date.now() + TIMEOUT_MS;
@@ -110,12 +111,12 @@ async function expect(socket, kind) {
 }
 
 /**
- * Um código de sala que quase certamente ninguém abriu.
+ * A room code that almost certainly nobody has opened.
  *
- * O alfabeto é o mesmo de `CODE_ALPHABET` — o servidor recusa qualquer coisa
- * fora dele antes de instanciar sala nenhuma. Um milhão de combinações contra
- * as poucas salas que existem num instante qualquer faz "quase certamente" ser
- * bom o bastante para um teste.
+ * The alphabet is the same as `CODE_ALPHABET` — the server refuses anything
+ * outside it before instantiating any room at all. A million combinations
+ * against the few rooms that exist at any given instant makes "almost
+ * certainly" good enough for a test.
  */
 function unusedCode() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -130,7 +131,7 @@ const send = (socket, message) => socket.send(JSON.stringify(message));
 const hello = (socket, nickname, intent, perfScore = 70) =>
   send(socket, { t: 'hello', v: PROTOCOL_VERSION, nickname, intent, perfScore });
 
-/** Abre uma sala por código e põe os dois lá dentro, prontos para duelar. */
+/** Opens a room by code and puts both sides inside, ready to duel. */
 async function pairByCode(perfA = 70, perfB = 70) {
   const host = open('/room/new');
   await opened(host);
@@ -155,18 +156,19 @@ async function pairByCode(perfA = 70, perfB = 70) {
 const cases = [];
 
 /**
- * Deixa a fila vazia antes de um caso que depende dela estar.
+ * Leaves the queue empty before a case that depends on it being empty.
  *
- * ⚠️ **Obrigatório contra o servidor publicado, e a falta disto reprovou um teste
- * que estava certo.** Lá a fila é global e tem gente de verdade dentro: se alguém
- * estiver esperando, o primeiro socket do teste é mandado para a sala **dele** e
- * pareado com ele, o que é o comportamento correto do servidor e a ruína da
- * asserção. O sintoma foi um `peer` com o apelido `Sailor` — que é justamente a
- * assinatura do defeito que o caso seguinte procura, e ali era só o nome padrão de
- * um capitão que não digitou o dele.
+ * ⚠️ **Mandatory against the published server, and the lack of it failed a test
+ * that was right.** There the queue is global and has real people in it: if
+ * somebody is waiting, the test's first socket is sent into **their** room and
+ * paired with them, which is the server's correct behavior and the ruin of the
+ * assertion. The symptom was a `peer` with the nickname `Sailor` — which is
+ * exactly the signature of the defect the next case looks for, and there it was
+ * only the default name of a captain who never typed one.
  *
- * A isca resolve os dois casos de uma vez: se havia alguém esperando, ela o pega e
- * a vaga se esvazia; se não havia, ela vira a dona da vaga e devolve ao fechar.
+ * The decoy settles both cases at once: if somebody was waiting, it takes them
+ * and the slot empties; if nobody was, it becomes the slot's owner and hands it
+ * back when it closes.
  */
 async function drainQueue() {
   const bait = open('/queue');
@@ -174,7 +176,7 @@ async function drainQueue() {
   hello(bait, 'Isca', 'queue');
   await expect(bait, 'welcome');
   bait.close(1000, 'left');
-  // A sala precisa de um instante para ver o fechamento e avisar a fila.
+  // The room needs a moment to see the close and tell the queue.
   await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
@@ -190,7 +192,7 @@ async function test(nome, run) {
       try {
         socket.close();
       } catch {
-        // Já fechado.
+        // Already closed.
       }
     }
   }
@@ -215,8 +217,8 @@ await test('a fila pareia dois capitães', async (keep) => {
   const roleA = await expect(first, 'peer');
   const roleB = await expect(second, 'peer');
   if (roleA.role === roleB.role) throw new Error(`both got role "${roleA.role}"`);
-  // Quem abriu a sala tem preferência, e só perde o comando para uma máquina
-  // visivelmente melhor. Ver `HOST_SWAP_MARGIN`.
+  // Whoever opened the room has preference, and only loses command to a machine
+  // that is visibly better. See `HOST_SWAP_MARGIN`.
   if (roleA.role !== 'host') throw new Error(`the stronger machine got "${roleA.role}"`);
   if (roleA.nickname !== 'Beto' || roleB.nickname !== 'Ana') {
     throw new Error('each side must see the other one’s name');
@@ -233,11 +235,11 @@ await test('a fila pareia dois capitães', async (keep) => {
 await test('a fila não decide quem simula antes de os dois se apresentarem', async (keep) => {
   await drainQueue();
 
-  // ⚠️ As duas conexões abrem **antes** de qualquer `hello`, e é isso que este
-  // caso tem de diferente do de cima. É o que acontece quando dois amigos clicam
-  // em "procurar capitão" no mesmo instante: os dois sockets entram na sala e só
-  // depois os dois nomes chegam. Era a única sequência em que a partida rápida
-  // quebrava, e ela quebrava metade das vezes.
+  // ⚠️ Both connections open **before** any `hello`, and that is what this case
+  // has that the one above doesn't. It's what happens when two friends click
+  // "find a captain" at the same instant: both sockets enter the room and only
+  // then do both names arrive. It was the only sequence in which quick match
+  // broke, and it broke half the time.
   const ana = open('/queue');
   keep.push(ana);
   await opened(ana);
@@ -246,8 +248,8 @@ await test('a fila não decide quem simula antes de os dois se apresentarem', as
   keep.push(beto);
   await opened(beto);
 
-  // Só a Ana se apresentou. A sala tem dois sockets e um nome — não há com o quê
-  // comparar, então não há nada a decidir.
+  // Only Ana has introduced herself. The room has two sockets and one name —
+  // there is nothing to compare against, so there is nothing to decide.
   hello(ana, 'Ana', 'queue', 90);
   await expect(ana, 'welcome');
   await new Promise((resolve) => setTimeout(resolve, 400));
@@ -261,13 +263,13 @@ await test('a fila não decide quem simula antes de os dois se apresentarem', as
   const roleA = await expect(ana, 'peer');
   const roleB = await expect(beto, 'peer');
 
-  // `Sailor` aqui é a assinatura exata do defeito: era o nome de fábrica de quem
-  // ainda não tinha falado, e era o que o outro lado recebia como adversário.
+  // `Sailor` here is the exact signature of the defect: it was the factory name
+  // of whoever hadn't spoken yet, and it was what the other side got as opponent.
   if (roleA.nickname !== 'Beto' || roleB.nickname !== 'Ana') {
     throw new Error(`each side must see the other one’s name; got ${roleA.nickname}/${roleB.nickname}`);
   }
-  // E o desempate volta a valer: quem chegou primeiro fica com o comando, e a nota
-  // do outro é a de verdade em vez de zero.
+  // And the tiebreak holds again: whoever arrived first keeps command, and the
+  // other one's score is the real one instead of zero.
   if (roleA.role !== 'host') throw new Error(`the captain who arrived first got "${roleA.role}"`);
   if (roleB.role !== 'guest') throw new Error(`the second captain got "${roleB.role}"`);
 });
@@ -275,15 +277,15 @@ await test('a fila não decide quem simula antes de os dois se apresentarem', as
 await test('a fila não senta ninguém numa vaga que já não serve', async (keep) => {
   await drainQueue();
 
-  // Ana entra na fila e vira a vaga guardada.
+  // Ana joins the queue and becomes the slot being held.
   const ana = open('/queue');
   keep.push(ana);
   await opened(ana);
   hello(ana, 'Ana', 'queue');
   const dead = await expect(ana, 'welcome');
 
-  // Alguém entra na sala dela **por código**, e o duelo começa. A vaga continua
-  // apontando para lá e agora ela não serve a mais ninguém.
+  // Somebody joins her room **by code**, and the duel starts. The slot still
+  // points there and now it is no good to anyone else.
   const zeca = open(`/room/${dead.code}`);
   keep.push(zeca);
   await opened(zeca);
@@ -294,9 +296,9 @@ await test('a fila não senta ninguém numa vaga que já não serve', async (kee
   send(zeca, { t: 'ready' });
   await expect(ana, 'start');
 
-  // Beto entra na fila e recebe aquela vaga morta. Ele tem de acabar numa sala
-  // nova, **e dentro da fila** — antes ele sentava sozinho, fora dela, esperando
-  // um adversário que nunca seria mandado para lá.
+  // Beto joins the queue and gets that dead slot. He has to end up in a new
+  // room, **and inside the queue** — before, he sat alone outside it, waiting
+  // for an opponent who would never be sent there.
   const beto = open('/queue');
   keep.push(beto);
   await opened(beto);
@@ -304,7 +306,7 @@ await test('a fila não senta ninguém numa vaga que já não serve', async (kee
   const fresh = await expect(beto, 'welcome');
   if (fresh.code === dead.code) throw new Error('sent into the room that was already duelling');
 
-  // A prova de que ele está mesmo na fila: o próximo a entrar cai com ele.
+  // The proof that he really is in the queue: the next one to join lands with him.
   const caio = open('/queue');
   keep.push(caio);
   await opened(caio);
@@ -323,7 +325,7 @@ await test('quem desiste da fila devolve a vaga', async (keep) => {
   hello(ana, 'Ana', 'queue');
   const abandoned = await expect(ana, 'welcome');
   ana.close(1000, 'left');
-  // A sala precisa de um instante para ver o fechamento e avisar a fila.
+  // The room needs a moment to see the close and tell the queue.
   await new Promise((resolve) => setTimeout(resolve, 700));
 
   const beto = open('/queue');
@@ -344,11 +346,11 @@ await test('a sala por código pareia e retransmite quadro', async (keep) => {
 });
 
 await test('um código que ninguém abriu é recusado com motivo', async (keep) => {
-  // ⚠️ Sorteado, e **não** um `ZZZZ` cravado. Este teste também roda contra o
-  // servidor publicado, onde as salas são globais e sobrevivem à corrida: um
-  // código fixo passa na primeira vez e reprova em todas as seguintes, porque a
-  // primeira o criou. Foi o que aconteceu — e o que o teste denunciou não foi o
-  // servidor, foi ele mesmo.
+  // ⚠️ Drawn at random, and **not** a hardcoded `ZZZZ`. This test also runs
+  // against the published server, where rooms are global and outlive the run: a
+  // fixed code passes the first time and fails every time after, because the
+  // first run created it. That is what happened — and what the test exposed
+  // wasn't the server, it was itself.
   const lost = open(`/room/${unusedCode()}`);
   keep.push(lost);
   await opened(lost);
@@ -376,7 +378,7 @@ await test('um terceiro na porta não derruba o duelo dos dois', async (keep) =>
   hello(curious, 'Curioso', 'join');
   await expect(curious, 'error');
 
-  // O duelo continua de pé, e ninguém foi mandado para casa.
+  // The duel is still standing, and nobody was sent home.
   host.send(new Uint8Array([2, 0, 0, 0]).buffer);
   await expect(guest, 'binary');
   if (host.closed || guest.closed) throw new Error('the duel dropped because of the third socket');
@@ -439,15 +441,15 @@ await test('quem foi pareado e ficou sozinho antes do começo é avisado', async
   await expect(ana, 'peer');
   await expect(beto, 'peer');
 
-  // Beto desiste na janela entre o pareamento e o `start` — meio segundo em que
-  // os dois já se conhecem e o duelo ainda não começou. Sem aviso, a Ana ficava na
-  // tela de "adversário a bordo" para sempre: a espera já tinha acabado, então não
-  // havia nem cronômetro andando para sugerir que algo estava errado.
+  // Beto gives up in the window between matchmaking and `start` — half a second
+  // in which the two already know each other and the duel hasn't begun. With no
+  // warning, Ana sat on the "opponent aboard" screen forever: the wait was over,
+  // so there wasn't even a clock running to suggest something was wrong.
   beto.close(1000, 'left');
   const error = await expect(ana, 'error');
   if (!/left/i.test(error.reason)) throw new Error(`unhelpful reason: ${error.reason}`);
 
-  // Um instante para a sala devolver a vaga à fila antes do próximo caso.
+  // A moment for the room to hand the slot back to the queue before the next case.
   await new Promise((resolve) => setTimeout(resolve, 400));
 });
 

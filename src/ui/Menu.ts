@@ -1,38 +1,39 @@
 /**
- * As telas de sobreposição: título, duelo contra a máquina, ajustes, controles e
- * fim de partida — mais as três de jogo em rede, que vêm de `OnlineMenu`.
+ * The overlay screens: title, duel against the machine, settings, controls and end
+ * of match — plus the three networked ones, which come from `OnlineMenu`.
  *
- * As daqui moram juntas porque são **uma família**: mesmo véu, mesma folha, mesma
- * navegação, e nunca mais de uma visível. Separá-las em cinco módulos duplicaria a
- * lógica de mostrar/esconder e a de foco em quatro lugares para ganhar nada — quem
- * mexer no véu quer mexer em todas de uma vez.
+ * The ones in here live together because they are **one family**: same veil, same
+ * sheet, same navigation, and never more than one visible. Splitting them into five
+ * modules would duplicate the show/hide logic and the focus logic across four places
+ * to gain nothing — whoever touches the veil wants to touch all of them at once.
  *
- * ## Por que o online é o único que sai daqui
+ * ## Why online is the only one that leaves this file
  *
- * Tudo neste arquivo é **síncrono**: nada muda sem um clique ou um passo de foco.
- * As telas de rede são o oposto — o conteúdo delas muda por evento externo (o
- * socket), num relógio que não é o do jogador. `OnlineMenu` constrói aquele DOM e
- * o registra em `screens`; véu, foco, `back()` e navegação por controle continuam
- * sendo daqui. É extração de *construção*, não de *comportamento*.
+ * Everything in this file is **synchronous**: nothing changes without a click or a
+ * focus step. The network screens are the opposite — their content changes on an
+ * external event (the socket), on a clock that is not the player's. `OnlineMenu`
+ * builds that DOM and registers it in `screens`; veil, focus, `back()` and gamepad
+ * navigation are still handled here. It is an extraction of *construction*, not of
+ * *behavior*.
  *
- * ## Navegação
+ * ## Navigation
  *
- * Tudo aqui é `<button>` de verdade, e não `div` com `onclick`. Sai de graça o que
- * seria caro reimplementar: ordem de tabulação, `Enter`/`Espaço`, foco visível,
- * leitura por leitor de tela e o cursor certo. O d-pad e o analógico esquerdo viram
- * um passo de foco entre os botões da tela ativa, o que faz o controle funcionar sem
- * um sistema de foco paralelo ao do navegador.
+ * Everything here is a real `<button>`, not a `div` with an `onclick`. What would be
+ * expensive to reimplement comes for free: tab order, `Enter`/`Space`, visible focus,
+ * screen-reader announcement and the right cursor. The d-pad and the left stick
+ * become a focus step between the buttons of the active screen, which makes the
+ * gamepad work without a focus system running in parallel with the browser's.
  *
- * Os dois eixos não fazem a mesma coisa, e é o que torna a tela de Ajustes operável
- * só no controle: **vertical troca de campo, horizontal mexe no campo focado** —
- * arrasta o deslizante, alterna a opção do grupo, vira o interruptor. Ver
- * `navigate`.
+ * The two axes do not do the same thing, and that is what makes the Settings screen
+ * operable on the gamepad alone: **vertical changes field, horizontal moves the
+ * focused field** — drags the slider, cycles the option in the group, flips the
+ * toggle. See `navigate`.
  *
- * O gamepad é lido direto de `input.gamepad`, e não das ações de `Input`: com o
- * menu aberto a entrada de jogo está congelada (`setCaptured`), e é justamente isso
- * que se quer — `A` no menu não pode virar pulo a bordo no quadro seguinte. As
- * únicas ações que `Input` deixa passar congelado são `pause` e `controls`, que é o
- * que faz o botão Menu fechar o que ele abriu; quem as consome é o laço principal.
+ * The gamepad is read straight from `input.gamepad`, not from `Input`'s actions: with
+ * the menu open game input is frozen (`setCaptured`), and that is exactly what is
+ * wanted — `A` in the menu must not turn into a jump on deck on the next frame. The
+ * only actions `Input` lets through while frozen are `pause` and `controls`, which is
+ * what makes the Menu button close what it opened; the main loop consumes them.
  */
 
 import { DIFFICULTIES, DIFFICULTY_ORDER, type DifficultyId } from '../ai/Difficulty';
@@ -58,7 +59,7 @@ import {
 } from './OnlineMenu';
 import '../styles/menu.css';
 
-/** Qual tela está no ar. `none` é o jogo rodando, sem sobreposição. */
+/** Which screen is up. `none` is the game running, with no overlay. */
 export type Screen =
   | 'none'
   | 'title'
@@ -71,11 +72,11 @@ export type Screen =
   | 'outcome';
 
 /**
- * Telas de onde o "Voltar" tem para onde ir.
+ * Screens the "Back" has somewhere to go from.
  *
- * `title` é a raiz e `outcome` é um beco com saídas próprias ("Sail again" e
- * "Main menu") — em nenhuma das duas `Esc`/`B` deve fazer nada, e é por isso que
- * a regra é uma lista e não um `screen !== 'title'`.
+ * `title` is the root and `outcome` is a dead end with exits of its own ("Sail
+ * again" and "Main menu") — on neither of them should `Esc`/`B` do anything, and
+ * that is why the rule is a list and not a `screen !== 'title'`.
  */
 const RETURNABLE: ReadonlySet<Screen> = new Set<Screen>([
   'solo',
@@ -86,7 +87,7 @@ const RETURNABLE: ReadonlySet<Screen> = new Set<Screen>([
   'controls',
 ]);
 
-/** Ações que a tela de controles lista, na ordem em que se aprende o navio. */
+/** Actions the controls screen lists, in the order you learn the ship. */
 const LISTED_ACTIONS: readonly Action[] = [
   'moveForward',
   'moveLeft',
@@ -105,7 +106,7 @@ const LISTED_ACTIONS: readonly Action[] = [
   'pause',
 ];
 
-/** Rótulos das opções de tempo. A lista de modos vem de `WEATHER_MODES`. */
+/** Labels for the weather options. The list of modes comes from `WEATHER_MODES`. */
 const WEATHER_LABELS: Record<WeatherMode, string> = {
   dynamic: 'Live',
   clear: 'Clear',
@@ -115,63 +116,64 @@ const WEATHER_LABELS: Record<WeatherMode, string> = {
 };
 
 /**
- * Leitura do analógico esquerdo que conta como uma direção de menu.
+ * Left-stick reading that counts as a menu direction.
  *
- * O número é baixo porque o valor que chega de `GamepadManager` **já passou por
- * uma curva quadrática** (ver `applyDeadzone`): 0,2 de leitura corresponde a
- * pouco mais de meio curso físico com a zona morta padrão, que é o gesto que se
- * espera de quem quer descer um item. Comparar contra 0,5 aqui exigiria três
- * quartos do curso, e a navegação pareceria emperrada.
+ * The number is low because the value arriving from `GamepadManager` **has
+ * already been through a quadratic curve** (see `applyDeadzone`): a reading of
+ * 0.2 matches a little over half the physical travel with the default deadzone,
+ * which is the gesture expected from someone who wants to step down one item.
+ * Comparing against 0.5 here would demand three quarters of the travel, and the
+ * navigation would feel sticky.
  */
 const NAV_STICK = 0.2;
 
 /**
- * Repetição de uma direção presa, em segundos: espera até a primeira repetição e
- * intervalo entre as seguintes.
+ * Repeat of a held direction, in seconds: the wait until the first repeat and the
+ * interval between the ones after it.
  *
- * O primeiro passo é sempre imediato — quem toca o d-pad quer um passo, não uma
- * espera. A pausa que vem depois é o que separa "andei um item" de "atravessei a
- * barra de volume", e o intervalo curto depois dela é o que torna suportável
- * arrastar um deslizante de 0 a 100% com o controle.
+ * The first step is always immediate — whoever taps the d-pad wants a step, not a
+ * wait. The pause that follows is what separates "moved one item" from "crossed
+ * the volume bar", and the short interval after it is what makes dragging a
+ * slider from 0 to 100% with the gamepad bearable.
  */
 const NAV_FIRST_REPEAT = 0.42;
 const NAV_REPEAT = 0.08;
 
 /**
- * O que conta como um passo de foco.
+ * What counts as a focus step.
  *
- * Uma constante, e não o seletor escrito duas vezes: `show` usa isto para escolher
- * onde o foco entra e `moveFocus` para saber por onde ele anda. Enquanto eram dois
- * literais, um campo novo aparecia na navegação do d-pad mas nunca recebia o foco
- * de entrada — e o sintoma era um primeiro `↓` que parecia não fazer nada.
+ * A constant, and not the selector written twice: `show` uses this to pick where
+ * focus lands and `moveFocus` to know where it can walk. While they were two
+ * literals, a new field would show up in d-pad navigation but never take the entry
+ * focus — and the symptom was a first `↓` that looked like it did nothing.
  *
- * Botão desabilitado fica de fora: ele não recebe foco, e incluí-lo daria um passo
- * de d-pad que some no vazio.
+ * A disabled button is left out: it takes no focus, and including it would give a
+ * d-pad step that vanishes into thin air.
  */
 const FOCUSABLE = 'button:not([disabled]), input[type="range"], input[type="text"]';
 
 /**
- * Escreve uma preferência numérica.
+ * Writes a numeric preference.
  *
- * O `as` é seguro por construção: todo campo listado em `RangedPreference` é
- * `number` em `PlayerPreferences`. A alternativa era uma cadeia de `if` por
- * campo, que é o tipo de código que envelhece mal a cada ajuste novo.
+ * The `as` is safe by construction: every field listed in `RangedPreference` is a
+ * `number` in `PlayerPreferences`. The alternative was a chain of `if`s, one per
+ * field, which is the kind of code that ages badly with every new setting.
  */
 function updateNumber(preference: RangedPreference, value: number): void {
   settings.update({ [preference]: value } as Partial<PlayerPreferences>);
 }
 
-/** Duas teclas opostas viram um eixo. Apertadas juntas se anulam. */
+/** Two opposite keys become an axis. Pressed together they cancel out. */
 function axis(positive: boolean, negative: boolean): -1 | 0 | 1 {
   return positive === negative ? 0 : positive ? 1 : -1;
 }
 
 /**
- * Aferições mostradas em cada cartão de capitão, de 0 a 1.
+ * Meters shown on each captain card, from 0 to 1.
  *
- * São **derivadas dos presets**, não digitadas: mudar `aimSigma` em `Difficulty`
- * move a barrinha sozinho. Precisão e reação são invertidas porque nos dois casos
- * o número baixo é o bom.
+ * They are **derived from the presets**, not typed in: changing `aimSigma` in
+ * `Difficulty` moves the little bar on its own. Gunnery and reaction are inverted
+ * because in both the low number is the good one.
  */
 function meters(id: DifficultyId): readonly { label: string; value: number }[] {
   const preset = DIFFICULTIES[id];
@@ -183,12 +185,12 @@ function meters(id: DifficultyId): readonly { label: string; value: number }[] {
 }
 
 /**
- * Uma dica de rodapé.
+ * A footer hint.
  *
- * Com `action`, o glifo troca sozinho quando o jogador muda de aparelho — que é
- * o ponto: a linha dizia `Tab`, `Esc` e `C` para sempre, inclusive com o
- * controle na mão. `key` é a saída para as dicas que não são uma ação do jogo
- * (um `W / S` de escada, por exemplo).
+ * With `action`, the glyph swaps on its own when the player changes device — which
+ * is the point: the line used to say `Tab`, `Esc` and `C` forever, gamepad in
+ * hand included. `key` is the way out for hints that are not a game action (a
+ * ladder's `W / S`, for example).
  */
 export interface Hint {
   action?: Action;
@@ -197,44 +199,44 @@ export interface Hint {
 }
 
 export interface MenuCallbacks {
-  /** O jogador soltou amarras contra a máquina. */
+  /** The player cast off against the machine. */
   onStartSolo(difficulty: DifficultyId): void;
-  /** Voltou ao menu de título a partir do fim de partida. */
+  /** Came back to the title menu from the end of a match. */
   onQuitToTitle(): void;
-  /** Qualquer clique ou movimento de foco, para o áudio responder. */
+  /** Any click or focus move, so the audio can answer. */
   onNavigate?(kind: 'move' | 'confirm' | 'back'): void;
-  /** O que os botões das telas de rede acionam. Ver `OnlineMenu`. */
+  /** What the buttons on the network screens trigger. See `OnlineMenu`. */
   readonly online: OnlineMenuCallbacks;
 }
 
-/** Como uma partida terminou, para a tela de fim saber o que oferecer. */
+/** How a match ended, so the outcome screen knows what to offer. */
 export type OutcomeMode = 'solo' | 'online';
 
 /**
- * Um campo que responde a ←/→ sem ser um deslizante, um grupo de opções ou um
- * interruptor.
+ * A field that answers ←/→ without being a slider, an option group or a toggle.
  *
- * Existe para `cycleOption` continuar sendo a regra horizontal do menu inteiro
- * enquanto telas de fora acrescentam campos próprios. Sem isto, `Menu` teria de
- * conhecer a classe CSS de cada widget novo — e o que é um caractere de código de
- * sala não é assunto deste arquivo.
+ * It exists so `cycleOption` stays the horizontal rule for the whole menu while
+ * outside screens add fields of their own. Without it, `Menu` would have to know
+ * the CSS class of every new widget — and what counts as one character of a room
+ * code is not this file's business.
  *
- * @returns `false` quando o passo não foi consumido: quem assume é `moveFocus`, e
- * o foco escapa para o campo vizinho. É o mesmo contrato da ponta de um grupo.
+ * @returns `false` when the step was not consumed: `moveFocus` takes over, and the
+ * focus escapes to the neighboring field. It is the same contract as the end of a
+ * group.
  */
 export interface MenuWidget {
-  /** ←/→ no campo focado. */
+  /** ←/→ on the focused field. */
   cycle(direction: 1 | -1): boolean;
   /**
-   * ↑/↓ no campo focado, para os campos em que o eixo natural é o vertical.
+   * ↑/↓ on the focused field, for the fields whose natural axis is the vertical one.
    *
-   * É a exceção declarada à regra "vertical troca de campo", e ela existe por um
-   * caso: um código de sala é lido da esquerda para a direita, então ←/→ têm de
-   * andar entre os caracteres — é o gesto que qualquer pessoa tenta primeiro. Se
-   * a letra mudasse no horizontal, atravessar o código exigiria o eixo que o olho
-   * usa para lê-lo, e sair do campo ficaria sem saída nenhuma.
+   * It is the declared exception to the "vertical changes field" rule, and it
+   * exists for one case: a room code is read from left to right, so ←/→ have to
+   * walk between the characters — it is the gesture anyone tries first. If the
+   * letter changed on the horizontal, crossing the code would demand the axis the
+   * eye uses to read it, and leaving the field would have no way out at all.
    *
-   * Quem devolve `false` aqui devolve o passo a `moveFocus`, como sempre.
+   * Returning `false` here hands the step back to `moveFocus`, as always.
    */
   step?(direction: 1 | -1): boolean;
 }
@@ -246,20 +248,21 @@ export class Menu {
   private screen: Screen = 'title';
   private difficulty: DifficultyId = 'corsair';
 
-  /** As três telas de rede. Constrói o DOM delas; a navegação continua sendo daqui. */
+  /** The three network screens. Builds their DOM; navigation is still handled here. */
   private readonly online: OnlineMenu;
 
   /**
-   * A carta "Duel another captain".
+   * The "Duel another captain" card.
    *
-   * Guardada porque ela é a única da tela que pode nascer morta: sem servidor de
-   * sala configurado não há jogo em rede, e um botão que abre uma tela para dar
-   * erro é pior que um botão apagado que diz o porquê. Ver `setOnlineAvailable`.
+   * Kept because it is the only one on the screen that can be born dead: with no
+   * room server configured there is no network play, and a button that opens a
+   * screen only to fail is worse than a dimmed button that says why. See
+   * `setOnlineAvailable`.
    *
-   * `!` porque quem a cria é `buildTitle`, chamada do construtor.
+   * `!` because what creates it is `buildTitle`, called from the constructor.
    */
   private onlineCard!: HTMLButtonElement;
-  /** A frase de chamada original da carta, para repor quando o modo voltar. */
+  /** The card's original blurb, to put back when the mode returns. */
   private onlineBlurb = '';
 
   private readonly choiceButtons = new Map<DifficultyId, HTMLButtonElement>();
@@ -267,35 +270,35 @@ export class Menu {
   private readonly outcomeTitle: HTMLHeadingElement;
   private readonly outcomeBlurb: HTMLParagraphElement;
   private readonly tally: HTMLDivElement;
-  /** "Sail again", que só existe contra a máquina — ver `showOutcome`. */
+  /** "Sail again", which only exists against the machine — see `showOutcome`. */
   private readonly outcomeAgain: HTMLButtonElement;
-  /** Linhas da tela de controles, para trocar os glifos ao vivo. */
+  /** Rows of the controls screen, to swap the glyphs live. */
   private readonly controlRows: {
     action: Action;
     keyboard: HTMLElement;
     gamepad: HTMLElement;
   }[] = [];
-  /** Glifos das linhas de dica, que trocam de aparelho junto com a tabela. */
+  /** Glyphs of the hint lines, which change device along with the table. */
   private readonly hintGlyphs: { action: Action; item: HTMLElement; glyph: HTMLElement }[] = [];
-  /** Aparelho + layout já pintados, para não reescrever o DOM a cada quadro. */
+  /** Device + layout already painted, so the DOM is not rewritten every frame. */
   private lastGlyphKey: string | null = null;
 
-  /** Direção de menu sustentada no controle, e o tempo até o próximo passo. */
+  /** Menu direction held on the gamepad, and the time until the next step. */
   private navX = 0;
   private navY = 0;
   private navRepeat = 0;
 
   /**
-   * Por onde se chegou até aqui, para o "Voltar" desfazer um passo de cada vez.
+   * The path taken to get here, so "Back" undoes one step at a time.
    *
-   * Era um campo só (`returnTo`), e bastava enquanto ajustes e controles eram as
-   * únicas subtelas. Com `título → online → entrar em sala`, um campo só perde o
-   * degrau do meio e o Voltar salta para o título. Empilhar `'none'` continua
-   * sendo o que faz `Esc` no meio do duelo devolver o jogador ao convés.
+   * It was a single field (`returnTo`), and that was enough while settings and
+   * controls were the only subscreens. With `title → online → join a room`, a
+   * single field loses the middle rung and Back jumps to the title. Pushing
+   * `'none'` is still what makes `Esc` mid-duel hand the player back to the deck.
    */
   private readonly history: Screen[] = [];
 
-  /** Campos de telas de fora que respondem a ←/→. Ver `MenuWidget`. */
+  /** Fields from outside screens that answer ←/→. See `MenuWidget`. */
   private readonly widgets = new WeakMap<HTMLElement, MenuWidget>();
 
   constructor(
@@ -317,8 +320,8 @@ export class Menu {
     this.tally = outcome.tally;
     this.outcomeAgain = outcome.again;
 
-    // Depois das daqui: o construtor de `OnlineMenu` chama `registerWidget`, que
-    // depende de `this.widgets` — e campos de classe já estão inicializados aqui.
+    // After the ones from here: `OnlineMenu`'s constructor calls `registerWidget`,
+    // which depends on `this.widgets` — and class fields are already initialized.
     this.online = new OnlineMenu(this.root, callbacks.online, this);
     for (const [name, overlay] of this.online.screens) this.screens.set(name, overlay);
 
@@ -326,33 +329,33 @@ export class Menu {
   }
 
   /**
-   * Um campo de tela externa que quer ←/→. Ver `MenuWidget`.
+   * A field from an outside screen that wants ←/→. See `MenuWidget`.
    *
-   * Público porque quem chama é `OnlineMenu`, que constrói o próprio DOM e é o
-   * único que sabe o que cada elemento dele faz.
+   * Public because the caller is `OnlineMenu`, which builds its own DOM and is the
+   * only one that knows what each of its elements does.
    */
   registerWidget(element: HTMLElement, widget: MenuWidget): void {
     this.widgets.set(element, widget);
   }
 
-  /** Repinta as telas de rede com o estado que o `OnlineSession` reporta. */
+  /** Repaints the network screens with the state `OnlineSession` reports. */
   setOnlineState(state: OnlineViewState): void {
     this.online.render(state);
   }
 
   /**
-   * Liga ou desliga o duelo em rede na tela de título.
+   * Turns the network duel on or off on the title screen.
    *
-   * Desligado, a carta continua na tela com o motivo escrito onde estava a frase
-   * de chamada — falhar aqui é falhar na hora certa. Esconder a carta seria pior:
-   * quem procura o modo online concluiria que ele não existe.
+   * Turned off, the card stays on the screen with the reason written where the
+   * blurb was — failing here is failing at the right time. Hiding the card would be
+   * worse: someone looking for the online mode would conclude it does not exist.
    */
   setOnlineAvailable(available: boolean, reason?: string): void {
     this.onlineCard.disabled = !available;
     const blurb = this.onlineCard.querySelector<HTMLElement>('.mode__blurb');
     if (!blurb) return;
-    // A frase de chamada é reposta quando o modo volta: o motivo é um estado, não
-    // uma substituição definitiva.
+    // The blurb is put back when the mode returns: the reason is a state, not a
+    // permanent replacement.
     blurb.textContent = available ? this.onlineBlurb : (reason ?? this.onlineBlurb);
   }
 
@@ -360,7 +363,7 @@ export class Menu {
     return this.screen;
   }
 
-  /** `true` quando alguma sobreposição está no ar (e o jogo não deve receber entrada). */
+  /** `true` when an overlay is up (and the game should not receive input). */
   get open(): boolean {
     return this.screen !== 'none';
   }
@@ -370,22 +373,23 @@ export class Menu {
     for (const [name, overlay] of this.screens) overlay.hidden = name !== screen;
 
     if (screen === 'none') return;
-    // O foco vai para o primeiro botão da tela: sem isso, `Tab` começaria do topo
-    // do documento e o d-pad não teria de onde partir.
+    // Focus goes to the screen's first button: without this, `Tab` would start from
+    // the top of the document and the d-pad would have nowhere to set out from.
     const first = this.screens.get(screen)?.querySelector<HTMLElement>(FOCUSABLE);
     first?.focus();
   }
 
   /**
-   * Mostra o resultado de uma partida.
+   * Shows the result of a match.
    *
-   * `mode` decide se há "Sail again": contra a máquina o botão reinicia o duelo
-   * na hora, mas em rede não há o que reiniciar de um lado só — o adversário já
-   * está de volta ao menu dele, e revanche é uma conversa entre os dois.
+   * `mode` decides whether there is a "Sail again": against the machine the button
+   * restarts the duel on the spot, but over the network there is nothing to restart
+   * from one side alone — the opponent is already back in their own menu, and a
+   * rematch is a conversation between the two.
    */
   showOutcome(won: boolean, stats: MatchStats, mode: OutcomeMode = 'solo'): void {
-    // A tela de fim é um beco: o Voltar não sai dela, e o que estava empilhado
-    // antes já não leva a lugar nenhum. Sem esta linha a pilha só cresce.
+    // The outcome screen is a dead end: Back does not leave it, and what was on the
+    // stack before no longer leads anywhere. Without this line the stack only grows.
     this.history.length = 0;
     this.outcomeAgain.hidden = mode !== 'solo';
     this.outcomeBox.className = `sheet outcome ${won ? 'outcome--won' : 'outcome--lost'}`;
@@ -419,10 +423,10 @@ export class Menu {
   }
 
   /**
-   * Um quadro de menu: navegação por controle e sincronia dos glifos.
+   * One menu frame: gamepad navigation and glyph syncing.
    *
-   * Roda sempre, mesmo com o menu fechado, porque a troca teclado↔controle precisa
-   * estar em dia quando a tela de controles abrir.
+   * It always runs, even with the menu closed, because the keyboard↔gamepad swap
+   * has to be up to date when the controls screen opens.
    */
   update(input: Input, dt: number): void {
     this.syncGlyphs(input);
@@ -435,16 +439,16 @@ export class Menu {
     const pad = input.gamepad;
     if (!pad.connected) return;
 
-    // D-pad e analógico esquerdo entram pelo mesmo caminho: os dois são "uma
-    // direção", e quem segura qualquer um dos dois espera repetição. Tratar o
-    // d-pad como toque isolado (`wasPressed`) obrigava a martelar o botão para
-    // atravessar um deslizante de ponta a ponta.
+    // D-pad and left stick come in through the same path: both are "a direction",
+    // and whoever holds either one expects repetition. Treating the d-pad as an
+    // isolated tap (`wasPressed`) meant hammering the button to cross a slider
+    // from end to end.
     const x = axis(
       pad.isDown(GamepadButton.DPAD_RIGHT) || pad.leftStick.x > NAV_STICK,
       pad.isDown(GamepadButton.DPAD_LEFT) || pad.leftStick.x < -NAV_STICK,
     );
-    // O analógico devolve Y positivo para baixo (ver `GamepadManager`), que é o
-    // mesmo sentido do d-pad aqui: empurrar para baixo avança na lista.
+    // The stick returns positive Y downward (see `GamepadManager`), which is the
+    // same direction as the d-pad here: pushing down advances through the list.
     const y = axis(
       pad.isDown(GamepadButton.DPAD_DOWN) || pad.leftStick.y > NAV_STICK,
       pad.isDown(GamepadButton.DPAD_UP) || pad.leftStick.y < -NAV_STICK,
@@ -468,23 +472,23 @@ export class Menu {
   }
 
   /**
-   * Abre ajustes ou controles por cima do que estiver acontecendo.
+   * Opens settings or controls on top of whatever is happening.
    *
-   * Durante a partida isto **é** a pausa: `returnTo` fica em `'none'`, então o
-   * "Voltar" devolve o jogador ao convés em vez de ao título. Uma tela de pausa
-   * dedicada seria uma quinta tela para repetir dois botões.
+   * Mid-match this **is** the pause: `returnTo` stays at `'none'`, so "Back" hands
+   * the player back to the deck instead of to the title. A dedicated pause screen
+   * would be a fifth screen to repeat two buttons.
    */
   openOverlay(screen: Extract<Screen, 'settings' | 'controls'>): void {
     this.openSub(screen);
   }
 
-  /** `Esc`/`B`: sai da tela atual para a anterior. */
+  /** `Esc`/`B`: leaves the current screen for the previous one. */
   back(): void {
     if (!RETURNABLE.has(this.screen)) return;
 
-    // Sair da sala de espera **é** desistir dela. Sem isto, quem aperta Voltar
-    // continuaria ocupando uma vaga na fila, e o adversário que entrasse depois
-    // encontraria um oponente que já foi embora.
+    // Leaving the waiting room **is** giving it up. Without this, whoever presses
+    // Back would go on holding a slot in the queue, and the opponent who came in
+    // later would find an opponent who had already left.
     if (this.screen === 'room' || this.screen === 'join') this.callbacks.online.onCancel();
 
     this.callbacks.onNavigate?.('back');
@@ -495,19 +499,20 @@ export class Menu {
     this.root.remove();
   }
 
-  // -- construção --------------------------------------------------------------
+  // -- construction ------------------------------------------------------------
 
   /**
-   * A primeira tela: com quem se vai brigar, antes de qualquer outra pergunta.
+   * The first screen: who you are going to fight, before any other question.
    *
-   * Os dois modos são **cartas**, e não dois botões numa fileira, porque a escolha
-   * precisa de uma frase cada. "Online" num botão de latão não diz se é contra
-   * quem está do lado ou contra quem está longe, se precisa de amigo, nem se há
-   * gente para jogar — e essas três dúvidas são exatamente o que faz alguém não
-   * clicar. A tarja acima do nome resolve a única que não cabe numa frase.
+   * The two modes are **cards**, not two buttons in a row, because the choice needs
+   * a sentence each. "Online" on a brass button does not say whether it is against
+   * the person next to you or against someone far away, whether it needs a friend,
+   * or whether there is anyone around to play — and those three doubts are exactly
+   * what makes someone not click. The badge above the name settles the one that
+   * does not fit in a sentence.
    *
-   * A dificuldade saiu daqui de propósito: ela só existe contra a máquina, e
-   * perguntá-la antes de saber se a máquina está em jogo é perguntar cedo.
+   * Difficulty left this screen on purpose: it only exists against the machine, and
+   * asking it before knowing whether the machine is in play is asking too early.
    */
   private buildTitle(): HTMLDivElement {
     const overlay = el('div', 'overlay', this.root);
@@ -545,8 +550,8 @@ export class Menu {
     settingsButton.type = 'button';
     settingsButton.addEventListener('click', () => this.openSub('settings'));
 
-    // A câmera livre saiu daqui e entrou na tabela de controles: ela era
-    // anunciada nas duas telas, e a tabela é onde uma lista de comandos pertence.
+    // The free camera left this screen for the controls table: it was announced on
+    // both screens, and the table is where a list of commands belongs.
     this.buildHintLine(sheet, [
       { action: 'controls', text: 'Controls' },
       { action: 'pause', text: 'Pause mid-duel' },
@@ -555,7 +560,7 @@ export class Menu {
     return overlay;
   }
 
-  /** Uma das cartas de modo da tela de título. */
+  /** One of the mode cards on the title screen. */
   private buildModeCard(
     parent: HTMLElement,
     options: {
@@ -578,7 +583,7 @@ export class Menu {
     return card;
   }
 
-  /** A escolha de capitão, que só faz sentido quando o adversário é a máquina. */
+  /** The captain choice, which only makes sense when the opponent is the machine. */
   private buildSolo(): HTMLDivElement {
     const overlay = el('div', 'overlay', this.root);
     const sheet = el('div', 'sheet', overlay);
@@ -634,7 +639,7 @@ export class Menu {
     el('h2', 'section__label', section, 'Settings');
     const grid = el('div', 'settings', section);
 
-    // --- preset gráfico ---
+    // --- graphics preset ---
     const qualityField = el('div', 'field', grid);
     el('span', '', qualityField, 'Graphics preset');
     const qualityValue = el('span', 'field__value', qualityField);
@@ -661,10 +666,10 @@ export class Menu {
     }
     paintQuality();
 
-    // --- deslizantes ---
-    // As faixas não estão aqui: vêm de `PREFERENCE_RANGES`, a mesma tabela contra
-    // a qual o `Settings` valida o que sai do `localStorage`. Números repetidos
-    // nos dois lugares saem de sincronia na primeira vez que um deles muda.
+    // --- sliders ---
+    // The ranges are not here: they come from `PREFERENCE_RANGES`, the same table
+    // `Settings` validates whatever comes out of `localStorage` against. Numbers
+    // repeated in two places fall out of sync the first time one of them changes.
     this.buildSlider(grid, 'Master volume', 'masterVolume', (v) => `${Math.round(v * 100)}%`);
     this.buildSlider(grid, 'Mouse sensitivity', 'mouseSensitivity', (v) => `${v.toFixed(2)}×`);
     this.buildSlider(grid, 'Gamepad sensitivity', 'gamepadSensitivity', (v) => `${v.toFixed(2)}×`);
@@ -672,11 +677,11 @@ export class Menu {
     this.buildSlider(grid, 'Day length', 'dayLengthMinutes', (v) => `${v.toFixed(0)} min`);
     this.buildSlider(grid, 'Field of view', 'fieldOfView', (v) => `${v.toFixed(0)}°`);
 
-    // --- tempo ---
-    // Deixar o jogador travar o tempo é o que torna o sistema de clima jogável
-    // em vez de só observável: quem quer treinar num mar previsível trava em
-    // "Clear", quem quer ver o temporal trava em "Storm" e não espera a cadeia
-    // de transições chegar lá sozinha.
+    // --- weather ---
+    // Letting the player lock the weather is what makes the weather system
+    // playable instead of only watchable: whoever wants to train on a predictable
+    // sea locks it on "Clear", whoever wants to see the storm locks it on "Storm"
+    // and does not wait for the chain of transitions to get there on its own.
     const weatherField = el('div', 'field', grid);
     el('span', '', weatherField, 'Weather');
     const weatherValue = el('span', 'field__value', weatherField);
@@ -702,7 +707,7 @@ export class Menu {
     }
     paintWeather();
 
-    // --- interruptor ---
+    // --- toggle ---
     const invertField = el('div', 'field', grid);
     el('span', '', invertField, 'Invert vertical axis');
     const toggle = el('button', 'toggle', invertField);
@@ -745,10 +750,10 @@ export class Menu {
     input.step = `${range.step}`;
     input.value = `${initial}`;
     input.setAttribute('aria-label', label);
-    // `input`, e não `change`: o valor tem de valer enquanto o cursor arrasta —
-    // ninguém calibra sensibilidade sem ver o efeito. O custo de aplicar dezenas
-    // de vezes por segundo é contido do outro lado (guarda de preset em
-    // `applyPreferences`, gravação adiada em `Settings`), e não aqui.
+    // `input`, not `change`: the value has to count while the cursor drags — nobody
+    // calibrates sensitivity without seeing the effect. The cost of applying it
+    // dozens of times per second is held down on the other side (preset guard in
+    // `applyPreferences`, deferred write in `Settings`), not here.
     input.addEventListener('input', () => {
       const parsed = Number.parseFloat(input.value);
       updateNumber(preference, parsed);
@@ -775,10 +780,10 @@ export class Menu {
     }
 
     this.buildHintLine(sheet, [
-      // A escada do mastro entrou nesta lista no dia em que deixou de ser
-      // automática: agarra-se e solta-se com a mesma tecla, e é a única peça do
-      // navio em que isso vale nas duas pontas — no convés ela sobe, na gávea
-      // ela desce. Quem não souber disso fica preso lá em cima.
+      // The mast ladder joined this list the day it stopped being automatic: you
+      // grab it and let go of it with the same key, and it is the only piece of the
+      // ship where that holds at both ends — on the deck it goes up, on the topsail
+      // platform it goes down. Whoever does not know that gets stuck up there.
       { action: 'interact', text: 'Helm, capstan, cannons, mast ladder, pump and holes' },
     ]);
 
@@ -826,12 +831,13 @@ export class Menu {
   }
 
   /**
-   * Uma linha de dicas no rodapé de uma folha.
+   * A line of hints in a sheet's footer.
    *
-   * Pública porque `OnlineMenu` também tem rodapé, e os glifos têm de ser
-   * registrados **aqui**: quem os troca quando o jogador larga o teclado e pega o
-   * controle é `syncGlyphs`, que varre uma lista só. Uma segunda lista no outro
-   * módulo daria uma tela em que os glifos param de acompanhar o aparelho.
+   * Public because `OnlineMenu` has a footer too, and the glyphs have to be
+   * registered **here**: what swaps them when the player drops the keyboard and
+   * picks up the gamepad is `syncGlyphs`, which sweeps a single list. A second list
+   * in the other module would give a screen where the glyphs stop following the
+   * device.
    */
   buildHintLine(parent: HTMLElement, hints: readonly Hint[]): void {
     const line = el('div', 'hint-line', parent);
@@ -844,18 +850,18 @@ export class Menu {
     }
   }
 
-  // -- estado ------------------------------------------------------------------
+  // -- state -------------------------------------------------------------------
 
   private openSub(screen: Extract<Screen, 'settings' | 'controls'>): void {
     this.push(screen);
   }
 
   /**
-   * Avança uma tela, guardando de onde veio.
+   * Advances one screen, remembering where it came from.
    *
-   * Público-para-dentro porque `OnlineMenu` também navega (o "Join a room" leva à
-   * tela do código), e o histórico tem de ser o mesmo dos dois lados — duas pilhas
-   * é como o Voltar passa a mentir.
+   * Public-but-internal because `OnlineMenu` navigates too (the "Join a room" leads
+   * to the code screen), and the history has to be the same on both sides — two
+   * stacks is how Back starts to lie.
    */
   push(screen: Exclude<Screen, 'none'>): void {
     this.history.push(this.screen);

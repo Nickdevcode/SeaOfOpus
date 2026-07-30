@@ -1,43 +1,43 @@
 /**
- * O corpo do jogador a bordo: malha, esqueleto e mistura de locomoção.
+ * The player's body aboard: mesh, skeleton and locomotion blend.
  *
- * O corpo é olhado de dois lugares, e cada um cobra uma coisa diferente. De fora
- * — a câmera livre, e o adversário no duelo em rede — o defeito que trai um
- * personagem é o pé patinando no convés. De dentro, em primeira pessoa, o que
- * trai é a cabeça: o olho nasce a 1,66 m e o crânio ocupa exatamente essa
- * altura. O primeiro problema se resolve com a fase única da
- * passada, logo abaixo; o segundo com o recorte de `shaders/headClip.ts`, e é
- * por ele que o corpo deixou de ficar escondido em primeira pessoa.
+ * The body is watched from two places, and each one charges for something
+ * different. From outside — the free camera, and the opponent in a networked
+ * duel — the flaw that gives a character away is the foot skating on the deck.
+ * From inside, in first person, what gives it away is the head: the eye sits at
+ * 1.66 m and the skull occupies exactly that height. The first problem is
+ * solved by the single stride phase, right below; the second by the clipping in
+ * `shaders/headClip.ts`, and that is what let the body stop hiding in first person.
  *
- * Por isso a mistura entre andar e correr **não** é um `lerp` de pesos com cada
- * clipe rodando na sua própria velocidade. Os dois são postos no **mesmo ponto
- * da passada**, quadro a quadro, a partir da fase que o `GaitClock` mantém —
- * nem sequer há `timeScale` aqui. Como ambos os clipes começam no pé esquerdo
- * tocando o chão, os contatos caem no mesmo instante e o pé continua parado no
- * convés durante o apoio, em qualquer ponto da mistura. Deixar cada um no seu
- * ritmo faria os dois discordarem de onde o pé está, e a média de duas verdades
- * é uma mentira que escorrega.
+ * That's why the blend between walking and running is **not** a `lerp` of weights
+ * with each clip running at its own speed. Both are put at the **same point of
+ * the stride**, frame by frame, from the phase the `GaitClock` keeps — there
+ * isn't even a `timeScale` here. Since both clips start on the left foot
+ * touching the ground, the contacts land at the same instant and the foot stays
+ * planted on the deck through the stance, at any point of the blend. Leaving
+ * each one at its own rhythm would make the two disagree about where the foot
+ * is, and the average of two truths is a lie that slips.
  *
- * O relógio vive no `PlayerController` e não aqui de propósito: é dele que sai
- * também o balanço da câmera, e as duas coisas têm de ser o mesmo passo. Além
- * disso o corpo é um arquivo que carrega de forma assíncrona e pode falhar; o
- * jogo precisa andar igual sem ele.
+ * The clock lives in `PlayerController` and not here on purpose: it's also what
+ * drives the camera bob, and the two have to be the same step. On top of that
+ * the body is a file that loads asynchronously and can fail; the game has to
+ * run the same without it.
  *
- * O avatar entra como **filho do modelo do navio**, então acompanha jogo de
- * proa e adernada de graça — a mesma razão de `CameraRig` compor com
- * `ship.model.root` e não com `ship.body`.
+ * The avatar goes in as a **child of the ship model**, so it follows bow pitch
+ * and heel for free — the same reason `CameraRig` composes with
+ * `ship.model.root` and not with `ship.body`.
  *
- * ## Dois corpos, uma classe
+ * ## Two bodies, one class
  *
- * A partida instancia **dois**: o do jogador, pendurado no casco dele, e o do
- * adversário, pendurado no outro. É a mesma classe porque é a mesma coisa — um
- * marujo a bordo —, e a única diferença é de onde vem o `PlayerController` que
- * a alimenta: no host e no duelo local ele é simulado aqui, e no cliente que não
- * simula a pose chega pela rede e `PlayerController.applyRemoteStep` a
- * transforma nos mesmos relógios. Todo o resto deste arquivo é cego a essa
- * distinção, e é isso que faz o corpo do outro jogador andar, correr, pular,
- * subir a escada, governar e pregar tábua com os mesmos clipes e as mesmas
- * regras do seu.
+ * A match instantiates **two**: the player's, hung on his hull, and the
+ * opponent's, hung on the other. It's the same class because it's the same thing
+ * — a deckhand aboard —, and the only difference is where the `PlayerController`
+ * that feeds it comes from: on the host and in the local duel it is simulated
+ * here, and on the client that doesn't simulate, the pose arrives over the wire
+ * and `PlayerController.applyRemoteStep` turns it into the same clocks. All the
+ * rest of this file is blind to that distinction, and that's what makes the
+ * other player's body walk, run, jump, climb the ladder, steer and nail planks
+ * with the same clips and the same rules as yours.
  */
 
 import * as THREE from 'three';
@@ -63,72 +63,76 @@ import type {
 import { CarriedPlank } from './CarriedPlank';
 import { SWIM_SUBMERSION, type PlayerController } from './PlayerController';
 
-/** Convergência da direção do corpo, em 1/s. */
+/** Convergence of the body's facing, in 1/s. */
 const FACING_LAMBDA = 11;
 
 /**
- * Onde o corpo se assenta na vertical, dada a altura dos pés simulados.
+ * Where the body settles on the vertical, given the height of the simulated feet.
  *
- * ## Os dois clipes de água têm outra origem, e é isso que esta linha conserta
+ * ## The two water clips have another origin, and that's what this line fixes
  *
- * Nos oito clipes de terra `y = 0` é o **chão, sob os pés**, e por isso o avatar
- * inteiro é pendurado na posição dos pés e acabou. Nos dois de água `y = 0` é a
- * **linha d'água**: o corpo foi construído repartido nela, pernas e quadril
- * abaixo, ombros e cabeça acima. Tocar `Float` sem tratar isso põe a linha d'água
- * do clipe na altura dos pés simulados, e o pirata boia um metro e meio acima do
- * mar — ou, dito do outro lado, o mar passa a cortá-lo nos tornozelos.
+ * In the eight land clips `y = 0` is the **ground, under the feet**, which is why
+ * the whole avatar is hung at the position of the feet and that's it. In the two
+ * water clips `y = 0` is the **waterline**: the body was built split at it, legs
+ * and hips below, shoulders and head above. Playing `Float` without handling that
+ * puts the clip's waterline at the height of the simulated feet, and the pirate
+ * floats a meter and a half above the sea — or, put the other way round, the sea
+ * starts cutting him off at the ankles.
  *
- * O conserto é uma soma só: subir o corpo `SWIM_SUBMERSION` quando a água tem o
- * corpo inteiro, nada quando ela não tem nenhum, e a fração no meio do caminho.
+ * The fix is a single sum: raise the body by `SWIM_SUBMERSION` when the water has
+ * the whole body, nothing when it has none of it, and the fraction in between.
  *
- * ## Por que a fração é linear, e por que ela não dá salto
+ * ## Why the fraction is linear, and why it doesn't jump
  *
- * Porque a pose também é. Na transição, o `root` do rig é a média ponderada dos
- * dois clipes: com peso `w` na água, a translação de mergulho do `Float` entra
- * valendo `w × 1,32` e o resto do corpo vem dos clipes de terra. Somar `w × 1,44`
- * por fora faz o corpo desenhado interpolar **em linha reta** entre os dois
- * assentamentos — pés simulados quando `w = 0`, clipe assentado na superfície
- * quando `w = 1`, e nada de descontínuo entre os dois. Qualquer curva diferente
- * da do peso descolaria a origem do clipe da pose que ele está desenhando.
+ * Because the pose is too. Through the transition the rig's `root` is the weighted
+ * average of the two clips: with weight `w` in the water, `Float`'s submersion
+ * translation comes in worth `w × 1.32` and the rest of the body comes from the
+ * land clips. Adding `w × 1.44` on the outside makes the drawn body interpolate
+ * **in a straight line** between the two settlings — simulated feet when `w = 0`,
+ * clip settled on the surface when `w = 1`, and nothing discontinuous between the
+ * two. Any curve other than the weight's would peel the clip's origin off the pose
+ * it is drawing.
  *
- * ⚠️ **`water` tem de ser o peso que os clipes de fato receberam**, e não o do
- * relógio: sem `Float` no GLB (um arquivo antigo em cache) o corpo continua sendo
- * desenhado pela locomoção, que quer os pés no lugar dos pés. Ver `updateSwim`.
+ * ⚠️ **`water` has to be the weight the clips actually got**, not the clock's:
+ * with no `Float` in the GLB (an old cached file) the body is still drawn by
+ * locomotion, which wants the feet where the feet are. See `updateSwim`.
  *
- * @param feetY altura dos pés simulados, em coordenadas do navio.
- * @param water quanto do corpo os clipes de água ocuparam, em [0, 1].
+ * @param feetY height of the simulated feet, in ship coordinates.
+ * @param water how much of the body the water clips took, in [0, 1].
  */
 export function waterPoseY(feetY: number, water: number): number {
   return feetY + SWIM_SUBMERSION * water;
 }
 
 /**
- * Reparte o que sobra do corpo entre a tábua e a locomoção.
+ * Splits what's left of the body between the plank and locomotion.
  *
- * É a única aritmética deste arquivo com uma **invariante**, e é por isso que ela
- * saiu de dentro do método: os pesos têm de somar exatamente 1. O que sobrar
- * acima de 1 o Three renormaliza, encolhendo todo mundo na mesma proporção; o que
- * faltar ele preenche com a pose de repouso do rig, que é a T-pose de braços
- * abertos. Nenhum dos dois defeitos aparece no Blender e os dois aparecem no
- * primeiro segundo de jogo.
+ * It's the only arithmetic in this file with an **invariant**, and that's why it
+ * moved out of the method: the weights have to add up to exactly 1. Whatever is
+ * left over above 1 Three renormalizes, shrinking everyone by the same
+ * proportion; whatever is missing it fills in with the rig's rest pose, which is
+ * the T-pose with the arms out. Neither flaw shows up in Blender and both show up
+ * in the first second of play.
  *
- * ⚠️ **A soma só fecha porque as entradas são exclusivas**, e cada exclusão é uma
- * linha de código em outro arquivo: não há como estar na escada e no leme, nem na
- * escada e no mar (`updateLadder` apaga a água, que é o que a escada do costado
- * acabou de tirar dele), nem no mar e no meio de um pulo (`enterWater` encerra o
- * voo sem disparar pouso). Onde duas delas se cruzam, elas se cruzam com o mesmo
- * λ e a soma atravessa a troca valendo um corpo. Quem confere isso quadro a quadro
- * num percurso convés→mar→escada→convés é `tests/locomotion.ts`.
+ * ⚠️ **The sum only closes because the inputs are exclusive**, and each exclusion
+ * is a line of code in another file: there's no way to be on the ladder and at the
+ * rudder, nor on the ladder and in the sea (`updateLadder` clears the water, which
+ * is what the hull-side ladder just pulled him out of), nor in the sea and in the
+ * middle of a jump (`enterWater` ends the flight without firing a landing). Where
+ * two of them cross, they cross with the same λ and the sum carries one body
+ * through the handover. What checks this frame by frame over a
+ * deck→sea→ladder→deck run is `tests/locomotion.ts`.
  *
- * A única que **convive** com as outras é a tábua — dá para carregar madeira
- * andando pelo porão —, e é ela que cede a todo o resto: ao posto, porque não se
- * prega tábua pendurado numa escada; ao pulo, porque não se prega tábua no ar; e a
- * quem anda, porque um corpo deslizando pelo convés na pose de carregar é
- * exatamente o defeito que o resto deste arquivo existe para evitar.
+ * The only one that **coexists** with the others is the plank — you can carry
+ * lumber while walking through the hold —, and it's the one that yields to all the
+ * rest: to the station, because you don't nail a plank hanging off a ladder; to
+ * the jump, because you don't nail a plank in the air; and to whoever is walking,
+ * because a body sliding across the deck in the carry pose is exactly the flaw the
+ * rest of this file exists to avoid.
  *
- * @param posts o que escada, timão, água e pulo já tomaram.
- * @param carry o peso que a tábua pediu.
- * @param moving quanto da locomoção é caminhada, em [0, 1].
+ * @param posts what ladder, helm, water and jump have already taken.
+ * @param carry the weight the plank asked for.
+ * @param moving how much of locomotion is walking, in [0, 1].
  */
 export function poseBudget(
   posts: { climb: number; helm: number; swim: number; jump: number },
@@ -141,35 +145,37 @@ export function poseBudget(
 }
 
 /**
- * Quanto o corpo recua do olho em primeira pessoa, em metros.
+ * How far the body pulls back from the eye in first person, in meters.
  *
- * **Sem isto a primeira pessoa não funciona**, e o motivo é anatômico. A câmera
- * fica em `EYE_HEIGHT` acima dos pés, **no eixo da coluna** — o olho de um
- * humano não fica ali, fica uns dez centímetros à frente, porque o crânio sai da
- * coluna e o rosto avança. Com a câmera no eixo, olhar para baixo é olhar para
- * dentro do próprio tronco: o buraco que o recorte da cabeça abre no pescoço cai
- * exatamente na linha de visão, e a tela vira uma parede de casaco sem forma.
- * Medido em execução: no limite de `PITCH_LIMIT` o torso ocupava a tela inteira.
+ * **Without this first person doesn't work**, and the reason is anatomical. The
+ * camera sits `EYE_HEIGHT` above the feet, **on the axis of the spine** — a
+ * human's eye isn't there, it's some ten centimeters ahead of it, because the
+ * skull comes off the spine and the face juts forward. With the camera on the
+ * axis, looking down means looking into your own chest: the hole the head clipping
+ * opens at the neck falls exactly on the line of sight, and the screen turns into
+ * a wall of shapeless coat. Measured at run time: at the `PITCH_LIMIT` limit the
+ * torso filled the entire screen.
  *
- * Recuar o **corpo** em vez de adiantar a câmera é de propósito. O olho é a
- * origem de alcance do `Interaction`, do ouvido em `audio.setListener` e da mira
- * do canhão; mexer nele para consertar um enquadramento mudaria distâncias de
- * jogo. O corpo não deve nada a ninguém — recuá-lo é uma mentira que só a vista
- * conta, e ela custa onze centímetros de pé atrás da beirada que ninguém mede.
+ * Pulling the **body** back instead of pushing the camera forward is deliberate.
+ * The eye is the reach origin for `Interaction`, for the ear in
+ * `audio.setListener` and for the cannon's aim; touching it to fix a framing would
+ * change gameplay distances. The body owes nobody anything — pulling it back is a
+ * lie only the view tells, and it costs eleven centimeters of standing back from
+ * the edge that nobody measures.
  *
- * **Onze, e não vinte.** Foi medido nos dois extremos do `PITCH_LIMIT`, porque o
- * erro tem dois lados: recuo de menos e o tronco vira uma parede sem forma
- * olhando reto para baixo; recuo de mais e o corpo **some** nos 55° em que se
- * anda de fato — o pirata fica pendurado à frente da câmera em vez de embaixo
- * dela. Com 0,18 o ombro já não aparecia a 55°; com 0,11 ele fica no rodapé nos
- * dois casos, que é o enquadramento que se procura.
+ * **Eleven, not twenty.** It was measured at both ends of `PITCH_LIMIT`, because
+ * the error has two sides: too little setback and the torso becomes a shapeless
+ * wall when looking straight down; too much and the body **disappears** at the 55°
+ * you actually walk around at — the pirate hangs in front of the camera instead of
+ * under it. At 0.18 the shoulder already didn't show up at 55°; at 0.11 it sits at
+ * the bottom of the frame in both cases, which is the framing you're after.
  */
 const FIRST_PERSON_SETBACK = 0.11;
 
 const _velocity = new THREE.Vector2();
 
 export class PlayerAvatar {
-  /** Nó que vai para dentro do modelo do navio. */
+  /** Node that goes inside the ship model. */
   readonly root = new THREE.Group();
 
   private mixer: THREE.AnimationMixer | null = null;
@@ -184,72 +190,71 @@ export class PlayerAvatar {
   private float: THREE.AnimationAction | null = null;
   private swim: THREE.AnimationAction | null = null;
 
-  /** A madeira nas mãos enquanto se prega tábua. Ver `CarriedPlank`. */
+  /** The lumber in the hands while a plank is being nailed. See `CarriedPlank`. */
   private readonly plank = new CarriedPlank();
 
   private facing = 0;
   private facingReady = false;
 
   /**
-   * O recorte da cabeça, um por material da malha.
+   * The head clipping, one per mesh material.
    *
-   * Fica vazio se o GLB não trouxer o osso `head` — e então a primeira pessoa
-   * simplesmente não liga o corpo, em vez de mostrar o crânio por dentro.
+   * Stays empty if the GLB doesn't bring the `head` bone — and then first person
+   * just doesn't turn the body on, instead of showing the skull from the inside.
    */
   private readonly headClips: HeadClipHandle[] = [];
-  /** Limiar em vigor quando o recorte está ligado. Ver `calibrate`. */
+  /** Threshold in force while the clipping is on. See `calibrate`. */
   private headClipThreshold = HEAD_CLIP_THRESHOLD;
-  /** Recuo em vigor. Ver `FIRST_PERSON_SETBACK` e `calibrate`. */
+  /** Setback in force. See `FIRST_PERSON_SETBACK` and `calibrate`. */
   private setback = FIRST_PERSON_SETBACK;
 
   /**
-   * A torção que separa pernas de tronco. Só vale em primeira pessoa: de fora,
-   * o corpo inteiro apontando para onde anda continua sendo o certo, e é essa a
-   * pose que o adversário mostra. O que ele ganha no lugar dela é o pescoço —
-   * ver `HeadLook`.
+   * The twist that separates legs from torso. Only holds in first person: from
+   * outside, the whole body pointing where it walks is still the right thing, and
+   * that's the pose the opponent shows. What he gets in its place is the neck —
+   * see `HeadLook`.
    */
   private readonly body = new FirstPersonBody();
   private twistReady = false;
 
   /**
-   * O pescoço que segue o olhar. Só age no corpo visto **de fora** — ver
-   * `HeadLook`, que explica por que ele e a torção do quadril não convivem.
+   * The neck that follows the gaze. Only acts on the body seen **from outside** —
+   * see `HeadLook`, which explains why it and the hip twist don't coexist.
    */
   private readonly headLook = new HeadLook();
   private headLookReady = false;
 
   /**
-   * Materiais **deste** corpo, para o descarte. Ver `CharacterAsset`: a
-   * geometria e as texturas são compartilhadas com o outro avatar e não são
-   * nossas para liberar.
+   * Materials of **this** body, for disposal. See `CharacterAsset`: the geometry
+   * and the textures are shared with the other avatar and are not ours to free.
    */
   private readonly materials: THREE.Material[] = [];
 
   /**
-   * Some com o corpo por inteiro, sem gastar um passo de animação com ele.
+   * Makes the whole body disappear, without spending an animation step on it.
    *
-   * Existe por causa do corpo do adversário, que só faz sentido em rede: contra
-   * a máquina, quem comanda o casco inimigo é o `ShipAI`, que não move marujo
-   * nenhum — e um pirata plantado no convés em pose de parado, sem nunca dar um
-   * passo, é pior que nenhum pirata. Ver `Match.startOnline`.
+   * It exists because of the opponent's body, which only makes sense over the
+   * network: against the machine, what commands the enemy hull is the `ShipAI`,
+   * which moves no deckhand at all — and a pirate planted on the deck in the idle
+   * pose, never taking a step, is worse than no pirate. See `Match.startOnline`.
    */
   hidden = false;
 
-  /** Posição do corpo, atrasada pela transição de estação. Ver `updateStation`. */
+  /** Body position, lagged by the station transition. See `updateStation`. */
   private readonly stationPosition = new THREE.Vector3();
-  /** 1 = transição terminada. Começa pronto para o primeiro quadro não saltar. */
+  /** 1 = transition finished. Starts ready so the first frame doesn't jump. */
   private stationBlend = 1;
   private lastStationChange = -1;
 
   loaded = false;
 
   /**
-   * Carrega o personagem. Falhar aqui **não** derruba o jogo: sem corpo, tudo
-   * o mais continua jogável, e em primeira pessoa nem se nota.
+   * Loads the character. Failing here does **not** bring the game down: with no
+   * body, everything else stays playable, and in first person it doesn't even show.
    *
-   * O arquivo vem de `CharacterAsset`, que o baixa **uma vez** e devolve uma
-   * cópia independente por avatar — malha e textura compartilhadas, esqueleto e
-   * material privados. Ver lá o porquê de cada uma dessas metades.
+   * The file comes from `CharacterAsset`, which downloads it **once** and hands
+   * back an independent copy per avatar — mesh and texture shared, skeleton and
+   * material private. See there the reason for each of those halves.
    */
   async load(url: string): Promise<boolean> {
     try {
@@ -267,84 +272,86 @@ export class PlayerAvatar {
       this.walk = this.action(character.animations, 'Walk');
       this.run = this.action(character.animations, 'Run');
       if (!this.idle || !this.walk || !this.run) {
-        console.warn('[avatar] clipes de locomoção não encontrados no GLB');
+        console.warn('[avatar] locomotion clips not found in the GLB');
         return false;
       }
 
-      // O pulo é opcional: um GLB antigo em cache do navegador não pode tirar do
-      // jogador a locomoção, que é o que ele usa o tempo todo.
+      // The jump is optional: an old GLB in the browser cache can't take
+      // locomotion away from the player, which is what he uses all the time.
       this.jumpAir = this.action(character.animations, 'JumpAir');
       this.jumpLand = this.action(character.animations, 'JumpLand');
       if (!this.jumpAir || !this.jumpLand) {
-        console.warn('[avatar] clipes de pulo não encontrados no GLB; o corpo salta sem pose');
+        console.warn('[avatar] jump clips not found in the GLB; the body jumps with no pose');
       }
 
-      // A escalada é opcional pelo mesmo motivo do pulo: um GLB antigo em cache
-      // não pode tirar do jogador a locomoção, que é o que ele usa o tempo todo.
+      // Climbing is optional for the same reason as the jump: an old cached GLB
+      // can't take locomotion from the player, which is what he uses all the time.
       this.climbUp = this.action(character.animations, 'ClimbUp');
       if (!this.climbUp) {
-        console.warn('[avatar] clipe de escalada não encontrado no GLB');
+        console.warn('[avatar] climb clip not found in the GLB');
       }
 
-      // O timão, idem. Sem ele o jogo continua inteiro: o timoneiro governa em
-      // pose de parado, que é exatamente o que fazia antes deste clipe existir.
+      // The helm, likewise. Without it the game stays whole: the helmsman steers
+      // in the idle pose, which is exactly what he did before this clip existed.
       this.helm = this.action(character.animations, 'Helm');
       if (!this.helm) {
-        console.warn('[avatar] clipe do timão não encontrado no GLB');
+        console.warn('[avatar] helm clip not found in the GLB');
       }
 
-      // E a tábua de reparo. Sem o clipe, o rombo continua fechando e a madeira
-      // continua aparecendo pregada no casco — o que se perde é o gesto.
+      // And the repair plank. Without the clip, the breach still closes and the
+      // lumber still shows up nailed to the hull — what's lost is the gesture.
       this.carry = this.action(character.animations, 'Carry');
       if (!this.carry) {
-        console.warn('[avatar] clipe de carregar tábua não encontrado no GLB');
+        console.warn('[avatar] plank-carry clip not found in the GLB');
       }
 
-      // E a água, que são **dois** e valem como um: sem `Float` não há pose de
-      // boiar, e sem `Swim` a braçada nunca começa — um par pela metade daria um
-      // corpo que boia e depois desliza sem gesto, que é pior que o corpo em pé
-      // que a locomoção desenhava antes de os dois existirem. Faltando qualquer
-      // um, a água devolve peso zero e o jogo volta a ser o de então.
+      // And the water, which is **two** and counts as one: with no `Float` there
+      // is no floating pose, and with no `Swim` the stroke never starts — half a
+      // pair would give a body that floats and then slides with no gesture, which
+      // is worse than the upright body locomotion drew before the two existed.
+      // With either one missing, the water returns zero weight and the game goes
+      // back to being the one from then.
       this.float = this.action(character.animations, 'Float');
       this.swim = this.action(character.animations, 'Swim');
       if (!this.float || !this.swim) {
-        console.warn('[avatar] clipes de água não encontrados no GLB; o corpo nada sem pose');
+        console.warn('[avatar] water clips not found in the GLB; the body swims with no pose');
       }
       if (skinned) this.plank.attach((skinned as THREE.SkinnedMesh).skeleton, this.root);
 
-      // Quem avança o tempo destes é um relógio, quadro a quadro: a passada para
-      // andar e correr, a velocidade vertical para o ar, o cronômetro do pouso
-      // para o pouso. O parado é o único que não: ele respira no ritmo dele, que
-      // não tem nada a ver com a velocidade de ninguém.
+      // What advances the time on these is a clock, frame by frame: the stride for
+      // walking and running, the vertical speed for the air, the landing timer for
+      // the landing. Idle is the only one that isn't: it breathes at its own
+      // rhythm, which has nothing to do with anyone's speed.
       this.walk.setEffectiveTimeScale(0);
       this.run.setEffectiveTimeScale(0);
       this.jumpAir?.setEffectiveTimeScale(0);
       this.jumpLand?.setEffectiveTimeScale(0);
-      // A escalada é indexada pela altura vencida, como a passada é pela
-      // distância no chão. Parado na escada a fase não anda, e o personagem
-      // congela agarrado — que é exatamente o que se quer.
+      // Climbing is indexed by the height cleared, as the stride is by distance on
+      // the ground. Standing still on the ladder the phase doesn't advance, and the
+      // character freezes clinging to it — which is exactly what's wanted.
       this.climbUp?.setEffectiveTimeScale(0);
-      // E o timão pelo ângulo da roda, pela mesma razão: parado com o leme
-      // carregado, o timoneiro fica com as mãos nos punhos em que a roda parou.
+      // And the helm by the wheel's angle, for the same reason: stopped with the
+      // rudder held over, the helmsman keeps his hands on the spoke handles where
+      // the wheel stopped.
       this.helm?.setEffectiveTimeScale(0);
-      // A tábua também, mas por um motivo diferente dos outros: a fase dela não
-      // sai de grandeza nenhuma do mundo, sai de um relógio — e o relógio é o
-      // `CarryClock`, do lado de fora, para que a respiração não recomece do
-      // zero a cada vez que a mão volta à madeira.
+      // The plank too, but for a different reason than the others: its phase comes
+      // from no quantity in the world, it comes from a clock — and the clock is
+      // `CarryClock`, on the outside, so that the breathing doesn't restart from
+      // zero every time the hand goes back to the lumber.
       this.carry?.setEffectiveTimeScale(0);
-      // A braçada é indexada pela **distância nadada**, como a passada é pela
-      // distância no chão: é o que faz a mão empurrar água em vez de patinar
-      // nela, em qualquer velocidade de nado.
+      // The stroke is indexed by the **distance swum**, as the stride is by
+      // distance on the ground: it's what makes the hand push water instead of
+      // skating on it, at any swimming speed.
       this.swim?.setEffectiveTimeScale(0);
-      // E a boia pelo tempo, da mesma família da tábua e do parado — só que num
-      // relógio que este arquivo não possui, para que a respiração de quem cai no
-      // mar duas vezes não recomece do zero na segunda. Ver `SwimClock`.
+      // And the float by time, same family as the plank and idle — only on a clock
+      // this file doesn't own, so that the breathing of someone who falls into the
+      // sea twice doesn't restart from zero the second time. See `SwimClock`.
       this.float?.setEffectiveTimeScale(0);
 
       this.loaded = true;
       return true;
     } catch (error) {
-      console.warn('[avatar] não foi possível carregar o personagem:', error);
+      console.warn('[avatar] could not load the character:', error);
       return false;
     }
   }
@@ -360,19 +367,20 @@ export class PlayerAvatar {
   }
 
   /**
-   * Prepara o recorte da cabeça nos materiais da malha.
+   * Sets up the head clipping on the mesh's materials.
    *
-   * Os índices saem de `skeleton.bones`, que é exatamente a tabela que o atributo
-   * `skinIndex` da geometria referencia — procurar pelo nome do osso no grafo da
-   * cena daria um `Object3D` certo e um índice errado.
+   * The indices come from `skeleton.bones`, which is exactly the table the
+   * geometry's `skinIndex` attribute references — looking the bone up by name in
+   * the scene graph would give the right `Object3D` and the wrong index.
    *
-   * Falhar aqui não derruba nada: sem recorte o avatar só não liga o corpo em
-   * primeira pessoa, e o jogo volta a ser o de antes. É a mesma política que o
-   * arquivo já aplica ao clipe de pulo e ao de escalada.
+   * Failing here brings nothing down: with no clipping the avatar just doesn't
+   * turn the body on in first person, and the game goes back to what it was
+   * before. It's the same policy the file already applies to the jump clip and to
+   * the climb clip.
    */
   private installHeadClip(mesh: THREE.SkinnedMesh | null): void {
     if (!mesh) {
-      console.warn('[avatar] malha com esqueleto não encontrada no GLB; sem corpo em 1ª pessoa');
+      console.warn('[avatar] skinned mesh not found in the GLB; no first-person body');
       return;
     }
 
@@ -380,7 +388,7 @@ export class PlayerAvatar {
     const head = bones.findIndex((bone) => bone.name === 'head');
     const neck = bones.findIndex((bone) => bone.name === 'neck');
     if (head < 0) {
-      console.warn('[avatar] osso `head` não encontrado no GLB; sem corpo em 1ª pessoa');
+      console.warn('[avatar] `head` bone not found in the GLB; no first-person body');
       return;
     }
 
@@ -389,175 +397,185 @@ export class PlayerAvatar {
   }
 
   /**
-   * Prepara a torção de primeira pessoa. Falhar aqui custa só a torção: o corpo
-   * continua andando, pulando e subindo escada, apontado para onde anda.
+   * Sets up the first-person twist. Failing here costs only the twist: the body
+   * keeps walking, jumping and climbing the ladder, pointed where it walks.
    */
   private installTwist(mesh: THREE.SkinnedMesh | null): void {
     if (!mesh) return;
     this.twistReady = this.body.attach(mesh.skeleton, this.root);
     if (!this.twistReady) {
-      console.warn('[avatar] coluna não encontrada no GLB; o corpo não se torce em 1ª pessoa');
+      console.warn('[avatar] spine not found in the GLB; the body does not twist in first person');
     }
   }
 
   /**
-   * Prepara o pescoço que segue o olhar. Falhar custa só o gesto — e ele só
-   * aparece no corpo visto de fora, que é o do adversário. Ver `HeadLook`.
+   * Sets up the neck that follows the gaze. Failing costs only the gesture — and
+   * it only shows on the body seen from outside, which is the opponent's. See
+   * `HeadLook`.
    */
   private installHeadLook(mesh: THREE.SkinnedMesh | null): void {
     if (!mesh) return;
     this.headLookReady = this.headLook.attach(mesh.skeleton, this.root);
     if (!this.headLookReady) {
-      console.warn('[avatar] pescoço não encontrado no GLB; a cabeça não segue o olhar');
+      console.warn('[avatar] neck not found in the GLB; the head does not follow the gaze');
     }
   }
 
-  /** Pendura o corpo no modelo do navio. */
+  /** Hangs the body on the ship model. */
   attach(parent: THREE.Object3D): void {
     parent.add(this.root);
   }
 
   /**
-   * @param firstPerson `true` quando a câmera está nos olhos deste corpo.
+   * @param firstPerson `true` when the camera is in this body's eyes.
    *
-   * A política de quando o corpo aparece é do personagem, não do laço principal:
-   * quem sabe que o canhão tira a câmera de dentro da cabeça é quem conhece as
-   * estações. A regra é uma frase — **o corpo aparece quando a câmera está nos
-   * olhos dele** —, e ela cobre os dois casos de uma vez.
+   * The policy for when the body shows belongs to the character, not to the main
+   * loop: whoever knows that the cannon takes the camera out of the head is
+   * whoever knows the stations. The rule is one sentence — **the body shows when
+   * the camera is in its eyes** —, and it covers both cases at once.
    *
-   * Escondido, o corpo continua animando. Parar o mixer junto faria o
-   * personagem aparecer congelado no quadro em que sumiu, na hora em que a
-   * câmera se solta (tecla `C`) ou em que se larga o canhão.
+   * Hidden, the body keeps animating. Stopping the mixer along with it would make
+   * the character show up frozen on the frame it vanished on, the moment the
+   * camera comes loose (`C` key) or the cannon is let go.
    */
   update(dt: number, player: PlayerController, firstPerson: boolean): void {
     if (!this.loaded || !this.mixer || !this.idle || !this.walk || !this.run) return;
 
-    // Corpo desligado não gasta mixer. É o contrário da regra do parágrafo
-    // acima, e de propósito: ali o corpo some por um quadro e volta (a câmera se
-    // solta, o canhão é largado), aqui ele some por uma partida inteira.
+    // A body that's off doesn't spend mixer. It's the opposite of the rule in the
+    // paragraph above, and on purpose: there the body vanishes for a frame and
+    // comes back (the camera comes loose, the cannon is let go), here it vanishes
+    // for a whole match.
     if (this.hidden) {
       this.root.visible = false;
       return;
     }
 
-    // No canhão a câmera vai para trás da culatra e os pés ficam onde estavam ao
-    // apertar o botão — o corpo apareceria de fora, decapitado, metros ao lado.
+    // At the cannon the camera goes behind the breech and the feet stay where they
+    // were when the button was pressed — the body would show from outside,
+    // decapitated, meters off to the side.
     const embodied = firstPerson && this.headClips.length > 0;
     this.root.visible = !firstPerson || (embodied && player.station !== 'cannon');
     this.setHeadClip(embodied);
-    // A pose **visual**, não a de colisão: numa escada os pés vencem um degrau
-    // inteiro num quadro, e é a vista que absorve isso. Ver `PlayerController`.
+    // The **visual** pose, not the collision one: on a ladder the feet clear a
+    // whole rung in one frame, and it's the view that absorbs that. See
+    // `PlayerController`.
     this.updateStation(dt, player);
 
     _velocity.set(player.velocity.x, player.velocity.z);
-    // "Andando" é o corpo avançando por gesto próprio, e na água esse gesto é a
-    // braçada. É este bit que aponta o corpo para onde ele **vai** em vez de para
-    // onde ele olha, e um nadador com o rumo preso ao olhar faz de lado o mesmo
-    // que o moonwalk fazia de costas.
+    // "Walking" is the body advancing by its own gesture, and in the water that
+    // gesture is the stroke. This is the bit that points the body where it's
+    // **going** instead of where it's looking, and a swimmer with his heading tied
+    // to his gaze does sideways what the moonwalk did backwards.
     const walking = player.gait.moving > 0.5 || player.swim.stroke > 0.5;
 
-    // A escada leva o corpo inteiro: quem está pendurado nela não está andando
-    // nem caindo. O que ela ocupa sai do orçamento antes de tudo.
+    // The ladder takes the whole body: whoever is hanging off it is neither walking
+    // nor falling. What it occupies comes off the budget before anything else.
     const climbing = this.updateClimb(player.climb);
-    // O timão sai do mesmo orçamento e pelo mesmo motivo: quem está de mãos na
-    // roda não está andando. Os dois nunca se sobrepõem — não há como estar na
-    // escada e no leme —, então somá-los não estoura o total.
+    // The helm comes off the same budget and for the same reason: whoever has his
+    // hands on the wheel isn't walking. The two never overlap — there's no way to
+    // be on the ladder and at the rudder —, so adding them doesn't blow the total.
     const helming = this.updateHelm(player.helm);
-    // E a água, que é o terceiro posto exclusivo: quem está no mar não está
-    // pendurado numa barra do mastro nem de mãos na roda. Ver `updateSwim`.
+    // And the water, which is the third exclusive station: whoever is in the sea
+    // isn't hanging off a mast rung nor with his hands on the wheel. See
+    // `updateSwim`.
     const swimming = this.updateSwim(player.swim);
-    // O pulo é o quarto, e ele não convive com a água por construção — o respingo
-    // encerra o voo em `PlayerController.enterWater`, sem disparar pouso.
+    // The jump is the fourth, and by construction it doesn't coexist with the
+    // water — the splash ends the flight in `PlayerController.enterWater`, without
+    // firing a landing.
     const jumping = this.updateJump(player.jump);
 
-    // O resto se reparte entre a tábua e a locomoção, e a soma fecha em 1. A
-    // aritmética está fora daqui porque é a única deste arquivo com invariante:
-    // ver `poseBudget`, que explica por que a tábua é a única que cede.
+    // The rest is split between the plank and locomotion, and the sum closes at 1.
+    // The arithmetic lives outside here because it's the only one in this file with
+    // an invariant: see `poseBudget`, which explains why the plank is the only one
+    // that yields.
     const { carry: carrying, ground } = poseBudget(
       { climb: climbing, helm: helming, swim: swimming, jump: jumping },
-      // O relógio pede, mas quem não tem clipe não ocupa corpo nenhum: sem esta
-      // guarda o orçamento reservaria peso para uma pose que ninguém desenha, e o
-      // que sobrasse viraria T-pose.
+      // The clock asks, but whoever has no clip occupies no body at all: without
+      // this guard the budget would reserve weight for a pose nobody draws, and
+      // whatever was left over would turn into T-pose.
       this.carry ? player.carry.weight : 0,
       player.gait.moving,
     );
     this.applyCarry(player.carry, carrying);
 
-    // A torção é exclusiva de quem está dentro do corpo. Visto de fora, o corpo
-    // inteiro apontado para onde anda continua sendo o certo — e é essa a pose
-    // que o adversário mostra.
+    // The twist is exclusive to whoever is inside the body. Seen from outside, the
+    // whole body pointed where it walks is still the right thing — and that's the
+    // pose the opponent shows.
     const twisting = embodied && this.twistReady;
     if (twisting) this.updateWornFacing(dt, player, walking);
     else this.updateFacing(dt, player, walking);
 
-    // Depois do rumo, que é quem diz para onde é "atrás".
+    // After the heading, which is what says where "behind" is.
     this.applyPosition(embodied, player, swimming);
     this.updateLocomotion(player.gait, ground, twisting && this.body.reversed);
     this.mixer.update(dt);
-    // Depois do mixer, sempre: ele reescreve os 43 ossos a cada passagem.
+    // After the mixer, always: it rewrites all 43 bones on every pass.
     if (twisting) this.body.apply();
-    // E o pescoço, que é o mesmo olhar visto do outro lado. Exclusivo de quem
-    // **não** está dentro do corpo: em primeira pessoa a cabeça está recortada e
-    // a torção do quadril ocupa o mesmo instante, e as duas rotações não
-    // comutam. Ver `HeadLook`.
+    // And the neck, which is the same gaze seen from the other side. Exclusive to
+    // whoever is **not** inside the body: in first person the head is clipped and
+    // the hip's twist takes up the same instant, and the two rotations do not
+    // commute. See `HeadLook`.
     //
-    // ⚠️ **E ele cede à água na proporção em que ela tomou o corpo.** Os dois
-    // clipes do mar não têm a cabeça onde a têm por acaso: `anim_swim.solve_attitude`
-    // resolveu a atitude do tronco e a extensão do pescoço **contra uma restrição**
-    // — o rosto nunca entra na água —, e o `verify()` de cada um mede a folga que
-    // sobrou (3,5 cm nadando, 10,4 cm boiando). `HeadLook` não conhece essa
-    // restrição: ele soma até 49° de inclinação por cima do que o clipe já resolveu,
-    // e num corpo deitado 49° para baixo é o rosto do adversário afundando toda vez
-    // que o dono dele olhar para os próprios pés. Na água a cabeça é do clipe.
+    // ⚠️ **And it yields to the water in proportion to how much of the body the
+    // water took.** The sea's two clips do not have the head where they have it by
+    // accident: `anim_swim.solve_attitude` solved the torso's attitude and the
+    // neck's extension **against a constraint** — the face never goes into the water
+    // — and each one's `verify()` measures the clearance left (3.5 cm swimming,
+    // 10.4 cm floating). `HeadLook` does not know that constraint: it adds up to 49°
+    // of tilt on top of what the clip already solved, and on a lying body 49°
+    // downward is the opponent's face sinking every time its owner looks at their own
+    // feet. In the water the head belongs to the clip.
     else if (this.headLookReady) this.headLook.apply(player.pitch * (1 - swimming));
-    // E a tábua depois dos dois, porque ela lê as matrizes dos punhos: lida
-    // antes, ela desenharia a pose do quadro anterior.
-    // O limiar é o mesmo do peso do clipe, e não do relógio: andar cede a pose
-    // à locomoção, e a madeira tem de sair junto — ninguém corre pelo porão com
-    // uma tábua flutuando à frente do peito.
+    // And the plank after both, because it reads the wrists' matrices: read before,
+    // it would draw the previous frame's pose.
+    // The threshold is the clip's weight, and not the clock's: walking gives the
+    // pose over to locomotion, and the wood has to leave with it — nobody runs
+    // through the hold with a plank floating in front of their chest.
     this.plank.update(this.root.visible && carrying > 0.35);
   }
 
   /**
-   * Assenta o corpo, recuado do olho quando é o jogador que o veste.
+   * Seats the body, set back from the eye when it is the player wearing it.
    *
-   * O recuo é no eixo do **tronco** (o modelo olha para +Z local, daí o seno e o
-   * cosseno do rumo), e não no do movimento: quem manda no enquadramento é a
-   * cabeça, e é ela que segue o tronco. Ver `FIRST_PERSON_SETBACK`.
+   * The setback is along the **torso's** axis (the model looks at local +Z, hence the
+   * sine and cosine of the heading), and not along the movement's: what rules the
+   * framing is the head, and it is the head that follows the torso. See
+   * `FIRST_PERSON_SETBACK`.
    *
-   * **No timão não há recuo**, e é a única estação em que isso vale. O recuo
-   * existe para tirar o tronco da frente do olho, e ele funciona porque o tronco
-   * acompanha o olhar; ali o corpo está travado de frente para a proa (ver
-   * `updateWornFacing`), então recuar no eixo do tronco é afastar o corpo **da
-   * roda** — os 11 cm somam ao vão que o braço já tem de vencer e as mãos do
-   * jogador caem aquém dos punhos. Compensar no clipe não serve: é o mesmo clipe
-   * que o outro jogador vê de fora, onde não há recuo nenhum.
+   * **At the helm there is no setback**, and it is the only station where that holds.
+   * The setback exists to take the torso out from in front of the eye, and it works
+   * because the torso follows the gaze; there the body is locked facing the bow (see
+   * `updateWornFacing`), so setting back along the torso's axis means moving the body
+   * away **from the wheel** — the 11 cm add to the gap the arm already has to cover
+   * and the player's hands land short of the handles. Compensating in the clip is no
+   * good: it is the same clip the other player sees from outside, where there is no
+   * setback at all.
    *
-   * **Na água o recuo continua valendo, e continua sendo 11 cm** — mas a geometria
-   * que ele resolve não é mais a mesma, e os números merecem ficar escritos.
-   * Medidos no GLB, com a origem do clipe já assentada na linha d'água e a câmera
-   * nos 22 cm de `SWIM_EYE_HEIGHT`, a articulação do pescoço fica:
+   * **In the water the setback still applies, and it is still 11 cm** — but the
+   * geometry it solves is no longer the same, and the numbers deserve writing down.
+   * Measured in the GLB, with the clip's origin already seated on the waterline and
+   * the camera at `SWIM_EYE_HEIGHT`'s 22 cm, the neck joint sits:
    *
-   * - **de pé no convés:** 28 cm abaixo e 9 cm atrás da câmera;
-   * - **boiando (`Float`):** 14 cm abaixo e 17 cm atrás — o corpo reclina 15° para
-   *   trás e o recuo soma a isso, então ele está ainda mais fora da vista que em
-   *   terra. A cabeça do clipe fica 9 cm atrás da origem, ou seja atrás da câmera;
-   * - **nadando (`Swim`):** 18 cm abaixo e **1 cm à frente**. O corpo está deitado,
-   *   a cabeça avança 19 cm da origem e o recuo mal dá conta de trazê-la para
-   *   debaixo do olho.
+   * - **standing on deck:** 28 cm below and 9 cm behind the camera;
+   * - **floating (`Float`):** 14 cm below and 17 cm behind — the body reclines 15°
+   *   backwards and the setback adds to that, so it is even further out of view than
+   *   on land. The clip's head sits 9 cm behind the origin, meaning behind the camera;
+   * - **swimming (`Swim`):** 18 cm below and **1 cm ahead**. The body is lying flat,
+   *   the head advances 19 cm from the origin and the setback barely manages to bring
+   *   it back under the eye.
    *
-   * O último caso é o único que não fecha sozinho no papel. O que salva é o
-   * `near` de 15 cm da câmera: olhando para vante, o plano de corte cai adiante do
-   * pescoço e da cabeça inteira, e o que sobra na tela são os braços na braçada,
-   * que é justamente o que se quer ver. Olhando **para baixo**, no batente do
-   * `PITCH_LIMIT`, o plano desce e o buraco que o recorte abre no pescoço volta a
-   * caber no enquadramento. Isso é coisa de olhar na tela, e o botão está à mão:
-   * `calibrate({ setback })` pela bancada `window.__game`.
+   * The last case is the only one that does not close on paper by itself. What saves
+   * it is the camera's 15 cm `near`: looking forward, the clipping plane falls ahead
+   * of the neck and of the whole head, and what is left on screen are the arms in the
+   * stroke, which is exactly what we want to see. Looking **down**, at `PITCH_LIMIT`'s
+   * stop, the plane drops and the hole the clipping opens in the neck fits back into
+   * the framing. This is a look-at-the-screen matter, and the knob is at hand:
+   * `calibrate({ setback })` through the `window.__game` bench.
    *
-   * A vertical é a outra metade do assentamento, e ela é toda da água: ver
+   * The vertical is the other half of the seating, and it is all the water's: see
    * `waterPoseY`.
    *
-   * @param water quanto do corpo os clipes de água ocuparam, em [0, 1].
+   * @param water how much of the body the water clips took, in [0, 1].
    */
   private applyPosition(embodied: boolean, player: PlayerController, water: number): void {
     this.root.position.copy(this.stationPosition);
@@ -568,22 +586,21 @@ export class PlayerAvatar {
   }
 
   /**
-   * Leva o corpo até a estação no mesmo passo que a câmera.
+   * Takes the body to the station on the same step as the camera.
    *
-   * Assumir o timão **teleporta** os pés: `takeHelm` escreve `local` direto em
-   * `HELM_STAND`, que pode estar a dois metros. A câmera nunca sofreu com isso
-   * porque o `CameraRig` já interpolava a troca em 0,28 s — só que o corpo não, e
-   * enquanto ele estava escondido ninguém viu. Vestindo o corpo, a diferença é
-   * um pirata decapitado atravessando o convés na direção do jogador enquanto a
-   * câmera ainda não saiu do lugar.
+   * Taking the helm **teleports** the feet: `takeHelm` writes `local` straight into
+   * `HELM_STAND`, which can be two meters away. The camera never suffered from that
+   * because `CameraRig` already interpolated the change over 0.28 s — the body did
+   * not, and while it was hidden nobody saw. Wearing the body, the difference is a
+   * decapitated pirate crossing the deck toward the player while the camera has not
+   * moved yet.
    *
-   * A curva é a mesma do rig, deliberadamente: mesma duração, mesmo smoothstep,
-   * mesma constante. Duas suavizações parecidas mas não idênticas seriam pior
-   * que nenhuma.
+   * The curve is deliberately the rig's: same duration, same smoothstep, same
+   * constant. Two similar but not identical smoothings would be worse than none.
    */
   private updateStation(dt: number, player: PlayerController): void {
     if (player.stationChangeCount !== this.lastStationChange) {
-      // A primeira vez é o spawn, e ali não há de onde vir.
+      // The first time is the spawn, and there is nowhere to come from there.
       this.stationBlend = this.lastStationChange < 0 ? 1 : 0;
       this.lastStationChange = player.stationChangeCount;
     }
@@ -599,12 +616,12 @@ export class PlayerAvatar {
   }
 
   /**
-   * Liga e desliga o recorte da cabeça.
+   * Switches the head clipping on and off.
    *
-   * Só um uniform muda — nem recompila shader nem troca de programa —, então
-   * soltar a câmera com `C` devolve a cabeça no mesmo quadro. Escrever sempre, em
-   * vez de comparar com o estado anterior, é o que mantém o limiar calibrado
-   * valendo depois de uma ida e volta à terceira pessoa.
+   * Only a uniform changes — no shader recompile, no program switch — so releasing
+   * the camera with `C` gives the head back on the same frame. Writing every time,
+   * instead of comparing with the previous state, is what keeps a calibrated
+   * threshold valid after a round trip to third person.
    */
   private setHeadClip(on: boolean): void {
     const threshold = on ? this.headClipThreshold : HEAD_CLIP_OFF;
@@ -612,39 +629,44 @@ export class PlayerAvatar {
   }
 
   /**
-   * Para onde o corpo aponta.
+   * Where the body points.
    *
-   * Não é para onde o jogador olha. Sem clipes de andar de lado e de ré, um
-   * corpo preso ao olhar faz o personagem deslizar de costas quando se anda
-   * para trás — o "moonwalk" clássico. Virar o corpo para a direção do
-   * movimento é mentira barata e invisível: a animação sempre anda para a
-   * frente, que é a única coisa que ela sabe fazer.
+   * It is not where the player looks. With no side-step and backward clips, a body
+   * tied to the gaze makes the character slide backwards when walking back — the
+   * classic "moonwalk". Turning the body toward the direction of movement is a cheap
+   * and invisible lie: the animation always walks forward, which is the only thing it
+   * knows how to do.
    *
-   * **Vale igual na água**, e `walking` já chega contando a braçada: `Swim` é um
-   * crawl que avança de cabeça, e um nadador com o rumo preso ao olhar cruzaria o
-   * mar de lado sempre que o jogador olhasse para a escada em vez de para onde
-   * está indo. Boiando não há para onde apontar, e aí o olhar volta a mandar.
+   * **It holds the same in the water**, and `walking` already arrives counting the
+   * stroke: `Swim` is a crawl that advances head-first, and a swimmer with their
+   * heading tied to the gaze would cross the sea sideways every time the player
+   * looked at the ladder instead of where they are going. Floating there is nowhere
+   * to point, and then the gaze rules again.
    */
   private updateFacing(dt: number, player: PlayerController, walking: boolean): void {
-    // No ar ninguém torce o corpo: o rumo é o que se levou na decolagem. Sem
-    // isto a locomoção se apaga durante o voo, o alvo cai de volta para o olhar,
-    // e quem pula de lado vê o personagem girar no meio do salto.
+    // In the air nobody twists their body: the heading is whatever was taken at
+    // takeoff. Without this the locomotion fades out during the flight, the target
+    // falls back to the gaze, and whoever jumps sideways sees the character spin
+    // mid-leap.
     if (this.facingReady && player.jump.air > 0.5) return;
 
-    // O personagem foi modelado olhando para -Y no Blender, que vira +Z depois
-    // da conversão para Y-up do glTF.
+    // The character was modeled looking at -Y in Blender, which becomes +Z after
+    // glTF's Y-up conversion.
     //
-    // Na escada o rumo não é escolha: o corpo encara a escada, que fica a vante
-    // do jogador (-Z do navio). Deixá-lo seguir o olhar faria o pirata subir de
-    // lado — e o clipe inteiro foi construído com as barras à frente do peito.
+    // On the ladder the heading is not a choice: the body faces the ladder, which is
+    // forward of the player (the ship's -Z). Letting it follow the gaze would make
+    // the pirate climb sideways — and the whole clip was built with the rungs in
+    // front of the chest.
     //
-    // No timão vale o mesmo, e a roda também fica a vante: o clipe põe as mãos
-    // em punhos que estão numa posição fixa do navio, e um corpo que gira leva as
-    // duas junto. Ver `updateWornFacing`, que paga o preço disso por dentro.
+    // At the helm the same holds, and the wheel is forward too: the clip puts the
+    // hands on handles that are at a fixed position on the ship, and a body that
+    // turns takes both with it. See `updateWornFacing`, which pays the price of that
+    // from the inside.
     if (player.onLadder || player.station === 'helm') {
-      // O rumo da escada vem do **controlador**, e não é mais um `Math.PI` cravado
-      // aqui: aquele número era o rumo da escada do mastro, a única que existia.
-      // Uma escada de embarque fica no costado e é encarada de fora para dentro.
+      // The ladder's heading comes from the **controller**, and is no longer a
+      // `Math.PI` hardcoded here: that number was the mast ladder's heading, the only
+      // one there was. A boarding ladder sits on the ship's side and is faced from
+      // outside in.
       this.facing = player.onLadder ? player.ladderFacing : Math.PI;
       this.facingReady = true;
       this.applyFacing(player);
@@ -659,8 +681,8 @@ export class PlayerAvatar {
       this.facing = target;
       this.facingReady = true;
     } else {
-      // Pelo caminho mais curto: sem isto, cruzar ±π faz o corpo girar quase
-      // uma volta inteira num quadro.
+      // By the short path: without this, crossing ±π makes the body turn almost a
+      // full revolution in one frame.
       let delta = (target - this.facing) % (Math.PI * 2);
       if (delta > Math.PI) delta -= Math.PI * 2;
       if (delta < -Math.PI) delta += Math.PI * 2;
@@ -671,39 +693,39 @@ export class PlayerAvatar {
   }
 
   /**
-   * Para onde o corpo aponta quando é o jogador que o está vestindo.
+   * Where the body points when it is the player wearing it.
    *
-   * O tronco vai para o olhar **sem suavização nenhuma**: ele é a câmera, e um
-   * peito que persegue a câmera com atraso faz o mundo girar dentro do próprio
-   * corpo. Quem amortece é a perna, do outro lado da torção.
+   * The torso goes with the gaze **with no smoothing at all**: it is the camera, and
+   * a chest that chases the camera with a delay makes the world turn inside your own
+   * body. What damps is the leg, on the other side of the twist.
    *
-   * O rumo das pernas não é o mesmo em todo lugar, e a lista de exceções é curta
-   * mas obrigatória — cada uma delas é um lugar onde o corpo tem os pés presos em
-   * algo e o olhar não.
+   * The legs' heading is not the same everywhere, and the list of exceptions is short
+   * but mandatory — each one is a place where the body has its feet attached to
+   * something and the gaze does not.
    */
   private updateWornFacing(dt: number, player: PlayerController, walking: boolean): void {
-    // Na escada o corpo está pendurado nas barras: nem o rumo nem a torção são
-    // escolha de quem olha. Ver `updateFacing`, que resolve o mesmo de fora.
+    // On the ladder the body is hanging from the rungs: neither the heading nor the
+    // twist is the looker's choice. See `updateFacing`, which solves the same thing
+    // from outside.
     //
-    // **E no timão, pelo mesmo motivo e com o mesmo remédio.** Os braços herdam
-    // `spine_03`: com o tronco preso ao olhar, as duas mãos saem da roda no
-    // instante em que o jogador olha para o lado, e não há clipe que conserte
-    // isso — o clipe põe a mão num punho, não no espaço. `hold` trava as pernas e
-    // zera a torção de uma vez, que é o que faz o corpo inteiro ficar de frente
-    // para a proa.
+    // **And at the helm, for the same reason and with the same remedy.** The arms
+    // inherit `spine_03`: with the torso tied to the gaze, both hands leave the wheel
+    // the instant the player looks aside, and there is no clip that fixes that — the
+    // clip puts the hand on a handle, not in space. `hold` locks the legs and zeroes
+    // the twist at once, which is what keeps the whole body facing the bow.
     //
-    // ⚠️ **E na água, por um motivo que não é o das mãos ocupadas: lá o eixo da
-    // torção deixa de ser a coluna.** `FirstPersonBody` gira o quadril em torno da
-    // vertical do avatar, e isso é uma torção de tronco enquanto o tronco está de
-    // pé. Nadando, o corpo está deitado: a mesma rotação passa a ser
-    // perpendicular à coluna, e o que ela produz não é um quadril torcido, é um
-    // nadador **dobrado de lado** como uma banana — até 65° deles, que é o limite
-    // que `LEG_OFFSET_LIMIT` autoriza sem ninguém ver problema em terra.
+    // ⚠️ **And in the water, for a reason that is not busy hands: there the twist's
+    // axis stops being the spine.** `FirstPersonBody` rotates the hip about the
+    // avatar's vertical, and that is a torso twist while the torso is upright.
+    // Swimming, the body is lying flat: that same rotation becomes perpendicular to
+    // the spine, and what it produces is not a twisted hip, it is a swimmer **bent
+    // sideways** like a banana — up to 65° of it, which is the limit
+    // `LEG_OFFSET_LIMIT` allows without anyone seeing a problem on land.
     //
-    // `hold` planta as pernas no rumo do corpo e zera o desvio, então `apply` sai
-    // pela porta da frente e o clipe chega intacto ao mixer. O que se perde é a
-    // separação pernas/tronco na água, e ali ela não custa nada: quem está
-    // boiando não tem pé no chão para escorregar.
+    // `hold` plants the legs on the body's heading and zeroes the offset, so `apply`
+    // goes out the front door and the clip reaches the mixer intact. What is lost is
+    // the legs/torso separation in the water, and there it costs nothing: whoever is
+    // floating has no foot on the ground to slip with.
     if (player.inWater) {
       this.facing = player.yaw + Math.PI;
       this.facingReady = true;
@@ -712,9 +734,10 @@ export class PlayerAvatar {
       return;
     }
 
-    // O custo é real e é o mesmo que a escada já paga: o corpo deixa de
-    // acompanhar o olhar. Vale a troca justamente onde as mãos estão ocupadas —
-    // e `legTarget` já plantava as pernas aqui, então metade dele já era devida.
+    // The cost is real and it is the same one the ladder already pays: the body
+    // stops following the gaze. The trade is worth it precisely where the hands are
+    // busy — and `legTarget` already planted the legs here, so half of it was already
+    // owed.
     if (player.onLadder || player.station === 'helm') {
       this.facing = player.onLadder ? player.ladderFacing : Math.PI;
       this.facingReady = true;
@@ -731,88 +754,88 @@ export class PlayerAvatar {
   }
 
   /**
-   * Escreve a orientação do corpo: rumo mais **inclinação de escada**.
+   * Writes the body's orientation: heading plus **ladder rake**.
    *
-   * É o único escritor de `root.rotation`, e passou a ser por necessidade: a
-   * inclinação vive no eixo X, então um caminho que só escrevesse `.y` deixaria o
-   * corpo deitado 14° depois de o jogador largar a escada de embarque.
+   * It is the only writer of `root.rotation`, and it became so out of necessity: the
+   * rake lives on the X axis, so a path that only wrote `.y` would leave the body
+   * lying at 14° after the player let go of the boarding ladder.
    *
-   * ⚠️ **A inclinação é o que faz aquela escada funcionar.** `ClimbUp` foi
-   * construído para barras numa reta vertical à frente do peito; a escada de
-   * embarque é inclinada 14,11° para acompanhar o bojo, e um corpo em pé nela vê a
-   * barra de cima fugir 14° para o lado — um erro que **cresce com a altura**,
-   * porque a reta se afasta da vertical linearmente. Inclinando o corpo o mesmo
-   * ângulo, a escada volta a ser vertical no referencial dele e a pegada casa em
-   * qualquer barra, de graça.
+   * ⚠️ **The rake is what makes that ladder work.** `ClimbUp` was built for rungs on
+   * a vertical line in front of the chest; the boarding ladder is raked 14.11° to
+   * follow the bilge, and an upright body on it sees the rung above escape 14° to the
+   * side — an error that **grows with height**, because the line moves away from the
+   * vertical linearly. Tilting the body by the same angle makes the ladder vertical
+   * again in its frame and the grip matches on any rung, for free.
    *
-   * A ordem `'YXZ'` compõe `Ry(rumo) · Rx(−inclinação)`: gira primeiro para o bordo
-   * e só então deita o corpo em torno do eixo lateral **dele**. Na escada do mastro
-   * e em terra firme a inclinação é zero, e isto vira o `rotation.y` de sempre.
+   * The `'YXZ'` order composes `Ry(heading) · Rx(−rake)`: it turns toward the side
+   * first and only then lays the body down about **its own** lateral axis. On the
+   * mast ladder and on solid ground the rake is zero, and this becomes the usual
+   * `rotation.y`.
    */
   private applyFacing(player: PlayerController): void {
-    // Negativo porque o modelo olha para +Z local e um `Rx` positivo levaria o
-    // topo do corpo *para a frente*; o que se quer é o topo indo para trás, na
-    // direção em que a escada se afasta do costado.
+    // Negative because the model looks at local +Z and a positive `Rx` would take the
+    // top of the body *forward*; what we want is the top going backwards, in the
+    // direction the ladder moves away from the planking.
     const tilt = player.onLadder ? -player.ladderTilt : 0;
     this.root.rotation.set(tilt, this.facing, 0, 'YXZ');
   }
 
   /**
-   * Para onde as pernas deveriam apontar, ou `null` para congelar onde estão.
+   * Where the legs should point, or `null` to freeze them where they are.
    *
-   * Fora do chão o rumo é o que se levou na decolagem — sem isto, girar o mouse
-   * no meio do salto gira as pernas junto, que é o mesmo defeito que o rumo de
-   * terceira pessoa já evita. No timão os pés ficam plantados atrás da roda:
-   * `takeHelm` teleporta o jogador para lá e o olhar continua livre, então quem
-   * olhasse para a popa veria o próprio corpo dar meia-volta com os pés parados.
+   * Off the ground the heading is whatever was taken at takeoff — without this,
+   * turning the mouse mid-jump turns the legs with it, which is the same defect the
+   * third-person heading already avoids. At the helm the feet stay planted behind the
+   * wheel: `takeHelm` teleports the player there and the gaze stays free, so anyone
+   * looking astern would see their own body turn around with its feet still.
    */
   private legTarget(player: PlayerController, walking: boolean): number | null {
     if (player.jump.air > 0.5) return null;
     if (player.station === 'helm') return Math.PI;
-    // Andando, a direção do movimento; parado, o olhar — e é o `FirstPersonBody`
-    // que decide se aquilo é uma caminhada de frente ou de ré.
+    // Walking, the direction of movement; standing still, the gaze — and it is
+    // `FirstPersonBody` that decides whether that is a forward or a backward walk.
     return walking ? Math.atan2(_velocity.x, _velocity.y) : player.yaw + Math.PI;
   }
 
   /**
-   * Põe os dois clipes no mesmo ponto da passada e reparte os pesos.
+   * Puts both clips at the same point of the stride and splits the weights.
    *
-   * Escrever `action.time` em vez de acelerar com `timeScale` tira qualquer
-   * chance de deriva: dois clipes de durações diferentes rodando por conta
-   * própria se afastam alguns milissegundos por ciclo, e em um minuto o contato
-   * de um cai no meio do apoio do outro.
+   * Writing `action.time` instead of speeding up with `timeScale` removes any chance
+   * of drift: two clips of different durations running on their own move a few
+   * milliseconds apart per cycle, and within a minute one's contact lands in the
+   * middle of the other's stance.
    */
   private updateLocomotion(gait: GaitClock, ground: number, reversed: boolean): void {
     const walk = this.walk!;
     const run = this.run!;
 
-    // Andar de ré é o ciclo de caminhada lido de trás para frente. Funciona porque
-    // os contatos de pé continuam caindo nos mesmos instantes da passada — é a
-    // mesma razão pela qual descer a escada é o `ClimbUp` com a fase recuando.
+    // Walking backwards is the walk cycle read back to front. It works because the
+    // foot contacts still land at the same instants of the stride — it is the same
+    // reason going down the ladder is `ClimbUp` with the phase running backwards.
     //
-    // A inversão fica **na leitura**, e não na fase: a fase é compartilhada com o
-    // balanço da câmera e com `tests/locomotion.ts`, e virá-la ali faria a câmera
-    // solavancar ao contrário do pé. O resto (`%1`) é para a fase zero não cair
-    // exatamente no fim do clipe.
+    // The inversion lives **in the reading**, and not in the phase: the phase is
+    // shared with the camera's bob and with `tests/locomotion.ts`, and flipping it
+    // there would make the camera jolt opposite to the foot. The remainder (`%1`)
+    // keeps phase zero from landing exactly at the end of the clip.
     const phase = reversed ? (1 - gait.phase) % 1 : gait.phase;
     walk.time = phase * (walk.getClip().duration || 1);
     run.time = phase * (run.getClip().duration || 1);
 
     walk.setEffectiveWeight((1 - gait.runBlend) * gait.moving * ground);
     run.setEffectiveWeight(gait.runBlend * gait.moving * ground);
-    // O que sobra vai para o parado. Sem esta linha o personagem volta à pose de
-    // repouso do rig quando ninguém anda — a T-pose, de braços abertos. É um
-    // defeito que não aparece no Blender e aparece no primeiro segundo de jogo.
+    // What is left goes to the idle. Without this line the character falls back to
+    // the rig's rest pose when nobody walks — the T-pose, arms out. It is a defect
+    // that does not show up in Blender and does show up in the game's first second.
     this.idle!.setEffectiveWeight((1 - gait.moving) * ground);
   }
 
   /**
-   * Põe os dois clipes do pulo no ponto certo. Devolve quanto do corpo eles
-   * tomaram, que é o que a locomoção deixa de ocupar.
+   * Puts the jump's two clips at the right point. Returns how much of the body they
+   * took, which is what the locomotion stops occupying.
    *
-   * O do ar é indexado pela **velocidade vertical** e não pelo tempo, então
-   * escrever `.time` aqui não é uma otimização como na passada: é a única forma
-   * de tocá-lo. Ver `JumpClock`.
+   * The air one is indexed by **vertical velocity** and not by time, so writing
+   * `.time` here is not an optimization as it is on the stride: it is the only way to
+   * play it. See `JumpClock`.
    */
   private updateJump(jump: JumpClock): number {
     const air = this.jumpAir;
@@ -828,14 +851,14 @@ export class PlayerAvatar {
   }
 
   /**
-   * Põe o clipe de escalada no ponto certo do ciclo. Devolve quanto do corpo ele
-   * tomou.
+   * Puts the climb clip at the right point of the cycle. Returns how much of the body
+   * it took.
    *
-   * Como a passada, o clipe é **posicionado** e não tocado: quem escolhe o
-   * quadro é a altura vencida, que o `ClimbClock` transforma em fase. Escrever
-   * `.time` em vez de acelerar com `timeScale` é o que garante que a mão fique
-   * na barra em qualquer velocidade de subida — e é o que faz descer funcionar
-   * de graça, com a fase andando para trás.
+   * Like the stride, the clip is **positioned** and not played: what chooses the frame
+   * is the height gained, which `ClimbClock` turns into a phase. Writing `.time`
+   * instead of speeding up with `timeScale` is what guarantees the hand stays on the
+   * rung at any climbing speed — and it is what makes going down work for free, with
+   * the phase running backwards.
    */
   private updateClimb(climb: ClimbClock): number {
     const action = this.climbUp;
@@ -847,13 +870,13 @@ export class PlayerAvatar {
   }
 
   /**
-   * Põe o clipe do timão no ponto certo do ciclo. Devolve quanto do corpo ele
-   * tomou.
+   * Puts the helm clip at the right point of the cycle. Returns how much of the body
+   * it took.
    *
-   * Mesmo contrato da escalada, com outra régua: quem escolhe o quadro é o
-   * ângulo da roda, que o `HelmClock` transforma em fase. Escrever `.time` é o
-   * que crava a mão no punho em qualquer cadência de giro — e é o que faz girar
-   * para bombordo funcionar de graça, com a fase andando para trás.
+   * The same contract as the climb, with another ruler: what chooses the frame is the
+   * wheel's angle, which `HelmClock` turns into a phase. Writing `.time` is what pins
+   * the hand to the handle at any rate of turn — and it is what makes turning to port
+   * work for free, with the phase running backwards.
    */
   private updateHelm(clock: HelmClock): number {
     const action = this.helm;
@@ -865,33 +888,33 @@ export class PlayerAvatar {
   }
 
   /**
-   * Põe os dois clipes da água no ponto certo e os reparte entre si. Devolve
-   * quanto do corpo eles tomaram.
+   * Puts the water's two clips at the right point and splits them between themselves.
+   * Returns how much of the body they took.
    *
-   * ## Duas réguas, porque são dois gestos diferentes
+   * ## Two rulers, because they are two different gestures
    *
-   * `Swim` é indexado pela **distância nadada**, como a passada é pela distância
-   * no chão: é o que faz a mão empurrar água em vez de patinar nela, em qualquer
-   * velocidade. `Float` é indexado pelo **tempo**, como a tábua, porque boiar não
-   * tem grandeza do mundo de onde ler uma fase — é respiração, e respiração não
-   * acelera com a corrente. As duas moram no mesmo `SwimClock`, que é o único que
-   * sabe se o marujo está no mar.
+   * `Swim` is indexed by **distance swum**, as the stride is by distance on the
+   * ground: it is what makes the hand push water instead of skating on it, at any
+   * speed. `Float` is indexed by **time**, like the plank, because floating has no
+   * world quantity to read a phase from — it is breathing, and breathing does not
+   * speed up with the current. Both live in the same `SwimClock`, which is the only
+   * one that knows whether the sailor is at sea.
    *
-   * A repartição é `stroke`, o irmão do `moving` da passada: acima do limiar de
-   * movimento o corpo dá braçada, abaixo dele boia, e no meio do caminho os dois
-   * clipes se sobrepõem na mesma proporção em que o corpo está entre um gesto e o
-   * outro. `weight` é a água inteira, e é o que este método devolve — a soma dos
-   * dois pesos é exatamente ele, então o orçamento de pose não sabe que a água
-   * tem duas metades.
+   * The split is `stroke`, the sibling of the stride's `moving`: above the movement
+   * threshold the body strokes, below it floats, and in between the two clips overlap
+   * in the same proportion the body is between one gesture and the other. `weight` is
+   * the whole water, and it is what this method returns — the sum of the two weights
+   * is exactly it, so the pose budget does not know the water has two halves.
    *
-   * ## Sem clipe, peso zero
+   * ## No clip, zero weight
    *
-   * Mesma política do pulo e da escalada: um GLB antigo em cache do navegador não
-   * pode tirar do jogador o resto do corpo. Faltando qualquer um dos dois, a água
-   * devolve zero, a locomoção reassume o orçamento e o corpo volta a nadar em pé
-   * — que é exatamente o que ele fazia antes de estes clipes existirem. É por
-   * isso que o **valor devolvido** é o que assenta a vertical em `waterPoseY`, e
-   * não `clock.weight`: sem clipe de água não há origem de água para corrigir.
+   * The same policy as the jump and the climb: an old GLB in the browser's cache
+   * cannot take the rest of the body away from the player. With either of the two
+   * missing, the water returns zero, the locomotion takes the budget back and the body
+   * goes back to swimming upright — which is exactly what it did before these clips
+   * existed. That is why the **returned value** is what seats the vertical in
+   * `waterPoseY`, and not `clock.weight`: with no water clip there is no water origin
+   * to correct.
    */
   private updateSwim(clock: SwimClock): number {
     const float = this.float;
@@ -908,9 +931,9 @@ export class PlayerAvatar {
   }
 
   /**
-   * A tábua nas mãos, no peso que `poseBudget` liberou para ela.
+   * The plank in the hands, at the weight `poseBudget` released for it.
    *
-   * @param weight quanto de corpo a tábua ficou, já grampeado ao orçamento.
+   * @param weight how much body the plank got, already clamped to the budget.
    */
   private applyCarry(clock: CarryClock, weight: number): void {
     const action = this.carry;
@@ -920,7 +943,7 @@ export class PlayerAvatar {
     action.setEffectiveWeight(weight);
   }
 
-  /** Diagnóstico para a bancada `window.__game` e para o overlay de telemetria. */
+  /** Diagnostics for the `window.__game` bench and for the telemetry overlay. */
   get debug(): {
     facing: number;
     walk: number;
@@ -930,15 +953,15 @@ export class PlayerAvatar {
     land: number;
     climb: number;
     helm: number;
-    /** Peso da boia. Zero fora da água — e zero também sem os clipes no GLB. */
+    /** The float's weight. Zero out of the water — and zero without the GLB's clips. */
     float: number;
-    /** Peso da braçada, que divide a água com a boia por `SwimClock.stroke`. */
+    /** The stroke's weight, which splits the water with the float by `SwimClock.stroke`. */
     swim: number;
-    /** Torção do quadril em vigor, em radianos. Zero fora da primeira pessoa. */
+    /** Hip twist in effect, in radians. Zero outside first person. */
     twist: number;
-    /** `true` quando a passada está sendo lida ao contrário. */
+    /** `true` when the stride is being read in reverse. */
     reversed: boolean;
-    /** Limiar do recorte da cabeça. `HEAD_CLIP_OFF` quer dizer cabeça inteira. */
+    /** Head clipping threshold. `HEAD_CLIP_OFF` means the whole head. */
     headClip: number;
   } {
     return {
@@ -959,16 +982,16 @@ export class PlayerAvatar {
   }
 
   /**
-   * Calibração ao vivo, pela bancada `window.__game`.
+   * Live calibration, through the `window.__game` bench.
    *
-   * Onde o pescoço tem de sumir e o quanto o corpo recua do olho são coisas que
-   * só se decidem com o olho na tela. Estão aqui, e não em `Settings`, porque são
-   * escolhas de autor e não de jogador: uma vez acertadas, viram as constantes do
-   * topo do arquivo.
+   * Where the neck has to vanish and how far the body sets back from the eye are
+   * things you only decide with your eye on the screen. They are here, and not in
+   * `Settings`, because they are the author's choices and not the player's: once
+   * settled, they become the constants at the top of the file.
    *
-   * @param threshold peso a partir do qual o fragmento some, em [0, 1].
-   * @param neckShare quanto o osso `neck` conta para esse peso, em [0, 1].
-   * @param setback recuo do corpo em relação ao olho, em metros.
+   * @param threshold weight from which the fragment disappears, in [0, 1].
+   * @param neckShare how much the `neck` bone counts toward that weight, in [0, 1].
+   * @param setback the body's setback relative to the eye, in meters.
    */
   calibrate(options: { threshold?: number; neckShare?: number; setback?: number }): void {
     if (options.threshold !== undefined) this.headClipThreshold = options.threshold;
@@ -978,17 +1001,17 @@ export class PlayerAvatar {
   }
 
   /**
-   * Descarta **este** corpo.
+   * Disposes of **this** body.
    *
-   * ⚠️ A geometria e as texturas **não** são liberadas aqui, e não é
-   * esquecimento: elas são do `CharacterAsset` e o outro avatar ainda está
-   * usando as mesmas. Liberá-las daqui apagaria o corpo do adversário junto com
-   * o do jogador. Quem as libera é `disposeCharacterAsset`, depois dos dois.
+   * ⚠️ The geometry and the textures are **not** released here, and that is not an
+   * oversight: they belong to `CharacterAsset` and the other avatar is still using
+   * the same ones. Releasing them from here would erase the opponent's body along
+   * with the player's. What releases them is `disposeCharacterAsset`, after both.
    */
   dispose(): void {
     this.mixer?.stopAllAction();
-    // Antes de varrer a árvore: a tábua é filha deste nó, mas a geometria e o
-    // material dela são do módulo `PlankAsset` e ainda servem os dois cascos.
+    // Before sweeping the tree: the plank is a child of this node, but its geometry
+    // and material belong to the `PlankAsset` module and still serve both hulls.
     this.plank.dispose();
     this.root.removeFromParent();
     for (const material of this.materials) material.dispose();

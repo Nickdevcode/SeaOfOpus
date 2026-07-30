@@ -1,77 +1,80 @@
 /**
- * Testes dos relógios do corpo — as propriedades que sustentam corpo e câmera.
+ * Tests for the body clocks — the properties that hold up body and camera.
  *
- * Rodável no navegador, como os outros:
+ * Runnable in the browser, like the others:
  *
  * ```js
  * const t = await import('/tests/locomotion.ts');
  * console.table(t.runLocomotionTests().cases);
  * ```
  *
- * **O que se prova aqui, na passada.** A animação inteira se apoia numa
- * igualdade só: o pé fica parado no chão durante o apoio *se e somente se* a
- * fase avançar pela distância percorrida, e não pelo tempo. Escrito em uma
- * linha:
+ * **What gets proved here, for the stride.** The whole animation rests on one
+ * equality: the foot stays planted on the ground through stance *if and only if*
+ * the phase advances by distance traveled, and not by time. Written on one
+ * line:
  *
- *     fase += (velocidade × dt) / distância_do_ciclo
+ *     phase += (speed × dt) / cycle_distance
  *
- * Disso cai que **uma passada por ciclo cobre exatamente a distância do ciclo**,
- * em qualquer velocidade e com qualquer mistura entre andar e correr. É o que os
- * dois primeiros casos medem, integrando o relógio quadro a quadro em vez de
- * conferir a fórmula contra ela mesma.
+ * Out of that falls **one stride per cycle covers exactly the cycle distance**,
+ * at any speed and with any blend between walking and running. That is what the
+ * first two cases measure, integrating the clock frame by frame instead of
+ * checking the formula against itself.
  *
- * Os outros dois cobrem a fase da curva vertical, que é onde um sinal trocado
- * passa despercebido: o corpo tem de estar **baixo** no contato quando anda e
- * **alto** no meio do voo quando corre. Invertido, a câmera sobe quando o pé
- * bate — e o efeito lê como "algo está estranho", nunca como "o cosseno está
- * com o sinal errado".
+ * The other two cover the phase of the vertical curve, which is where a flipped
+ * sign goes unnoticed: the body has to be **low** at contact when walking and
+ * **high** at mid-flight when running. Inverted, the camera rises when the foot
+ * lands — and the effect reads as "something looks off", never as "the cosine
+ * has the wrong sign".
  *
- * **E no pulo.** O clipe de ar é indexado pela velocidade vertical, e disso cai
- * a propriedade que fez três clipes virarem dois: **o pulo padrão percorre o
- * clipe inteiro exatamente uma vez**, da decolagem ao contato, sem que ninguém
- * tenha ajustado uma duração para isso. Um clipe medido no relógio aterrissaria
- * no meio do ápice num pulinho e daria três voltas numa queda do mastro; este
- * satura sozinho.
+ * **And for the jump.** The air clip is indexed by vertical speed, and out of
+ * that falls the property that turned three clips into two: **the standard jump
+ * runs through the whole clip exactly once**, from takeoff to contact, without
+ * anyone having tuned a duration for it. A clip measured against the clock would
+ * land halfway through the apex on a small hop and go around three times on a
+ * fall from the mast; this one saturates on its own.
  *
- * O voo é simulado com a **mesma ordem de operações** do `PlayerController`,
- * incluindo o detalhe que morde: o chão é resolvido *antes* de o relógio ser
- * alimentado, então no quadro do contato a velocidade de impacto já vale zero.
- * Testar o relógio com a velocidade que ele "deveria" ver esconderia justamente
- * o bug que a cópia interna existe para evitar.
+ * The flight is simulated with the **same order of operations** as
+ * `PlayerController`, including the detail that bites: the ground is resolved
+ * *before* the clock is fed, so on the contact frame the impact speed is already
+ * zero. Testing the clock with the speed it "should" see would hide exactly the
+ * bug the in-test copy exists to avoid.
  *
- * **E no timão.** É o mesmo teorema da escada com outra régua, e a régua aqui é a
- * própria roda: um ciclo do clipe cobre 45° e a roda tem oito punhos, então varrer
- * o curso inteiro — de batente a batente, uma volta redonda — tem de fechar
- * **oito ciclos exatos** e devolver a fase de onde ela saiu. Traduzido para o que
- * se vê: a mão volta ao mesmo punho. O sweep roda contra o `Rudder` de verdade,
- * porque é ele quem grampeia o curso e define a cadência.
+ * **And for the helm.** It is the same theorem as the ladder with a different
+ * ruler, and the ruler here is the wheel itself: one cycle of the clip covers 45°
+ * and the wheel has eight spoke handles, so sweeping the whole travel — stop to
+ * stop, one full turn — has to close **exactly eight cycles** and hand the phase
+ * back where it started. Translated into what you see: the hand comes back to the
+ * same spoke handle. The sweep runs against the real `Rudder`, because it is the
+ * `Rudder` that clamps the travel and sets the cadence.
  *
- * E há o caso que só existe em JavaScript: metade do curso vive em ângulo
- * negativo, e `-0.3 % 1` dá `-0.3` nesta linguagem. Uma fase negativa escrita em
- * `.time` vira quadro do fim do clipe — a mão saltando um punho ao cruzar o leme
- * a meio. O último caso mede exatamente isso, com o número que quebra.
+ * And there is the case that only exists in JavaScript: half the travel lives at
+ * a negative angle, and `-0.3 % 1` gives `-0.3` in this language. A negative
+ * phase written into `.time` comes out as a frame from the end of the clip — the
+ * hand jumping a spoke handle as the rudder crosses amidships. The last case
+ * measures exactly that, with the number that breaks it.
  *
- * **E no corpo vestido.** Desde que o jogador enxerga o próprio corpo, duas
- * coisas que antes não tinham como estar erradas passaram a ter. A primeira é a
- * amplitude do balanço: em terceira pessoa a câmera podia exagerar à vontade, e
- * de dentro qualquer exagero é o tronco deslizando por baixo do olho — os casos
- * medem que a altura pedida é **a do clipe**, nas duas velocidades nativas. A
- * segunda é a dobra das pernas para andar de ré, cujo caso difícil é o strafe
- * puro: ali o desvio fica cravado nos 90° e, sem histerese, o corpo daria
- * meia-volta a cada quadro. O teste alimenta a dobra com o mesmo desvio 120
- * vezes e exige que ela não se mexa, entrando pelos dois lados.
+ * **And for the worn body.** Now that the player sees their own body, two things
+ * that had no way of being wrong before can be. The first is the amplitude of the
+ * bob: in third person the camera could exaggerate all it wanted, and from inside
+ * any exaggeration is the torso sliding under the eye — the cases measure that
+ * the height asked for is **the clip's**, at both native speeds. The second is
+ * the leg fold for walking backwards, whose hard case is the pure strafe: there
+ * the deviation sits pinned at 90° and, without hysteresis, the body would turn
+ * around every frame. The test feeds the fold the same deviation 120 times and
+ * demands that it not move, entering from both sides.
  *
- * **E na água.** Os dois clipes do mar trouxeram três coisas que não existiam em
- * lugar nenhum desta base. A primeira é uma **origem diferente**: eles têm `y = 0`
- * na linha d'água, e não no chão sob os pés, então o corpo precisa subir 1,44 m
- * para o clipe cair onde ele foi construído — e o caso que mede isso é o que
- * amarra os 12 cm de divergência entre a física e o clipe (ver `waterPoseY`). A
- * segunda é a **soma dos pesos**: até aqui os postos eram exclusivos por sorte, e
- * a água os obrigou a ser exclusivos por construção; o caso mede a soma quadro a
- * quadro num percurso inteiro de convés→mar→escada→convés, que é onde as quatro
- * transições acontecem. A terceira é a **troca de dono da fase**: enquanto os
- * clipes não existiam, quem desenhava o nado era a caminhada, e o caso que provava
- * o empréstimo agora prova que a troca não mexeu numa cadência sequer.
+ * **And for the water.** The two sea clips brought in three things that existed
+ * nowhere else in this codebase. The first is a **different origin**: they have
+ * `y = 0` at the waterline, and not on the ground under the feet, so the body has
+ * to rise 1.44 m for the clip to land where it was built — and the case that
+ * measures it is the one that pins down the 12 cm of divergence between the
+ * physics and the clip (see `waterPoseY`). The second is the **sum of the
+ * weights**: until now the stations were exclusive by luck, and the water forced
+ * them to be exclusive by construction; the case measures the sum frame by frame
+ * over a whole run of deck→sea→ladder→deck, which is where all four transitions
+ * happen. The third is the **handover of the phase**: while the clips did not
+ * exist, the one drawing the swim was the walk, and the case that proved the
+ * borrowing now proves the handover did not move a single cadence.
  */
 
 import * as THREE from 'three';
@@ -137,23 +140,23 @@ export interface TestReport {
 }
 
 /**
- * Roda o relógio até ele estabilizar e devolve a distância coberta por ciclo.
+ * Runs the clock until it settles and returns the distance covered per cycle.
  *
- * A medição vai **de volta a volta**, e não ao longo de um intervalo qualquer.
- * A primeira versão dividia a distância de 6 s pelo número de voltas inteiras
- * dentro dela; como 6 s não fecha um número inteiro de ciclos, sobrava um
- * pedaço de passada no numerador e o resultado saía 6% baixo. O código estava
- * certo e o teste, errado — que é o jeito mais barato de perder uma tarde.
+ * The measurement goes **from wrap to wrap**, and not over some arbitrary
+ * interval. The first version divided the distance of 6 s by the number of whole
+ * wraps inside it; since 6 s does not close a whole number of cycles, a piece of
+ * stride was left over in the numerator and the result came out 6% low. The code
+ * was right and the test wrong — the cheapest way there is to lose an afternoon.
  */
 function distancePerCycle(speed: number, dt = 1 / 240): { distance: number; cycles: number } {
   const gait = new GaitClock();
 
-  // Meio segundo para a mistura convergir: ela é amortecida, e medir durante a
-  // convergência mediria o amortecedor, não a passada.
+  // Half a second for the blend to converge: it is damped, and measuring during
+  // the convergence would measure the damper, not the stride.
   for (let t = 0; t < 0.5; t += dt) gait.update(dt, speed, true);
 
-  let closed = 0;                           // só ciclos que fecharam
-  let pending = 0;                          // o ciclo em andamento
+  let closed = 0;                           // only cycles that closed
+  let pending = 0;                          // the cycle in progress
   let cycles = 0;
   let counting = false;
   let previous = gait.phase;
@@ -164,13 +167,13 @@ function distancePerCycle(speed: number, dt = 1 / 240): { distance: number; cycl
     previous = gait.phase;
 
     if (wrapped && !counting) {
-      counting = true;                      // começa a contar na primeira volta
+      counting = true;                      // starts counting on the first wrap
       continue;
     }
     if (!counting) continue;
 
     pending += speed * dt;
-    if (wrapped) {                          // fechou: só agora vira medida
+    if (wrapped) {                          // closed: only now is it a measure
       closed += pending;
       pending = 0;
       cycles++;
@@ -180,26 +183,27 @@ function distancePerCycle(speed: number, dt = 1 / 240): { distance: number; cycl
 }
 
 interface FlightLog {
-  /** Tempo entre a saída do chão e o contato, em segundos. */
+  /** Time between leaving the ground and contact, in seconds. */
   flight: number;
-  /** Fase do clipe de ar no quadro em que a subida virou queda. */
+  /** Phase of the air clip on the frame where the rise turned into a fall. */
   phaseAtApex: number;
-  /** Fase do clipe de ar no último quadro antes do contato. */
+  /** Phase of the air clip on the last frame before contact. */
   phaseAtContact: number;
-  /** Maior soma de pesos vista em qualquer quadro do voo. */
+  /** Largest sum of weights seen on any frame of the flight. */
   peakWeight: number;
-  /** Quadros em que ar e pouso tiveram peso ao mesmo tempo. */
+  /** Frames where air and landing had weight at the same time. */
   overlap: number;
-  /** Força do pouso disparado no contato. */
+  /** Strength of the landing triggered at contact. */
   impact: number;
 }
 
 /**
- * Simula uma queda de `fromHeight` metros, opcionalmente com impulso inicial.
+ * Simulates a fall from `fromHeight` meters, optionally with an initial impulse.
  *
- * Reproduz o laço do `PlayerController` na ordem em que ele acontece: gravidade,
- * integração, chão, e **só então** o relógio. Um pulo padrão é
- * `simulateFall(0, JUMP_SPEED)`; a queda do cesto da gávea é `simulateFall(9)`.
+ * Reproduces the `PlayerController` loop in the order it happens: gravity,
+ * integration, ground, and **only then** the clock. A standard jump is
+ * `simulateFall(0, JUMP_SPEED)`; the fall from the crow's nest is
+ * `simulateFall(9)`.
  */
 function simulateFall(fromHeight: number, launch = 0, dt = 1 / 60): FlightLog {
   const clock = new JumpClock();
@@ -228,8 +232,8 @@ function simulateFall(fromHeight: number, launch = 0, dt = 1 / 60): FlightLog {
 
     const wasAirborne = !grounded;
     if (vy <= 0 && y <= 0) {
-      // Lido antes do `update`, que é onde ela ainda existe: o relógio nunca
-      // chega a ver esta fase, ele só a deixou registrada no quadro anterior.
+      // Read before `update`, which is where it still exists: the clock never
+      // gets to see this phase, it only left it recorded on the previous frame.
       if (wasAirborne) log.phaseAtContact = clock.airPhase;
       y = 0;
       vy = 0;
@@ -244,7 +248,7 @@ function simulateFall(fromHeight: number, launch = 0, dt = 1 / 60): FlightLog {
     if (grounded && wasAirborne) {
       log.flight = t + dt;
       log.impact = clock.impact;
-      // Mais meio segundo no chão: é o que o pouso precisa para rodar e sumir.
+      // Another half second on the ground: what the landing needs to run and go.
       for (let u = 0; u < 0.5; u += dt) {
         clock.update(dt, 0, true);
         log.peakWeight = Math.max(log.peakWeight, clock.air + clock.land);
@@ -258,32 +262,32 @@ function simulateFall(fromHeight: number, launch = 0, dt = 1 / 60): FlightLog {
 }
 
 interface HelmSweep {
-  /** Punhos que a mão trocou no percurso: uma volta de fase por punho. */
+  /** Spoke handles the hand changed over the run: one phase wrap per handle. */
   cycles: number;
-  /** Fase no fim do curso. */
+  /** Phase at the end of the travel. */
   phase: number;
-  /** Menor fase vista em qualquer quadro. Negativo aqui é módulo vazando. */
+  /** Lowest phase seen on any frame. Negative here is modulo leaking. */
   minPhase: number;
-  /** Quadros que o curso levou, na cadência real da roda. */
+  /** Frames the travel took, at the wheel's real cadence. */
   frames: number;
 }
 
 /**
- * Gira a roda de um batente ao outro e integra o relógio do timão quadro a
- * quadro.
+ * Turns the wheel from one stop to the other and integrates the helm clock frame
+ * by frame.
  *
- * Usa o `Rudder` do jogo, e não uma rampa escrita à mão: é ele quem grampeia o
- * curso em `MAX_WHEEL` e quem sabe quanto a roda anda por segundo. Um teste que
- * reproduzisse essa aritmética estaria medindo a própria cópia — é o mesmo motivo
- * pelo qual o caso da escada lê o espaçamento da escada de verdade.
+ * Uses the game's `Rudder`, and not a ramp written by hand: it is the `Rudder`
+ * that clamps the travel at `MAX_WHEEL` and knows how far the wheel moves per
+ * second. A test that reproduced that arithmetic would be measuring its own copy
+ * — the same reason the ladder case reads the spacing off the real ladder.
  *
- * @param direction +1 gira para boreste, -1 para bombordo.
+ * @param direction +1 turns to starboard, -1 to port.
  */
 function sweepWheel(direction: 1 | -1, dt = 1 / 60): HelmSweep {
   const rudder = new Rudder();
   const clock = new HelmClock();
 
-  // Do batente contrário, para o percurso ser o curso inteiro e não um pedaço.
+  // From the opposite stop, so the run is the whole travel and not a piece of it.
   rudder.wheelAngle = -direction * MAX_WHEEL;
   clock.update(dt, true, rudder.wheelAngle);
 
@@ -295,15 +299,16 @@ function sweepWheel(direction: 1 | -1, dt = 1 / 60): HelmSweep {
   };
   let previous = clock.phase;
 
-  // Quem encerra o laço é o grampo do `Rudder`: chegar ao batente é chegar ao fim
-  // do curso. O último quadro é parcial de propósito — a roda não leva um número
-  // inteiro de quadros de um batente ao outro, e é justamente aí que um erro de
-  // arredondamento apareceria.
+  // What ends the loop is the `Rudder`'s clamp: reaching the stop is reaching the
+  // end of the travel. The last frame is partial on purpose — the wheel does not
+  // take a whole number of frames to go from one stop to the other, and that is
+  // exactly where a rounding error would show up.
   while (rudder.wheelAngle * direction < MAX_WHEEL && sweep.frames < 600) {
     rudder.update(direction, dt);
     clock.update(dt, true, rudder.wheelAngle);
-    // Boreste sobe a fase e bombordo a desce, então o fim do ciclo troca de lado
-    // junto: contar sempre "caiu" acharia uma volta por quadro na descida.
+    // Starboard raises the phase and port lowers it, so the end of the cycle
+    // switches sides with it: always counting "it dropped" would find one wrap per
+    // frame on the way down.
     if (direction > 0 ? clock.phase < previous : clock.phase > previous) sweep.cycles++;
     previous = clock.phase;
     sweep.minPhase = Math.min(sweep.minPhase, clock.phase);
@@ -315,19 +320,19 @@ function sweepWheel(direction: 1 | -1, dt = 1 / 60): HelmSweep {
 }
 
 /**
- * O casco que o marujo precisa, e nada além dele.
+ * The hull the deckhand needs, and nothing beyond it.
  *
- * `applyRemoteStep` toca no navio para uma coisa e uma só — o ângulo do timão,
- * que é a régua do clipe de governar. `fixedUpdate` pede um pouco mais: os
- * comandos que ele zera todo passo, a gravidade rodada para o referencial do
- * casco, o rumo e as duas conversões entre navio e mundo. Montar um `Ship` de
- * verdade aqui traria a geração de textura em canvas junto, e o teste deixaria de
- * rodar fora do navegador por nada.
+ * `applyRemoteStep` touches the ship for one thing and one thing only — the helm
+ * angle, which is the ruler of the steering clip. `fixedUpdate` asks for a little
+ * more: the controls it zeroes every step, gravity rotated into the hull's frame,
+ * the heading and the two conversions between ship and world. Building a real
+ * `Ship` here would drag canvas texture generation in with it, and the test would
+ * stop running outside the browser for nothing.
  *
- * **O casco está parado na origem, sem adernar e sem guinar**, e é de propósito:
- * assim `local` e mundo são o mesmo número, e um caso que fale de metros pode ser
- * lido em qualquer um dos dois sem tradução mental. O que se está medindo aqui é
- * o marujo, não o navio.
+ * **The hull sits still at the origin, with no heel and no yaw**, and that is on
+ * purpose: this way `local` and world are the same number, and a case that talks
+ * in meters can be read in either one without mental translation. What is being
+ * measured here is the deckhand, not the ship.
  */
 function fakeShip(wheelAngle = 0): Ship {
   const copy = (from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3 => to.copy(from);
@@ -337,9 +342,10 @@ function fakeShip(wheelAngle = 0): Ship {
     controls: { capstanTurns: 0, pumping: false, wheel: 0 },
     anchor: { state: 'stowed' },
     body: {
-      // Parado: assim a velocidade de mundo do náufrago é a dele, e não a soma com
-      // a do casco. Um casco em movimento aqui mediria a soma — que é o que o caso
-      // do adversário na água mede, logo abaixo, com um `body.velocity` próprio.
+      // Still: this way the castaway's world velocity is his own, and not the sum
+      // with the hull's. A moving hull here would measure the sum — which is what
+      // the case for the opponent in the water measures, just below, with a
+      // `body.velocity` of its own.
       velocity: { x: 0, y: 0, z: 0 },
       localToWorld: copy,
       worldToLocal: copy,
@@ -350,28 +356,29 @@ function fakeShip(wheelAngle = 0): Ship {
 }
 
 /**
- * O mar do teste: uma chapa parada em `y = 0`.
+ * The test's sea: a still sheet at `y = 0`.
  *
- * Uma onda de verdade aqui mediria o `WaveField`, que já tem os testes dele. O que
- * estes casos precisam do mar é uma **superfície**, e uma superfície plana é a
- * única contra a qual dá para escrever "os pés ficam 1,44 m abaixo dela" e cobrar
- * o número.
+ * A real wave here would measure `WaveField`, which already has its own tests.
+ * What these cases need from the sea is a **surface**, and a flat surface is the
+ * only one against which "the feet sit 1.44 m below it" can be written down and
+ * the number demanded.
  */
 function flatSea(): WaveField {
   return { sampleHeight: () => 0 } as unknown as WaveField;
 }
 
-/** Um quadro de entrada vazio, reaproveitado. Nada aqui aloca por passo. */
+/** An empty input frame, reused. Nothing here allocates per step. */
 function idleFrame(): InputFrame {
   return createInputFrame();
 }
 
 /**
- * Roda o marujo local por `seconds`, com a mesma entrada em todos os passos.
+ * Runs the local deckhand for `seconds`, with the same input on every step.
  *
- * É o laço do jogo, e não uma reprodução dele: chama `fixedUpdate` de verdade, com
- * o mesmo passo fixo. É o que faz estes casos cobrirem os resolvedores, a queda, a
- * entrada na água e o nado juntos, em vez de cada peça contra si mesma.
+ * This is the game loop, and not a reproduction of it: it calls the real
+ * `fixedUpdate`, with the same fixed step. That is what makes these cases cover
+ * the resolvers, the fall, the entry into the water and the swim together, instead
+ * of each piece against itself.
  */
 function stepPlayer(
   controller: PlayerController,

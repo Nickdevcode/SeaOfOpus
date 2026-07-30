@@ -1,14 +1,15 @@
 /**
- * O casco da Chalupa, varrido a partir da tabela de estações.
+ * The Sloop's hull, swept from the station table.
  *
- * Nada aqui é modelado à mão: tudo sai de `ShipDimensions`, então mexer numa
- * linha da tabela muda ao mesmo tempo o desenho, a flutuabilidade e a colisão.
- * Era exatamente esse acoplamento que se queria — casco visual e casco físico
- * discordando é o bug mais caro de achar num jogo de barco.
+ * Nothing here is modeled by hand: it all comes out of `ShipDimensions`, so
+ * touching one row of the table changes the drawing, the buoyancy and the
+ * collision at the same time. That coupling is exactly what was wanted — a
+ * visual hull and a physics hull disagreeing is the most expensive bug to find
+ * in a boat game.
  *
- * A saída vem separada por material, não por peça. Um `Mesh` por material dá
- * cinco chamadas de desenho para o navio inteiro; separar por peça daria
- * dezenas, e o navio inimigo dobraria a conta.
+ * The output comes split by material, not by part. One `Mesh` per material
+ * gives five draw calls for the whole ship; splitting by part would give
+ * dozens, and the enemy ship would double the count.
  */
 
 import * as THREE from 'three';
@@ -40,88 +41,93 @@ import {
 } from './ShipDimensions';
 import { BOARDING_LADDERS, BOARDING_RUNG_RADIUS } from './BoardingLadder';
 
-/** Estações longitudinais da malha. 72 dá ~22 cm entre balizas — a curva fica lisa. */
+/** Longitudinal mesh stations. 72 gives ~22 cm between frames — a smooth curve. */
 const LENGTH_SEGMENTS = 72;
-/** Divisões da quilha ao topo da amurada. */
+/** Divisions from the keel to the top of the bulwark. */
 const GIRTH_SEGMENTS = 22;
 
-/** Comprimento de uma tábua do costado, em metros (um ladrilho da textura). */
+/** Length of one hull-side plank, in meters (one tile of the texture). */
 const HULL_PLANK_TILE = 4;
-/** Perímetro coberto por um ladrilho da textura do costado (10 tábuas de 28 cm). */
+/** Girth covered by one tile of the hull-side texture (10 planks of 28 cm). */
 const HULL_GIRTH_TILE = 2.8;
-/** Perímetro aproximado da meia-nau, da quilha à borda — só para escalar o UV. */
+/** Approximate midships girth, from the keel to the rail — just to scale the UV. */
 const MIDSHIP_GIRTH = 4.6;
 
-/** Comprimento de uma tábua de convés e largura da faixa de 8 tábuas. */
+/** Length of one deck plank and width of the 8-plank band. */
 const DECK_PLANK_TILE = 4.5;
 const DECK_BAND_TILE = 1.76;
 
-/** Alturas dos cintados: um logo abaixo do convés, outro no meio da amurada. */
+/** Wale heights: one just below the deck, the other halfway up the bulwark. */
 const WALE_HEIGHTS = [1.02, 1.92];
 
 /**
- * Faixa de `t` coberta pelo forro interno e pelo assoalho do porão.
+ * Range of `t` covered by the inner liner and by the hold floor.
  *
- * Os dois usam o mesmo intervalo de propósito: quando o piso parava antes do
- * forro sobravam buracos triangulares nas duas pontas do porão. Não vai até 0 e
- * 1 porque nos extremos a seção degenera num ponto e a normal fica indefinida.
+ * Both use the same interval on purpose: when the floor stopped short of the
+ * liner, triangular holes were left at both ends of the hold. It doesn't reach
+ * 0 and 1 because at the extremes the section degenerates to a point and the
+ * normal is undefined.
  */
 const SHELL_T_FROM = 0.006;
 const SHELL_T_TO = 0.994;
-/** Quanto o forro desce abaixo do assoalho, para a junta ficar coberta. */
+/** How far the liner runs below the floor, so the joint stays covered. */
 const FLOOR_OVERLAP = 0.16;
 /**
- * Quanto o teto do porão avança para fora do convés.
+ * How far the hold ceiling reaches outboard of the deck.
  *
- * O convés útil já é a meia largura *menos* a espessura do costado; o teto usa
- * a mesma fileira, então sem essa sobra a aresta dele ficaria pendurada no ar,
- * a um palmo do forro. Com ela, a borda morre enfiada na madeira do costado.
+ * The usable deck is already the half width *minus* the hull thickness; the
+ * ceiling uses the same row, so without this overshoot its edge would hang in
+ * the air, a hand's breadth from the liner. With it, the edge dies buried in
+ * the hull-side timber.
  */
 const CEILING_OUTSET = 0.09;
 
-// -- o portaló ---------------------------------------------------------------
+// -- the gangway -------------------------------------------------------------
 //
-// O vão na amurada por onde se pula no mar, um por bordo, logo acima da escada
-// de embarque. Ele não é uma peça: é um **buraco**, e por isso mora aqui e não
-// em `ShipParts` — quem tem de deixar de existir é o costado, o forro e a capa.
+// The opening in the bulwark you jump into the sea through, one per side, right
+// above the boarding ladder. It isn't a part: it's a **hole**, and that's why it
+// lives here and not in `ShipParts` — what has to stop existing is the hull
+// side, the liner and the cap.
 //
-// A faixa é a mesma nos dois bordos (a escada é simétrica), então o `t` sai uma
-// vez só. `BoardingLadder` é a fonte: mudar a estação da escada lá move o vão
-// aqui, e é isso que impede a escada de subir para uma amurada fechada.
+// The band is the same on both sides (the ladder is symmetric), so `t` is worked
+// out once. `BoardingLadder` is the source: moving the ladder's station there
+// moves the opening here, and that's what keeps the ladder from climbing to a
+// closed bulwark.
 
 const GANGWAY_SPEC = BOARDING_LADDERS[0]!;
-/** Borda de ré do vão (menor `t`, maior Z) e borda de vante (maior `t`). */
+/** Aft edge of the opening (lower `t`, higher Z) and forward edge (higher `t`). */
 const GANGWAY_T_FROM = zToT(GANGWAY_SPEC.z + GANGWAY_SPEC.gangwayHalfWidth);
 const GANGWAY_T_TO = zToT(GANGWAY_SPEC.z - GANGWAY_SPEC.gangwayHalfWidth);
 
 /**
- * Quanto o **forro** é cortado abaixo do costado, no vão.
+ * How far below the hull side the **liner** is cut, at the opening.
  *
- * Os dois não podem ser cortados na mesma linha, e a razão é a de sempre neste
- * casco: o forro é deslocado ao longo da normal, não na horizontal. Na amurada
- * de popa a normal aponta ligeiramente para baixo (n·y = −0,07), então o ponto
- * do forro na mesma estação `v` do costado sai **9 mm mais alto** — cortar os
- * dois em `v` igual deixaria um friso de forro atravessado no meio do piso do
- * portaló, do lado de dentro. Dois centímetros de sobra põem o fio do forro em
- * y ≈ 1,729: abaixo do piso e dentro da espessura da soleira, que o cobre.
+ * The two can't be cut on the same line, and the reason is the usual one on
+ * this hull: the liner is offset along the normal, not horizontally. On the
+ * stern bulwark the normal points slightly downward (n·y = −0.07), so the liner
+ * point at the same `v` station as the hull side comes out **9 mm higher** —
+ * cutting both at equal `v` would leave a sliver of liner across the middle of
+ * the gangway floor, on the inboard side. Two centimeters of slack put the
+ * liner's edge at y ≈ 1.729: below the floor and inside the thickness of the
+ * sill, which covers it.
  */
 const GANGWAY_LINER_DROP = 0.02;
 
-/** Espessura da soleira do portaló. Cabe dentro de `DECK_THICKNESS` de propósito:
- *  a ponta de dentro dela morre embutida no próprio convés. */
+/** Thickness of the gangway sill. It fits inside `DECK_THICKNESS` on purpose:
+ *  its inboard end dies buried in the deck itself. */
 const GANGWAY_SILL_THICKNESS = 0.05;
 
-/** `true` quando a estação cai dentro do vão, nos dois bordos. */
+/** `true` when the station falls inside the opening, on both sides. */
 function inGangway(t: number): boolean {
   return t > GANGWAY_T_FROM && t < GANGWAY_T_TO;
 }
 
-/** `v` em que o **costado** morre no vão: a linha do piso do tombadilho. */
+/** `v` where the **hull side** dies at the opening: the quarterdeck floor line. */
 function gangwaySillV(t: number): number {
   return sectionV(sampleSection(t, sectionScratchB), QUARTERDECK_Y);
 }
 
-/** `v` em que o **forro** morre no vão — ver `GANGWAY_LINER_DROP`. */
+/** `v` where the **liner** dies at the opening — see `GANGWAY_LINER_DROP`. */
 function gangwayLinerV(t: number): number {
   return sectionV(sampleSection(t, sectionScratchB), QUARTERDECK_Y - GANGWAY_LINER_DROP);
 }
@@ -132,8 +138,8 @@ const pointScratch = new THREE.Vector3();
 const normalScratch = new THREE.Vector3();
 
 /**
- * Ponto do casco deslocado `offset` metros ao longo da normal (negativo = para
- * dentro), já com o UV das tábuas.
+ * Hull point offset `offset` meters along the normal (negative = inboard), with
+ * the plank UV already applied.
  */
 function hullVertex(t: number, v: number, side: number, offset: number): Vertex {
   hullSurfacePoint(t, v, side, pointScratch);
@@ -151,18 +157,18 @@ function hullVertex(t: number, v: number, side: number, offset: number): Vertex 
 }
 
 export interface HullGeometrySet {
-  /** Costado externo, painel de popa, quilha, roda de proa e cadaste. */
+  /** Outer hull side, transom, keel, stem and sternpost. */
   hull: THREE.BufferGeometry;
-  /** Forro interno da amurada e do porão, mais o piso e o teto do porão. */
+  /** Inner liner of the bulwark and the hold, plus the hold floor and ceiling. */
   interior: THREE.BufferGeometry;
-  /** Convés, tombadilho, degraus, capa da amurada, braçola e borda da escotilha. */
+  /** Deck, quarterdeck, steps, cap rail, coaming and hatch rim. */
   deck: THREE.BufferGeometry;
-  /** Cintados e a moldura do painel de popa. */
+  /** Wales and the transom's molding. */
   trim: THREE.BufferGeometry;
 }
 
 /**
- * Constrói o casco inteiro. Roda uma vez por navio, na criação da partida.
+ * Builds the whole hull. Runs once per ship, when the match is created.
  */
 export function buildHullGeometry(): HullGeometrySet {
   const hull = new GeometryBuilder();
@@ -192,17 +198,17 @@ export function buildHullGeometry(): HullGeometrySet {
 }
 
 /**
- * O costado externo, uma metade de cada vez.
+ * The outer hull side, one half at a time.
  *
- * Os dois lados não formam uma faixa fechada só: em `v = 0` as duas metades se
- * encontram em `x = 0`, e emitir uma faixa que passa por ali criaria uma fileira
- * inteira de triângulos de área zero. Separadas, a quilha vira só uma costura
- * entre duas superfícies — e o madeirame da quilha cobre a costura.
+ * The two sides don't form a single closed strip: at `v = 0` the two halves meet
+ * at `x = 0`, and emitting a strip that runs through there would create a whole
+ * row of zero-area triangles. Kept apart, the keel becomes just a seam between
+ * two surfaces — and the keel timber covers the seam.
  */
 function buildShell(builder: GeometryBuilder): void {
-  // Não é mais uma varredura só por causa do portaló: as bordas do vão entram
-  // como estações explícitas (senão o corte nasceria serrilhado no passo da
-  // malha) e as faixas de dentro dele param na linha do piso.
+  // No longer a single sweep because of the gangway: the opening's edges go in
+  // as explicit stations (otherwise the cut would come out jagged at the mesh
+  // step) and the strips inside it stop at the floor line.
   const rows = deckRows(0, 1, LENGTH_SEGMENTS, [GANGWAY_T_FROM, GANGWAY_T_TO]);
 
   for (const side of [1, -1]) {
@@ -216,14 +222,14 @@ function buildShell(builder: GeometryBuilder): void {
 }
 
 /**
- * Uma fileira da quilha à borda, opcionalmente decepada na soleira do portaló.
+ * One row from the keel to the rail, optionally cut off at the gangway sill.
  *
- * O corte é um **grampeamento** de `v`, e não uma fileira mais curta: assim os
- * vértices abaixo da soleira caem exatamente nos mesmos `v` da faixa vizinha
- * intacta, e as duas se encontram sem fresta. O que sobra acima do grampo são
- * quadriláteros de área zero, que o `GeometryBuilder` já descarta sozinho na hora
- * de somar as normais — é o preço, barato, de não ter duas amostragens diferentes
- * da mesma curva encostando uma na outra.
+ * The cut is a **clamp** on `v`, not a shorter row: that way the vertices below
+ * the sill land on exactly the same `v` as the untouched neighboring strip, and
+ * the two meet with no gap. What is left above the clamp are zero-area quads,
+ * which `GeometryBuilder` already discards on its own when it sums the normals —
+ * that's the price, a cheap one, of not having two different samplings of the
+ * same curve butted against each other.
  */
 function girthRow(t: number, side: number, cut: boolean): Vertex[] {
   const maxV = cut ? gangwaySillV(t) : 1;
@@ -235,12 +241,12 @@ function girthRow(t: number, side: number, cut: boolean): Vertex[] {
 }
 
 /**
- * Painel de popa: a parede chata que fecha o casco atrás.
+ * Transom: the flat wall that closes the hull off at the back.
  *
- * Vem em duas folhas, uma virada para fora com a madeira escura do costado e
- * outra para dentro — a Chalupa tem a popa mais visível do jogo, e um painel de
- * face única mostraria o vazio por dentro toda vez que a câmera passasse pelo
- * timão.
+ * It comes in two sheets, one facing outward with the dark hull-side timber and
+ * one facing inward — the Sloop has the most visible stern in the game, and a
+ * single-sided panel would show the emptiness inside every time the camera swept
+ * past the helm.
  */
 function buildTransom(outer: GeometryBuilder, inner: GeometryBuilder): void {
   const section = sampleSection(0, sectionScratchB);
@@ -258,20 +264,21 @@ function buildTransom(outer: GeometryBuilder, inner: GeometryBuilder): void {
     );
   });
 
-  // A face de dentro fica exatamente onde o forro lateral **começa**, e não a uma
-  // espessura de costado do painel externo. Os dois números eram diferentes — o
-  // forro nasce em `SHELL_T_FROM`, 9,6 cm à vante da popa, e o painel interno
-  // ficava 3,4 cm atrás dele. A quina de popa do porão tinha um rasgo dessa
-  // largura correndo de alto a baixo, com o mar aparecendo por ele.
+  // The inner face sits exactly where the side liner **starts**, and not one
+  // hull thickness in from the outer panel. The two numbers were different — the
+  // liner begins at `SHELL_T_FROM`, 9.6 cm forward of the stern, and the inner
+  // panel sat 3.4 cm behind it. The hold's stern corner had a tear that wide
+  // running top to bottom, with the sea showing through it.
   //
-  // A largura sai de `innerHalfWidthAt`, a mesma função que descreve o forro,
-  // pelo mesmo motivo: recuo horizontal e recuo ao longo da normal não são o
-  // mesmo ponto, e no painel de popa — que é quase vertical mas tem o costado
-  // fugindo para vante — a diferença chega a um palmo lá embaixo.
+  // The width comes from `innerHalfWidthAt`, the same function that describes
+  // the liner, for the same reason: a horizontal inset and an inset along the
+  // normal are not the same point, and on the transom — which is nearly vertical
+  // but has the hull side running away forward — the difference reaches a hand's
+  // breadth down at the bottom.
   const innerZ = tToZ(SHELL_T_FROM);
-  // Objeto próprio: `sectionScratchB` é o rascunho compartilhado do módulo, e
-  // guardar uma referência a ele aqui faria a próxima amostragem reescrever esta
-  // seção por baixo.
+  // Its own object: `sectionScratchB` is the module's shared scratch, and
+  // holding a reference to it here would let the next sampling rewrite this
+  // section from under it.
   const innerSection: HullSection = { halfBeam: 0, keelY: 0, sheerY: 0, fullness: 1 };
   sampleSection(SHELL_T_FROM, innerSection);
   const innerHeight = innerSection.sheerY - innerSection.keelY;
@@ -290,12 +297,13 @@ function buildTransom(outer: GeometryBuilder, inner: GeometryBuilder): void {
 }
 
 /**
- * Forro interno: a mesma superfície do costado, empurrada para dentro pela
- * espessura do chapeamento e com as normais viradas.
+ * Inner liner: the same hull-side surface, pushed inboard by the planking
+ * thickness and with the normals flipped.
  *
- * Vai da altura do piso do porão até o topo da amurada numa tacada só, porque é
- * literalmente a mesma tábua — o convés é que corta esse forro em dois no meio,
- * separando o que se vê de pé no convés do que se vê descendo pela escotilha.
+ * It runs from the hold floor's height to the top of the bulwark in one go,
+ * because it is literally the same plank — it's the deck that cuts this liner in
+ * two halfway up, separating what you see standing on deck from what you see
+ * going down the hatch.
  */
 function buildInnerShell(builder: GeometryBuilder): void {
   const rows = deckRows(SHELL_T_FROM, SHELL_T_TO, LENGTH_SEGMENTS, [
@@ -313,14 +321,14 @@ function buildInnerShell(builder: GeometryBuilder): void {
   }
 }
 
-/** Uma fileira do forro, com o mesmo grampeamento de `girthRow` no portaló. */
+/** One liner row, with the same clamp as `girthRow` at the gangway. */
 function innerRow(t: number, side: number, cut: boolean): Vertex[] {
   const section = sampleSection(t, sectionScratchB);
-  // O piso do porão sobe acima da quilha no meio do navio e a alcança nas
-  // pontas; abaixo dele não há forro para desenhar. Começar um palmo *abaixo*
-  // dele é de propósito: o assoalho pousa por cima do forro, como numa
-  // embarcação de verdade, e a junta some debaixo da tábua em vez de depender de
-  // dois cálculos independentes baterem no milímetro.
+  // The hold floor rises above the keel amidships and meets it at the ends;
+  // below it there is no liner to draw. Starting a hand's breadth *below* it is
+  // deliberate: the floor rests on top of the liner, the way it does on a real
+  // boat, and the joint disappears under the plank instead of depending on two
+  // independent calculations agreeing to the millimeter.
   const vFloor = Math.max(sectionV(section, HOLD_FLOOR_Y - FLOOR_OVERLAP), 0);
   const maxV = cut ? gangwayLinerV(t) : 1;
 
@@ -333,14 +341,14 @@ function innerRow(t: number, side: number, cut: boolean): Vertex[] {
 }
 
 /**
- * Piso do porão: um assoalho plano, tão largo quanto o forro permitir.
+ * Hold floor: a flat floor, as wide as the liner allows.
  *
- * A borda sai de `innerHalfWidthAt`, a mesma função que descreve o forro, e não
- * de um recuo horizontal da meia largura externa. Não é preciosismo: no bojo o
- * costado corre a 40° da vertical, e ali "13 cm para dentro na horizontal" e
- * "13 cm ao longo da normal" são pontos diferentes — 3 cm em X, 8 cm em Y. A
- * versão antiga deixava exatamente essa fresta correndo pelos dois bordos, com o
- * mar aparecendo através dela.
+ * The edge comes from `innerHalfWidthAt`, the same function that describes the
+ * liner, and not from a horizontal inset of the outer half width. This isn't
+ * fussiness: at the bilge the hull side runs at 40° from vertical, and there
+ * "13 cm inboard horizontally" and "13 cm along the normal" are different points
+ * — 3 cm in X, 8 cm in Y. The old version left exactly that gap running down
+ * both sides, with the sea showing through it.
  */
 function buildHoldFloor(builder: GeometryBuilder): void {
   const rows = 48;
@@ -351,8 +359,9 @@ function buildHoldFloor(builder: GeometryBuilder): void {
     const hwA = innerHalfWidthAt(previousT, HOLD_FLOOR_Y);
     const hwB = innerHalfWidthAt(t, HOLD_FLOOR_Y);
 
-    // Nas pontas o forro já se fechou abaixo do assoalho e não sobra piso; um
-    // triângulo degenerado ali não faria mal, mas também não desenha nada.
+    // At the ends the liner has already closed below the floor and no floor is
+    // left; a degenerate triangle there would do no harm, but it draws nothing
+    // either.
     if (hwA > 1e-3 || hwB > 1e-3) {
       const columns = 6;
       const rowA: Vertex[] = [];
@@ -373,41 +382,41 @@ function buildHoldFloor(builder: GeometryBuilder): void {
 }
 
 /**
- * Capa da amurada: a tira que fecha o topo, ligando a face externa à interna.
+ * Cap rail: the strip that closes the top, joining the outer face to the inner.
  *
- * É a peça que a câmera mais encosta o nariz — quem anda pelo convés passa o
- * tempo todo rente a ela — então ela ganha o carvalho claro do convés em vez do
- * alcatrão do costado, que é o que a Rare faz na Chalupa.
+ * It's the part the camera gets closest to — anyone walking the deck spends the
+ * whole time right up against it — so it gets the deck's pale oak instead of the
+ * hull side's tar, which is what Rare does on the Sloop.
  */
 /**
- * A capa **desce** um pouco pelas duas faces em vez de pousar em cima delas.
+ * The cap **drops** a little down both faces instead of resting on top of them.
  *
- * A versão anterior era uma tira plana no topo exato da amurada, subida 12 mm
- * para não brigar em profundidade com o costado. Esses 12 mm eram uma fenda
- * aberta em toda a volta do navio, dos dois lados — e o convés é justamente onde
- * o jogador encosta o nariz na amurada. Descendo 2,5 cm por fora e por dentro a
- * peça abraça a quina, cobre a costura em vez de pairar sobre ela, e ainda ganha
- * a espessura que uma tábua de capa realmente tem.
+ * The previous version was a flat strip at the exact top of the bulwark, raised
+ * 12 mm so it wouldn't fight the hull side for depth. Those 12 mm were an open
+ * slot all the way around the ship, on both sides — and the deck is exactly
+ * where the player's nose ends up against the bulwark. Dropping 2.5 cm outboard
+ * and inboard, the part wraps the corner, covers the seam instead of hovering
+ * over it, and gets the thickness a cap plank really has.
  */
 const CAP_RAIL_DROP = 0.025;
 
 /**
- * Um ponto da capa da amurada. `w` atravessa a peça: 0 na saia externa, 0,5 no
- * topo, 1 na saia interna.
+ * A point on the cap rail. `w` runs across the part: 0 at the outer skirt, 0.5
+ * at the top, 1 at the inner skirt.
  *
- * Está numa função própria porque o batente do portaló precisa terminar
- * **exatamente** neste perfil. A capa é interrompida no vão, e o corte da
- * amurada aparece por baixo dela: se o batente parasse na linha reta do topo do
- * costado, sobraria 1,4 cm de fresta sob a coroa da capa no meio da peça e 1,1 cm
- * de aba sobrando na quina de fora. Lendo o mesmo perfil, as duas peças se
- * encontram no fio por construção.
+ * It lives in its own function because the gangway jamb has to end **exactly**
+ * on this profile. The cap is interrupted at the opening, and the bulwark's cut
+ * shows underneath it: if the jamb stopped at the straight line of the hull
+ * side's top, 1.4 cm of gap would be left under the crown of the cap in the
+ * middle of the part and 1.1 cm of lip would stick out at the outer corner.
+ * Reading the same profile, the two parts meet flush by construction.
  */
 function capRailVertex(t: number, w: number, side: number): Vertex {
   const across = Math.min(w, 1 - w) * 2;
   const point = hullVertex(t, 1, side, -w * HULL_THICKNESS);
   return vertex(
     point.x,
-    // Sobe no meio e desce nas duas bordas: um perfil de tampo arredondado.
+    // Rises in the middle and drops at both edges: a rounded-top profile.
     point.y + 0.014 - CAP_RAIL_DROP * (1 - across),
     point.z,
     (t * HULL_LENGTH) / DECK_PLANK_TILE,
@@ -415,7 +424,7 @@ function capRailVertex(t: number, w: number, side: number): Vertex {
   );
 }
 
-/** Divisões da capa na travessia. O batente do portaló usa as mesmas. */
+/** Divisions across the cap. The gangway jamb uses the same ones. */
 const CAP_RAIL_SEGMENTS = 6;
 
 function capRailRow(t: number, side: number): Vertex[] {
@@ -425,8 +434,8 @@ function capRailRow(t: number, side: number): Vertex[] {
 }
 
 function buildCapRail(builder: GeometryBuilder): void {
-  // Interrompida no portaló: é a capa que faz a amurada ser um muro, e deixá-la
-  // passar por cima do vão daria uma janela em vez de uma saída.
+  // Interrupted at the gangway: it's the cap that makes the bulwark a wall, and
+  // letting it run over the opening would give a window instead of a way out.
   const rows = deckRows(0.004, 0.996, LENGTH_SEGMENTS, [GANGWAY_T_FROM, GANGWAY_T_TO]);
 
   for (const side of [1, -1]) {
@@ -438,8 +447,8 @@ function buildCapRail(builder: GeometryBuilder): void {
     }
   }
 
-  // Painel de popa: sem esta tampa a amurada morre numa aresta de 13 cm de
-  // madeira sem face, bem no enquadramento de quem está ao leme.
+  // Transom: without this cap the bulwark dies in a 13 cm edge of faceless
+  // timber, right in the frame of whoever is at the helm.
   const section = sampleSection(0, sectionScratchB);
   const top = section.sheerY;
   const outerHalf = sectionHalfWidth(section, 1);
@@ -463,22 +472,23 @@ function buildCapRail(builder: GeometryBuilder): void {
 }
 
 /**
- * Os dois portalós: os batentes que fecham o corte da amurada e a soleira.
+ * The two gangways: the jambs that close the bulwark's cut, and the sill.
  *
- * **Aqui é onde a lição da gávea e a do convés se pagam.** O costado, o forro e
- * a capa são superfícies de face única: recortá-los deixa a amurada com 13 cm de
- * espessura escancarados, e madeira de face única não existe vista de lado —
- * pelo vão apareceria o mar através da própria parede. As duas faces do corte
- * precisam ser desenhadas, e é o que os batentes são: uma tira ligando o costado
- * ao forro em cada borda do vão, do fio da soleira ao perfil da capa.
+ * **This is where the topsail-platform lesson and the deck one pay off.** The
+ * hull side, the liner and the cap are single-sided surfaces: cutting them
+ * leaves the bulwark's 13 cm of thickness wide open, and single-sided timber
+ * doesn't exist seen edge-on — through the opening the sea would show through
+ * the wall itself. Both faces of the cut have to be drawn, and that's what the
+ * jambs are: a strip joining the hull side to the liner at each edge of the
+ * opening, from the sill's edge to the cap's profile.
  *
- * A soleira é uma peça só de propósito, e vai do convés até o pé da escada de
- * embarque. Seriam naturalmente duas — a que tampa a espessura da amurada e a
- * plataforma que atravessa os 18 cm entre o costado e a escada —, mas duas peças
- * de piso na mesma altura encostadas no fio piscam uma contra a outra em
- * profundidade. Uma tábua só não tem junta, e ainda é a coisa certa a bordo: o
- * portaló de um navio tem uma plataforma, senão o primeiro passo de quem embarca
- * é no vazio.
+ * The sill is a single part on purpose, and it runs from the deck to the foot of
+ * the boarding ladder. Naturally it would be two — the one that caps the
+ * bulwark's thickness and the platform that spans the 18 cm between the hull
+ * side and the ladder — but two floor parts at the same height butted edge to
+ * edge flicker against each other in depth. A single plank has no joint, and
+ * it's also the right thing aboard: a ship's gangway has a platform, otherwise
+ * the first step of whoever comes aboard is into thin air.
  */
 function buildGangways(builder: GeometryBuilder): void {
   for (const spec of BOARDING_LADDERS) {
@@ -486,9 +496,10 @@ function buildGangways(builder: GeometryBuilder): void {
 
     for (const isFore of [false, true]) {
       const t = isFore ? GANGWAY_T_TO : GANGWAY_T_FROM;
-      // O batente nasce na linha do **forro**, e não na do costado: ele é a mais
-      // baixa das duas (ver `GANGWAY_LINER_DROP`), e começar na outra deixaria
-      // 2 cm de forro sem batente na quina de dentro. A sobra some sob a soleira.
+      // The jamb starts on the **liner**'s line, not the hull side's: it's the
+      // lower of the two (see `GANGWAY_LINER_DROP`), and starting on the other
+      // would leave 2 cm of liner with no jamb at the inner corner. The excess
+      // disappears under the sill.
       const vLow = gangwayLinerV(t);
       builder.addSurface(
         1,
@@ -497,17 +508,18 @@ function buildGangways(builder: GeometryBuilder): void {
           k >= 1
             ? capRailVertex(t, w, side)
             : hullVertex(t, vLow + (1 - vLow) * k, side, -w * HULL_THICKNESS),
-        // A face olha para dentro do vão: para vante na borda de ré e vice-versa.
+        // The face looks into the opening: forward at the aft edge, vice versa.
         isFore ? side < 0 : side > 0,
       );
     }
 
-    // Soleira. Mais comprida que o vão nas duas pontas para as faces de topo
-    // morrerem dentro da amurada em vez de encostarem no plano dos batentes; o
-    // que sobra para fora do costado é a lateral da plataforma, que é peça vista.
+    // Sill. Longer than the opening at both ends so the end faces die inside the
+    // bulwark instead of butting against the plane of the jambs; what sticks out
+    // past the hull side is the platform's side, which is a part on show.
     const xIn = Math.min(deckEdgeHalfWidth(GANGWAY_T_FROM), deckEdgeHalfWidth(GANGWAY_T_TO)) - 0.05;
-    // Para no fio de dentro da barra de topo da escada: a barra sobra 2,6 cm
-    // acima da tábua e vira o focinho do degrau, que é o que se vê num portaló.
+    // Stops at the inner edge of the ladder's top bar: the bar stands 2.6 cm
+    // above the plank and becomes the step's nosing, which is what you see on a
+    // gangway.
     const xOut = spec.topX - BOARDING_RUNG_RADIUS;
     builder.addBox(
       {
@@ -526,11 +538,11 @@ function buildGangways(builder: GeometryBuilder): void {
 }
 
 /**
- * Fileiras de estação do convés.
+ * Deck station rows.
  *
- * As bordas da escotilha entram como estações explícitas para o recorte sair
- * retangular; sem isso o buraco nasceria com um serrilhado do tamanho do passo
- * da malha.
+ * The hatch edges go in as explicit stations so the cutout comes out
+ * rectangular; without that the hole would come out jagged by the size of the
+ * mesh step.
  */
 function deckRows(from: number, to: number, count: number, extra: number[] = []): number[] {
   const rows: number[] = [];
@@ -542,20 +554,20 @@ function deckRows(from: number, to: number, count: number, extra: number[] = [])
   return rows;
 }
 
-/** Extremos em X de um trecho de convés, cada um em função da meia largura da fileira. */
+/** X extents of a deck span, each one a function of the row's half width. */
 type Span = [(halfWidth: number) => number, (halfWidth: number) => number];
 
 /**
- * Como emitir a faixa. Sem opções sai a face de cima, que é onde se anda; com
- * `CEILING` sai a mesma faixa virada para baixo, um pouco abaixo e um pouco mais
- * para fora — o teto do porão.
+ * How to emit the band. With no options it comes out as the top face, the one
+ * you walk on; with `CEILING` the same band comes out facing down, a little
+ * lower and a little further outboard — the hold ceiling.
  */
 interface BandOptions {
-  /** Deslocamento vertical aplicado à faixa inteira. */
+  /** Vertical offset applied to the whole band. */
   offsetY?: number;
-  /** Inverte a orientação das faces. */
+  /** Flips the orientation of the faces. */
   flip?: boolean;
-  /** Alarga a fileira para fora (a borda da escotilha, que é fixa, não se mexe). */
+  /** Widens the row outboard (the hatch edge, which is fixed, doesn't move). */
   outset?: number;
 }
 
@@ -570,8 +582,8 @@ function emitDeckBand(
   options: BandOptions = {},
 ): void {
   const { offsetY = 0, flip = false, outset = 0 } = options;
-  // A borda desenhada vai até o forro, e não até a meia largura útil — ver
-  // `deckEdgeHalfWidth`. É o que fecha a fresta das quinas de proa e de popa.
+  // The drawn edge goes out to the liner, and not to the usable half width — see
+  // `deckEdgeHalfWidth`. It's what closes the gap at the bow and stern corners.
   const hwA = deckEdgeHalfWidth(tA) + outset;
   const hwB = deckEdgeHalfWidth(tB) + outset;
   const zA = tToZ(tA);
@@ -582,13 +594,13 @@ function emitDeckBand(
     const x1a = toX(hwA);
     const x0b = fromX(hwB);
     const x1b = toX(hwB);
-    // Perto da proa o convés fica mais estreito que a escotilha; ali o trecho
-    // lateral se inverte e a única coisa certa a fazer é não emitir nada.
+    // Near the bow the deck gets narrower than the hatch; there the side span
+    // inverts and the only right thing to do is emit nothing.
     if (x1a - x0a < 0.02 || x1b - x0b < 0.02) continue;
 
-    // O abaulamento é medido pela largura **útil**, e não pela desenhada: a
-    // altura do chão tem de ser exatamente a que `deckCamber` devolve para a
-    // física, senão o pé do jogador flutua um centímetro acima da tábua.
+    // The camber is measured from the **usable** width, and not from the drawn
+    // one: the floor height has to be exactly what `deckCamber` returns for the
+    // physics, otherwise the player's foot floats a centimeter above the plank.
     const camberA = deckHalfWidth(tA);
     const camberB = deckHalfWidth(tB);
 
@@ -611,14 +623,14 @@ function emitDeckBand(
 }
 
 /**
- * Convés principal, da borda do tombadilho até a proa, com a escotilha vazada.
+ * Main deck, from the quarterdeck's edge to the bow, with the hatch cut out.
  *
- * Sai duas vezes: a face de cima no material do convés, a de baixo no do porão.
- * O convés é uma casca de espessura zero, e casca de espessura zero com material
- * `FrontSide` simplesmente **não existe** para quem olha de baixo — quem descia
- * ao porão via o céu e o cordame através do próprio convés em que acabara de
- * pisar. As duas faces vêm da mesma fileira de estações, então o teto acompanha
- * a tosadura e o abaulamento sem nenhuma chance de divergir.
+ * It comes out twice: the top face in the deck material, the bottom one in the
+ * hold's. The deck is a zero-thickness shell, and a zero-thickness shell with a
+ * `FrontSide` material **does not exist** for anyone looking from below — going
+ * down into the hold you saw the sky and the rigging through the very deck you
+ * had just been standing on. Both faces come from the same row of stations, so
+ * the ceiling follows the sheer and the camber with no chance of diverging.
  */
 function buildDeck(builder: GeometryBuilder, ceiling: GeometryBuilder): void {
   const hatchFrom = STATIONS.hatch - HATCH_HALF_T;
@@ -643,17 +655,18 @@ function buildDeck(builder: GeometryBuilder, ceiling: GeometryBuilder): void {
 }
 
 /**
- * Tombadilho de popa e o que sobe até ele.
+ * The after quarterdeck and what climbs up to it.
  *
- * O degrau entre os dois conveses é o que faz o timão ficar acima da linha da
- * vela — sem ele o timoneiro navegaria olhando para o pano. As duas escadas
- * ficam junto às amuradas, deixando o meio livre para o mastro de mezena e para
- * quem corre da proa para a popa.
+ * The step between the two decks is what puts the helm above the sail's line —
+ * without it the helmsman would sail looking at canvas. The two stairs sit
+ * against the bulwarks, leaving the middle clear for the mizzen mast and for
+ * anyone running from bow to stern.
  */
 function buildQuarterdeck(builder: GeometryBuilder, ceiling: GeometryBuilder): void {
-  // Começa exatamente onde o forro interno de popa começa. Não é preciosismo de
-  // meio centímetro: o piso parava em 0,004 e o painel de dentro em 0,006, e a
-  // faixa entre os dois era um vão aberto para o mar bem debaixo do timoneiro.
+  // Starts exactly where the stern's inner liner starts. This isn't half a
+  // centimeter of fussiness: the floor stopped at 0.004 and the inner panel at
+  // 0.006, and the band between them was an opening onto the sea right under the
+  // helmsman.
   const rows = deckRows(SHELL_T_FROM, QUARTERDECK_T, 12);
   const full: Span[] = [[(hw) => -hw, (hw) => hw]];
   for (let i = 0; i < rows.length - 1; i++) {
@@ -661,9 +674,9 @@ function buildQuarterdeck(builder: GeometryBuilder, ceiling: GeometryBuilder): v
     emitDeckBand(ceiling, rows[i]!, rows[i + 1]!, QUARTERDECK_Y, full, CEILING);
   }
 
-  // A parede frontal do tombadilho, virada para a proa. Desce até *abaixo* do
-  // teto do convés principal porque ela também fecha o degrau de 44 cm entre os
-  // dois tetos — visto do porão, esse degrau era mais um rasgo para o céu.
+  // The quarterdeck's front wall, facing the bow. It goes down to *below* the
+  // main deck's ceiling because it also closes the 44 cm step between the two
+  // ceilings — seen from the hold, that step was one more tear open to the sky.
   const hw = deckEdgeHalfWidth(QUARTERDECK_T);
   const camberHalf = deckHalfWidth(QUARTERDECK_T);
   const z = tToZ(QUARTERDECK_T);
@@ -688,9 +701,9 @@ function buildQuarterdeck(builder: GeometryBuilder, ceiling: GeometryBuilder): v
   }
   builder.addStrip(bottom, top, true);
 
-  // Duas escadas de dois degraus, uma por bordo. Cada degrau é um bloco maciço
-  // que nasce no convés: assim o vão embaixo não fica aberto quando a câmera se
-  // agacha, e o topo de cada bloco já é a superfície pisável.
+  // Two two-step stairs, one per side. Each step is a solid block that starts at
+  // the deck: that way the space underneath isn't open when the camera crouches,
+  // and the top of each block is already the walkable surface.
   const steps = 2;
   const rise = (QUARTERDECK_Y - DECK_Y) / steps;
   const tread = 0.32;

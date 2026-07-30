@@ -1,30 +1,31 @@
 /**
- * O lado que não simula.
+ * The side that doesn't simulate.
  *
- * O guest **não integra casco nenhum**: nem empuxo, nem vela, nem leme, nem
- * contato. Ele recebe a pose pronta, interpola entre dois instantâneos e desenha.
- * O que ele simula localmente é só o próprio corpo no convés — e é isso que faz
- * este modelo funcionar sem rollback.
+ * The guest **integrates no hull at all**: no buoyancy, no sails, no rudder, no
+ * contact. It receives the pose ready-made, interpolates between two snapshots and
+ * draws. What it simulates locally is only its own body on the deck — and that is
+ * what makes this model work without rollback.
  *
- * ## Por que dá para prever o corpo sem prever o navio
+ * ## Why the body can be predicted without predicting the ship
  *
- * Porque `PlayerController` vive em **coordenadas locais do navio**. O convés é
- * um chão parado: andar nele não depende de onda, de vela nem de rumo. O casco é
- * só um referencial que chega pela rede, e o corpo anda por cima dele sem saber
- * de nada. É a decisão de arquitetura que este arquivo inteiro aproveita, e ela
- * foi tomada muito antes de existir rede — por causa da câmera.
+ * Because `PlayerController` lives in **ship-local coordinates**. The deck is a
+ * still floor: walking on it doesn't depend on waves, on sails or on heading. The
+ * hull is just a frame of reference that arrives over the network, and the body
+ * walks on top of it none the wiser. It's the architectural decision this whole
+ * file cashes in on, and it was made long before there was a network — because of
+ * the camera.
  *
- * ## Três relógios
+ * ## Three clocks
  *
- * - **O do host** (`hostTick`), que chega nos instantâneos. É a verdade.
- * - **O de desenho**, `hostTick − INTERP_DELAY`. Fica para trás de propósito:
- *   é o atraso que dá dois instantâneos entre os quais interpolar. Sem ele, o
- *   cliente estaria sempre extrapolando, e extrapolação em rede ruim é o que
- *   produz navio tremendo e depois corrigindo.
- * - **O de predição**, `hostTick + lead`. É onde o corpo local corre, à frente,
- *   para que a entrada chegue ao host no instante em que ele precisa dela.
+ * - **The host's** (`hostTick`), which arrives in the snapshots. It's the truth.
+ * - **The render clock**, `hostTick − INTERP_DELAY`. It lags on purpose: it's the
+ *   delay that provides two snapshots to interpolate between. Without it the
+ *   client would always be extrapolating, and extrapolation on a bad connection
+ *   is what produces a ship that shakes and then corrects.
+ * - **The prediction clock**, `hostTick + lead`. It's where the local body runs,
+ *   ahead, so that input reaches the host at the instant it needs it.
  *
- * O terceiro é o único ajustável, e ele se ajusta sozinho por `bufferDepth`.
+ * The third is the only adjustable one, and it adjusts itself via `bufferDepth`.
  */
 
 import * as THREE from 'three';
@@ -43,232 +44,236 @@ import { createWorldState, decodeSnapshot, type WorldState } from './WorldState'
 import type { RoomClient } from './RoomClient';
 
 /**
- * Passos entre instantâneos. É o `SNAPSHOT_EVERY` de `HostSession`, visto daqui.
+ * Steps between snapshots. It's `HostSession`'s `SNAPSHOT_EVERY`, seen from here.
  *
- * Duplicado de propósito: quem simula decide a taxa e quem desenha precisa
- * saber dela para se atrasar exatamente o necessário. Se um dia a taxa mudar,
- * mudam os dois.
+ * Duplicated on purpose: the side that simulates decides the rate and the side
+ * that draws needs to know it in order to lag by exactly the right amount. If the
+ * rate ever changes, both change.
  */
 const SNAPSHOT_INTERVAL = 4;
 
 /**
- * Atraso de desenho, em passos.
+ * Render delay, in steps.
  *
- * ⚠️ **Um intervalo exato, e não mais.** Era seis — uma vez e meia o intervalo,
- * pensando em folga para o jitter —, e o resultado era o oposto do pretendido:
- * com dois instantâneos em mão, o mais antigo está `SNAPSHOT_INTERVAL` passos
- * atrás do mais novo, então um alvo seis passos atrás cai **antes do primeiro
- * dos dois**. O fator de interpolação vivia grampeado em zero, a pose ficava
- * congelada no instantâneo anterior e só saltava quando chegava o seguinte. Ou
- * seja: o mundo inteiro do guest — o casco dele, o convés sob os pés dele e a
- * câmera junto — andava a quinze quadros por segundo, aos trancos, num jogo que
- * desenhava a cento e quarenta e quatro.
+ * ⚠️ **Exactly one interval, and no more.** It was six — one and a half intervals,
+ * meant as headroom for jitter — and the result was the opposite of the intent:
+ * with two snapshots in hand, the older one is `SNAPSHOT_INTERVAL` steps behind
+ * the newer, so a target six steps back falls **before the first of the two**. The
+ * interpolation factor sat clamped at zero, the pose stayed frozen on the previous
+ * snapshot and only jumped when the next one arrived. Which means: the guest's
+ * entire world — its hull, the deck under its feet and the camera along with them
+ * — moved at fifteen frames per second, in lurches, in a game that drew at a
+ * hundred and forty-four.
  *
- * Com um intervalo exato, o relógio de desenho entra em `from` no instante em
- * que o par é montado e chega a `to` bem quando o próximo par chega. A folga de
- * jitter não vem mais de atrasar o desenho: vem do grampo em 1, que **congela**
- * na última pose conhecida enquanto o pacote atrasado não chega, em vez de
- * extrapolar. Congelar por vinte milissegundos não se vê; extrapolar, sim.
+ * With exactly one interval, the render clock enters `from` the instant the pair
+ * is assembled and reaches `to` right as the next pair arrives. Jitter headroom no
+ * longer comes from delaying the render: it comes from the clamp at 1, which
+ * **freezes** on the last known pose while the late packet hasn't arrived, instead
+ * of extrapolating. Freezing for twenty milliseconds isn't visible; extrapolating
+ * is.
  */
 const INTERP_DELAY = SNAPSHOT_INTERVAL;
 
-// A aritmética do relógio de desenho mora em `renderClock`, onde ela pode ser
-// provada sem arrastar Three.js e o `Match` para dentro de um teste.
+// The render clock arithmetic lives in `renderClock`, where it can be proven
+// without dragging Three.js and `Match` into a test.
 
-/** Um lote de entrada a cada dois passos: 30 mensagens por segundo. */
+/** One input batch every two steps: 30 messages per second. */
 const SEND_EVERY = 2;
 
 /**
- * Fundo de fila que se quer manter no host, em quadros.
+ * Queue floor to keep at the host, in frames.
  *
- * Um quadro é o amortecedor mínimo: com ele, um pacote que atrase até um passo
- * inteiro ainda encontra o que consumir. Dois seriam mais seguros e custariam
- * 17 ms de latência de comando a mais o tempo todo — e a segurança que eles
- * comprariam já é comprada de graça pela redundância do lote, que reenvia cada
- * quadro duas vezes. Ver `adjustLead`.
+ * One frame is the minimum cushion: with it, a packet late by up to a whole step
+ * still finds something to consume. Two would be safer and would cost an extra
+ * 17 ms of command latency all the time — and the safety they'd buy is already
+ * bought for free by the batch's redundancy, which resends every frame twice.
+ * See `adjustLead`.
  */
 const DEPTH_TARGET = 1;
 
 /**
- * Limites do avanço, em passos.
+ * Bounds on the lead, in steps.
  *
- * O piso não é zero porque um avanço nulo significa carimbar o comando com o
- * tick que o host já consumiu — ele nasceria descartado. O teto existe porque
- * avanço é latência de comando: vinte e quatro passos são 400 ms entre a mão e o
- * convés, e daí em diante o problema já não é de sincronia, é de conexão.
+ * The floor isn't zero because a null lead means stamping the command with the
+ * tick the host has already consumed — it would be born discarded. The ceiling
+ * exists because lead is command latency: twenty-four steps are 400 ms between the
+ * hand and the deck, and past that the problem is no longer sync, it's the
+ * connection.
  */
 const LEAD_MIN = 3;
 const LEAD_MAX = 24;
 
-/** Fração do desvio do leme corrigida por instantâneo. Ver `applyShipParts`. */
+/** Fraction of the rudder deviation corrected per snapshot. See `applyShipParts`. */
 const WHEEL_CATCHUP = 0.08;
 
-/** Fração do desvio da mira corrigida por instantâneo. Ver `correctOperatedAim`. */
+/** Fraction of the aim deviation corrected per snapshot. See `correctOperatedAim`. */
 const AIM_CATCHUP = 0.12;
 
 /**
- * Intervalo entre ajustes do avanço, em passos. Meio segundo.
+ * Interval between lead adjustments, in steps. Half a second.
  *
- * Era de dois segundos, e servia enquanto o avanço tinha de **descobrir** a
- * latência subindo de um em um. Agora ele nasce medido (ver `estimateLead`) e
- * este ajuste só persegue deriva, então pode ser mais frequente sem ficar
- * inquieto — cada mudança de avanço é um pulinho no relógio de quem joga.
+ * It was two seconds, and that served while the lead still had to **discover** the
+ * latency by climbing one step at a time. Now it is born measured (see
+ * `estimateLead`) and this adjustment only chases drift, so it can be more frequent
+ * without getting restless — every change of lead is a small hop in the player's
+ * clock.
  */
 const LEAD_ADJUST_EVERY = 30;
 
 /**
- * Folga do relógio local antes de corrigir, em passos.
+ * Slack on the local clock before correcting, in steps.
  *
- * Dois passos são 33 ms. Abaixo disso a "divergência" é só o instantâneo ter sido
- * escrito entre dois passos daqui, e corrigir seria caçar o próprio rabo.
+ * Two steps are 33 ms. Below that the "divergence" is just the snapshot having been
+ * written between two steps on this side, and correcting would be chasing your own
+ * tail.
  */
 const CLOCK_TOLERANCE = 2;
 
-/** Divergência que deixa de ser deriva e vira outra coisa. Meio segundo. */
+/** Divergence that stops being drift and becomes something else. Half a second. */
 const CLOCK_SNAP = 30;
 
 /**
- * Erro de predição do corpo, em metros, e o que fazer com cada faixa.
+ * Body prediction error, in meters, and what to do with each band.
  *
- * Abaixo do primeiro é ruído de ponto flutuante e desalinho de um passo — corrigir
- * seria tremer à toa. Entre os dois, o erro é real mas pequeno: o corpo assume a
- * posição do host e o **desenho** absorve a diferença em dois décimos de segundo,
- * de modo que ninguém vê o salto. Acima do segundo não é erro, é teleporte
- * legítimo (assumiu um posto, agarrou a escada, renasceu), e aí o certo é ir
- * direto.
+ * Below the first it's floating-point noise and a one-step misalignment —
+ * correcting would be shaking for nothing. Between the two, the error is real but
+ * small: the body takes the host's position and the **render** absorbs the
+ * difference over two tenths of a second, so nobody sees the jump. Above the second
+ * it isn't error, it's a legitimate teleport (took a station, grabbed the ladder,
+ * respawned), and then going straight there is the right thing.
  */
 const ERROR_IGNORE = 0.08;
 const ERROR_SNAP = 1.5;
 
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
-/** A pose autoritativa do corpo trazida para mundo. Ver `authoritativePosition`. */
+/** The authoritative body pose brought to world space. See `authoritativePosition`. */
 const _authority = new THREE.Vector3();
 
 /**
- * Uma predição guardada: **a grandeza que o corpo possuía** naquele passo.
+ * A stored prediction: **the quantity the body owned** at that step.
  *
- * ⚠️ Não é sempre a mesma grandeza, e essa é a razão de a classe existir. No convés
- * o corpo possui a posição **local** — ele anda sobre um chão parado e o casco não
- * entra na conta. Na água ele possui a de **mundo**, e o `local` é derivado dela
- * pela pose do casco. Guardar sempre o `local` faria a reconciliação comparar, no
- * caso da água, duas contas feitas com poses de casco diferentes — ver
- * `GuestSession.reconcile`.
+ * ⚠️ It isn't always the same quantity, and that's the reason this class exists. On
+ * the deck the body owns the **local** position — it walks on a still floor and the
+ * hull never enters the arithmetic. In the water it owns the **world** one, and
+ * `local` is derived from it by the hull's pose. Always storing `local` would make
+ * reconciliation compare, in the water case, two computations made with different
+ * hull poses — see `GuestSession.reconcile`.
  */
 interface PredictedStep {
   readonly position: THREE.Vector3;
-  /** `true` quando `position` é de mundo. */
+  /** `true` when `position` is in world space. */
   inWater: boolean;
 }
 
 export class GuestSession {
   /**
-   * Os dois instantâneos entre os quais se desenha.
+   * The two snapshots the frame is drawn between.
    *
-   * Não são `readonly` porque eles trocam de papel a cada chegada: o "para onde"
-   * vira o "de onde", por troca de referência. Copiar o mundo campo a campo
-   * quinze vezes por segundo seria trabalho por nada.
+   * They aren't `readonly` because they swap roles on every arrival: the "to"
+   * becomes the "from", by swapping references. Copying the world field by field
+   * fifteen times per second would be work for nothing.
    */
   private from = createWorldState();
   private to = createWorldState();
   /**
-   * O terceiro, onde todo instantâneo é lido antes de valer.
+   * The third one, where every snapshot is read before it counts.
    *
-   * Existe porque a decisão de aceitar um instantâneo depende do que vem dentro
-   * dele: o tick só se conhece depois de decodificar. Decodificando direto sobre
-   * o `from` — que era o que se fazia —, um pacote que chegasse fora de ordem
-   * destruía a base da interpolação **antes** de ser recusado, e o navio passava
-   * a ser desenhado entre uma pose velha e a atual. Um terceiro buffer custa
-   * alguns quilobytes uma vez na vida e fecha a porta inteira.
+   * It exists because the decision to accept a snapshot depends on what comes
+   * inside it: the tick is only known after decoding. Decoding straight onto
+   * `from` — which is what used to happen — meant a packet arriving out of order
+   * destroyed the base of the interpolation **before** being refused, and the ship
+   * started being drawn between an old pose and the current one. A third buffer
+   * costs a few kilobytes once in a lifetime and closes the door for good.
    */
   private spare = createWorldState();
   private hasFrom = false;
   private hasTo = false;
 
-  /** O relógio do host, como o guest o conhece. Só muda quando chega instantâneo. */
+  /** The host's clock, as the guest knows it. Only moves when a snapshot arrives. */
   hostTick = 0;
 
   /**
-   * O relógio local, que anda **um por passo**.
+   * The local clock, which moves **one per step**.
    *
-   * ⚠️ Isto não pode ser `hostTick + lead` calculado na hora, e o motivo é o bug
-   * mais caro que este arquivo já teve: `hostTick` só avança quando chega um
-   * instantâneo, e instantâneo chega a cada quatro passos. Derivado dele, o
-   * carimbo do comando ficava parado três passos e pulava quatro — e como o host
-   * descarta comando repetido (a redundância do lote depende disso), **três de
-   * cada quatro comandos eram jogados fora**. O sintoma era `starves` na casa dos
-   * milhares com a conexão perfeita.
+   * ⚠️ This cannot be `hostTick + lead` computed on the spot, and the reason is the
+   * most expensive bug this file has ever had: `hostTick` only advances when a
+   * snapshot arrives, and a snapshot arrives every four steps. Derived from it, the
+   * command stamp sat still for three steps and jumped four — and since the host
+   * discards a repeated command (the batch's redundancy depends on that), **three
+   * out of every four commands were thrown away**. The symptom was `starves` in
+   * the thousands on a perfect connection.
    *
-   * Aqui ele anda sozinho e o instantâneo só o **corrige**, um passo de cada vez.
-   * Ver `syncClock`.
+   * Here it moves on its own and the snapshot only **corrects** it, one step at a
+   * time. See `syncClock`.
    */
   private localTick = 0;
 
   /**
-   * Onde se acha que o relógio do host está **agora**, em passos fracionários.
+   * Where the host's clock is thought to be **now**, in fractional steps.
    *
-   * Anda sozinho, um por passo, e o instantâneo corrige só a fase dela. O
-   * relógio de desenho é esta estimativa menos o atraso de interpolação — e é
-   * por ser derivado de uma rampa que ele anda liso. Ver `renderClock.ts`, que
-   * conta a versão anterior e por que ela tremia.
+   * It moves on its own, one per step, and the snapshot corrects only its phase.
+   * The render clock is this estimate minus the interpolation delay — and it's by
+   * being derived from a ramp that it moves smoothly. See `renderClock.ts`, which
+   * tells the story of the previous version and why it shook.
    */
   private hostEstimate = 0;
 
-  /** `true` depois que o primeiro instantâneo alinhou os dois relógios. */
+  /** `true` once the first snapshot has aligned the two clocks. */
   private clockStarted = false;
 
-  /** Quanto o corpo local corre à frente do host, em passos. */
+  /** How far ahead of the host the local body runs, in steps. */
   lead = 4;
-  /** Profundidade da fila do host, vinda no instantâneo. Telemetria. */
+  /** Depth of the host's queue, as it came in the snapshot. Telemetry. */
   depth = 0;
-  /** Erro de predição do último instantâneo, em metros. Telemetria. */
+  /** Prediction error from the last snapshot, in meters. Telemetry. */
   predictionError = 0;
 
   /**
-   * O desvio visual **não mora mais aqui**, e a mudança é um conserto.
+   * The view offset **doesn't live here any more**, and the change is a fix.
    *
-   * Ele era um vetor privado desta classe, com um getter público documentado como
-   * "o desvio visual do corpo, que o desenho soma à posição" — e ninguém, em
-   * nenhum arquivo do projeto, lia aquele getter. A faixa do meio da reconciliação
-   * ficava sem suavização nenhuma. Agora ele é `PlayerController.viewOffset`, que
-   * é onde a pose do quadro é montada e onde ele de fato chega à tela; ver a nota
-   * completa lá.
+   * It was a private vector on this class, with a public getter documented as "the
+   * body's view offset, which the render adds to the position" — and nobody, in any
+   * file of the project, read that getter. The middle band of reconciliation was
+   * left with no smoothing at all. Now it is `PlayerController.viewOffset`, which
+   * is where the frame's pose is assembled and where it actually reaches the
+   * screen; see the full note there.
    */
   private get viewOffset(): THREE.Vector3 {
     return this.match.crew[0].controller.viewOffset;
   }
 
-  /** Histórico do corpo previsto, indexado por tick, para reconciliar. */
+  /** History of the predicted body, indexed by tick, for reconciling. */
   private readonly history = new Map<number, PredictedStep>();
   private readonly historyPool: PredictedStep[] = [];
 
   /**
-   * A janela de comandos que sai daqui, com a costura que a mantém sem buracos.
+   * The window of commands that leaves here, with the stitching that keeps it whole.
    *
-   * Ver `InputOutbox` — em resumo, cada correção do relógio de predição pula ou
-   * repete um carimbo, e o host descarta as duas coisas. Sem a costura, cada
-   * correção custava um comando do jogador.
+   * See `InputOutbox` — in short, every correction of the prediction clock skips or
+   * repeats a stamp, and the host discards both. Without the stitching, each
+   * correction cost the player one command.
    */
   private readonly outbox = new InputOutbox();
 
   private leadTimer = 0;
   /**
-   * A fila mais vazia que o host relatou desde o último ajuste do avanço.
+   * The emptiest queue the host has reported since the last lead adjustment.
    *
-   * É o **mínimo**, e não o último valor, porque é o mínimo que diz se sobra
-   * folga: uma fila que oscila entre zero e quatro não tem gordura nenhuma para
-   * cortar, ainda que o instantâneo em que se olhou mostrasse quatro.
+   * It's the **minimum**, and not the last value, because it's the minimum that
+   * says whether there is slack to spare: a queue that swings between zero and
+   * four has no fat at all to trim, even if the snapshot you looked at showed four.
    */
   private minDepthSinceAdjust = Number.POSITIVE_INFINITY;
-  /** Passos que o host passou sem comando desde o último ajuste do avanço. */
+  /** Steps the host spent with no command since the last lead adjustment. */
   private starvedSinceAdjust = 0;
 
   /**
-   * A pose do adversário neste instante, montada uma vez e reescrita por passo.
+   * The opponent's pose at this instant, built once and rewritten every step.
    *
-   * Um objeto só, e não um `CrewState` novo por quadro: isto roda sessenta vezes
-   * por segundo dentro do orçamento do quadro de render. Ver a nota de alocação
-   * em `snapshotCodec`.
+   * A single object, and not a fresh `CrewState` per frame: this runs sixty times
+   * per second inside the render frame's budget. See the allocation note in
+   * `snapshotCodec`.
    */
   private readonly remotePose = {
     local: new THREE.Vector3(),
@@ -283,7 +288,7 @@ export class GuestSession {
     inWater: false,
   };
 
-  /** Passo em que o posto mudou por predição local, à espera do recibo do host. */
+  /** Step where the station changed by local prediction, awaiting the host's receipt. */
   private stationPredictedAt = -1;
   private lastStation: 'deck' | 'helm' | 'cannon' = 'deck';
   private lastCannonIndex = -1;
@@ -291,22 +296,22 @@ export class GuestSession {
   private lastAtCapstan = false;
   private lastInWater = false;
 
-  /** `true` quando o host avisou que a janela dele saiu de foco. */
+  /** `true` when the host has warned that its window lost focus. */
   stalled = false;
 
   constructor(
     private readonly match: Match,
     private readonly client: RoomClient,
-    /** Qual dos dois cascos é o meu. Decidido pela sala. */
+    /** Which of the two hulls is mine. Decided by the room. */
     private readonly slot: 0 | 1,
   ) {}
 
-  /** O índice do adversário **no fio**. Ver a nota de inversão em `applyWorld`. */
+  /** The opponent's index **on the wire**. See the inversion note in `applyWorld`. */
   private get remote(): 0 | 1 {
     return this.slot === 0 ? 1 : 0;
   }
 
-  /** A peça que o jogador local está servindo, ou `-1`. */
+  /** The gun the local player is serving, or `-1`. */
   private get operatedCannon(): number {
     const mine = this.match.crew[0].controller;
     return mine.station === 'cannon' ? mine.cannonIndex : -1;
@@ -333,19 +338,19 @@ export class GuestSession {
     this.stalled = false;
   }
 
-  /** Um instantâneo chegou. */
+  /** A snapshot has arrived. */
   onFrame(frame: ArrayBuffer): void {
-    // Lido no reserva, sempre. Ver a nota em `spare`.
+    // Read into the spare, always. See the note on `spare`.
     const header = decodeSnapshot(frame, this.spare);
     if (!header) return;
 
-    // Fora de ordem ou repetido: a rede entregou um pacote velho depois de um
-    // novo. Aplicá-lo faria o mundo andar para trás.
+    // Out of order or repeated: the network delivered an old packet after a new
+    // one. Applying it would make the world move backwards.
     if (this.hasTo && header.tick <= this.to.tick) return;
 
-    // Rodízio de três, por troca de referência: copiar o mundo campo a campo
-    // quinze vezes por segundo seria trabalho por nada. O que sai de circulação
-    // é o `from` antigo — ou o `to` antigo, enquanto ainda não há um par.
+    // A rotation of three, by swapping references: copying the world field by
+    // field fifteen times per second would be work for nothing. What leaves
+    // circulation is the old `from` — or the old `to`, while there is no pair yet.
     const freed = this.hasTo ? this.from : this.to;
     if (this.hasTo) {
       this.from = this.to;
@@ -361,16 +366,16 @@ export class GuestSession {
     if (this.to.starved > 0) this.starvedSinceAdjust += this.to.starved;
     this.stalled = false;
 
-    // Primeiro instantâneo: o avanço nasce medido, e os dois relógios já nascem
-    // alinhados a ele. Ver `estimateLead` e `advanceRenderClock`.
+    // First snapshot: the lead is born measured, and both clocks are born aligned
+    // to it. See `estimateLead` and `advanceRenderClock`.
     //
-    // ⚠️ A guarda é uma bandeira, e **não** `localTick === 0`, que era o que
-    // havia aqui e nunca era verdade: `predictionTick` incrementa o relógio a
-    // cada passo desde que a partida começa, e o primeiro instantâneo chega
-    // dezenas de passos depois. O ramo de baixo é que rodava sempre, e o efeito
-    // era o avanço nascer no valor de fábrica e ter de **descobrir** a latência
-    // subindo de um em um — que é exatamente o trabalho que `estimateLead`
-    // existe para não ser preciso fazer.
+    // ⚠️ The guard is a flag, and **not** `localTick === 0`, which is what used to
+    // be here and was never true: `predictionTick` increments the clock every step
+    // from the moment the match starts, and the first snapshot arrives dozens of
+    // steps later. It was the branch below that always ran, and the effect was the
+    // lead being born at the factory value and having to **discover** the latency
+    // by climbing one step at a time — which is exactly the work `estimateLead`
+    // exists to make unnecessary.
     if (!this.clockStarted) {
       this.clockStarted = true;
       this.lead = this.estimateLead();
@@ -378,19 +383,19 @@ export class GuestSession {
       this.hostEstimate = this.hostTick;
     } else {
       this.syncClock();
-      // A fase da estimativa é corrigida **aqui**, e só aqui: é o único momento
-      // em que há informação nova sobre onde o host está.
+      // The estimate's phase is corrected **here**, and only here: it's the only
+      // moment when there is new information about where the host is.
       this.hostEstimate = correctHostEstimate(this.hostEstimate, this.hostTick);
     }
 
     this.reconcile();
     this.correctOperatedAim();
-    // Os eventos do host viram os eventos deste passo: fumaça, estrondo, lasca e
-    // as balas nascem daqui. Ver `MatchEvents` — um caminho, dois papéis.
+    // The host's events become this step's events: smoke, boom, splinters and the
+    // cannonballs are all born here. See `MatchEvents` — one path, two roles.
     //
-    // O campo `ship` também se inverte, como tudo que vem do fio: sem isso, o
-    // estrondo do meu próprio canhão sairia com o volume de longe e a lasca do
-    // meu casco iria parar no dele.
+    // The `ship` field is inverted too, like everything that comes off the wire:
+    // without it, the boom of my own cannon would come out at long-range volume
+    // and the splinters off my hull would end up on his.
     for (const event of this.to.events) {
       if ('ship' in event) event.ship = event.ship === this.slot ? 0 : 1;
       if (event.kind === 'shot') this.spawnGhostBall(event.position, event.direction);
@@ -400,25 +405,25 @@ export class GuestSession {
   }
 
   /**
-   * Reaproxima a mira da peça que **eu** sirvo do ângulo que o host tem dela.
+   * Pulls the aim of the gun **I** serve back toward the angle the host has for it.
    *
-   * ⚠️ **Sem isto, a mira do canhão é a única coisa do jogo que diverge para
-   * sempre.** Ela é acumular-e-grampear dos mesmos deltas dos dois lados, o que
-   * concorda perfeitamente enquanto nenhum comando se perde — e comando se
-   * perde. Bastava um, e daí em diante o cano que eu vejo apontado para o casco
-   * dele não é o cano de onde a bala sai: eu miro, aperto, a bala nasce do outro
-   * lado com outro ângulo e passa longe. É a leitura mais frustrante que um
-   * duelo pode dar, porque nada na tela sugere que o problema não foi a mira.
+   * ⚠️ **Without this, the cannon's aim is the only thing in the game that diverges
+   * forever.** It is accumulate-and-clamp over the same deltas on both sides, which
+   * agrees perfectly as long as no command is lost — and commands do get lost. One
+   * was enough, and from then on the barrel I see pointed at his hull isn't the
+   * barrel the ball leaves from: I aim, I fire, the ball is born on the other side
+   * at another angle and misses wide. It's the most frustrating read a duel can
+   * give, because nothing on screen suggests the problem wasn't the aim.
    *
-   * É o mesmo remédio da roda do timão (ver `WHEEL_CATCHUP`) e roda no mesmo
-   * ritmo em que a informação nova chega: **uma vez por instantâneo**, e não uma
-   * vez por passo. Aqui a diferença importa mais que na roda, porque este ângulo
-   * está debaixo da mão de quem está mirando agora — puxá-lo sessenta vezes por
-   * segundo seria arrastar a peça contra o próprio jogador.
+   * It's the same remedy as the helm wheel (see `WHEEL_CATCHUP`) and it runs at the
+   * same rhythm at which new information arrives: **once per snapshot**, and not
+   * once per step. Here the difference matters more than on the wheel, because this
+   * angle is under the hand of whoever is aiming right now — pulling it sixty times
+   * per second would be dragging the gun against the player himself.
    *
-   * O ganho é pequeno de propósito: o valor que chega descreve meia ida e volta
-   * atrás. A doze por cento por instantâneo, um erro fecha em cerca de meio
-   * segundo e é imperceptível com o cano em movimento.
+   * The gain is small on purpose: the value that arrives describes half a round
+   * trip ago. At twelve percent per snapshot, an error closes in about half a
+   * second and is imperceptible with the barrel in motion.
    */
   private correctOperatedAim(): void {
     const index = this.operatedCannon;
@@ -432,38 +437,39 @@ export class GuestSession {
   }
 
   /**
-   * Põe no ar a bala de um tiro que o host anunciou.
+   * Puts in the air the cannonball of a shot the host announced.
    *
-   * A velocidade é reconstruída como `direção × velocidade de boca`, e não vem no
-   * fio. A aproximação é boa porque a boca é duas ordens de grandeza mais rápida
-   * que o navio: uma chalupa a 5 m/s contra 95 m/s de pólvora dá menos de 3% de
-   * erro de módulo, e a direção — que é o que decide onde a bala **parece** cair
-   * — vem exata. Mandar o vetor cheio custaria seis bytes por tiro para corrigir
-   * o que ninguém enxerga.
+   * The velocity is reconstructed as `direction × muzzle speed`, and doesn't come
+   * over the wire. The approximation is good because the muzzle is two orders of
+   * magnitude faster than the ship: a sloop at 5 m/s against 95 m/s of powder gives
+   * less than 3% error in magnitude, and the direction — which is what decides
+   * where the ball **appears** to fall — comes through exact. Sending the full
+   * vector would cost six bytes per shot to fix what nobody can see.
    */
   private spawnGhostBall(position: THREE.Vector3, direction: THREE.Vector3): void {
     _position.copy(direction).multiplyScalar(MUZZLE_SPEED);
     this.match.cannonballs.spawnGhost(position, _position, BALL_MASS, BALL_RADIUS);
   }
 
-  /** O host avisou que a janela dele está em segundo plano. */
+  /** The host warned that its window is in the background. */
   markStalled(): void {
     this.stalled = true;
   }
 
   /**
-   * O passo do guest.
+   * The guest's step.
    *
-   * @param frame a entrada local deste passo, já carimbada com o tick de predição.
+   * @param frame the local input for this step, already stamped with the prediction
+   * tick.
    */
   fixedUpdate(frame: InputFrame): void {
     if (!this.hasTo) return;
 
-    // Antes de `applyWorld`, que é quem escreve a autoridade por cima. Ver
+    // Before `applyWorld`, which is what writes the authority over the top. See
     // `trackStationPrediction`.
     this.trackStationPrediction(frame.tick);
-    // Um por passo, sempre. Toda a correção mora na chegada do instantâneo — é
-    // o que mantém a velocidade do mundo constante entre dois pacotes.
+    // One per step, always. All the correction lives in the snapshot's arrival —
+    // it's what keeps the world's speed constant between two packets.
     this.hostEstimate = advanceHostEstimate(this.hostEstimate);
     this.applyWorld();
     this.rememberStation();
@@ -473,34 +479,34 @@ export class GuestSession {
   }
 
   /**
-   * O instante que está sendo desenhado, em passos fracionários.
+   * The instant being drawn, in fractional steps.
    *
-   * Um instantâneo atrás da estimativa do host: é onde a pose já tem os dois
-   * pontos entre os quais interpolar.
+   * One snapshot behind the host estimate: it's where the pose already has the two
+   * points to interpolate between.
    */
   private get renderClock(): number {
     return this.hostEstimate - INTERP_DELAY;
   }
 
   /**
-   * O passo em que o corpo local corre, e com que o comando é carimbado.
+   * The step the local body runs on, and the one the command is stamped with.
    *
-   * Avança **aqui**, uma vez por chamada, porque é chamado uma vez por passo. Ver
-   * `localTick` para o porquê de ele não ser derivado do relógio do host.
+   * It advances **here**, once per call, because it is called once per step. See
+   * `localTick` for why it is not derived from the host's clock.
    */
   predictionTick(): number {
     return ++this.localTick;
   }
 
   /**
-   * Alinha o relógio local ao do host, sem solavanco.
+   * Aligns the local clock to the host's, without a jolt.
    *
-   * O alvo é `hostTick + lead`: comando carimbado aí chega lá pouco antes de ser
-   * preciso. Divergência pequena é corrigida **um passo por instantâneo** — o
-   * jogador sente como o mundo indo um triz mais devagar ou mais rápido, que é
-   * imperceptível. Divergência grande não é deriva, é outra coisa (a aba dormiu,
-   * a rede sumiu por segundos), e aí saltar é o certo: acompanhar de um em um
-   * levaria minutos.
+   * The target is `hostTick + lead`: a command stamped there arrives just before it
+   * is needed. Small divergence is corrected **one step per snapshot** — the player
+   * feels it as the world going a shade slower or faster, which is imperceptible.
+   * Large divergence is not drift, it is something else (the tab slept, the network
+   * vanished for seconds), and then jumping is right: catching up one at a time would
+   * take minutes.
    */
   private syncClock(): void {
     const target = this.hostTick + this.lead;
@@ -514,41 +520,44 @@ export class GuestSession {
   }
 
   /**
-   * Decai o desvio visual. Roda no quadro, com o `dt` real.
+   * Decays the visual offset. Runs on the frame, with the real `dt`.
    *
-   * O getter `offset` que existia ao lado disto **foi removido**: era a ponta solta
-   * de uma peça que nunca foi ligada, e mantê-lo publicaria de novo um vetor que
-   * ninguém lê. Quem soma o desvio à pose agora é `PlayerController.syncView`.
+   * The `offset` getter that used to sit beside this **has been removed**: it was the
+   * loose end of a piece that was never wired up, and keeping it would publish again
+   * a vector nobody reads. What adds the offset to the pose now is
+   * `PlayerController.syncView`.
    */
   decayOffset(dt: number): void {
     this.match.crew[0].controller.decayViewOffset(dt);
   }
 
-  // -- aplicação -----------------------------------------------------------------
+  // -- application ---------------------------------------------------------------
 
   /**
-   * Escreve no `Match` a pose do instante de desenho.
+   * Writes the render instant's pose into the `Match`.
    *
-   * O truque que faz `syncModel(alpha)` continuar funcionando sem uma linha de
-   * mudança: a cada passo, a pose de agora vira a "anterior" e a interpolada vira
-   * a "atual". `ShipBody` já sabe interpolar entre as duas — ele faz isso desde
-   * antes de existir rede, para a tela de 144 Hz não ver a simulação de 60.
+   * The trick that keeps `syncModel(alpha)` working without a line of change: on
+   * every step, the current pose becomes the "previous" one and the interpolated one
+   * becomes the "current". `ShipBody` already knows how to interpolate between the
+   * two — it has done so since before there was any network, so the 144 Hz screen
+   * does not see the 60 Hz simulation.
    */
   private applyWorld(): void {
-    // Sem par ainda: só há uma pose, e ela é a de agora.
+    // No pair yet: there is only one pose, and it is the current one.
     const t = this.hasFrom
       ? interpolationFactor(this.renderClock, this.from.tick, this.to.tick)
       : 1;
 
     for (let local = 0; local < 2; local++) {
-      // ⚠️ **Os índices se invertem aqui, e é a linha mais importante do arquivo.**
+      // ⚠️ **The indices invert here, and it is the most important line in the
+      // file.**
       //
-      // No fio, o índice 0 é sempre o navio de quem simula. Localmente, o índice
-      // 0 é sempre "o meu" — é o que faz a câmera, o HUD, o corpo e o áudio
-      // funcionarem sem saber que existe rede. Traduzir na entrada mantém os dois
-      // mundos coerentes e deixa o resto do jogo em paz; não traduzir daria um
-      // guest olhando pelos olhos do adversário, e levaria horas para descobrir
-      // por quê.
+      // On the wire, index 0 is always the simulating side's ship. Locally, index 0
+      // is always "mine" — it is what makes the camera, the HUD, the body and the
+      // audio work without knowing there is a network. Translating on the way in
+      // keeps both worlds coherent and leaves the rest of the game alone; not
+      // translating would give a guest looking through the opponent's eyes, and it
+      // would take hours to work out why.
       const net = local === 0 ? this.slot : this.remote;
       const ship = this.match.ships[local]!;
       const to = this.to.ships[net]!;
@@ -567,19 +576,19 @@ export class GuestSession {
       this.applyShipParts(ship, from, to, t, local === 0);
     }
 
-    // O mar é escrito, não avançado: somar `dt` sessenta vezes por segundo por
-    // dez minutos afastaria o relógio do mar dos dois lados por acúmulo de ponto
-    // flutuante, e o casco flutuaria numa onda que o outro não vê.
+    // The sea is written, not advanced: adding `dt` sixty times a second for ten
+    // minutes would drive the two sides' sea clocks apart through floating-point
+    // accumulation, and the hull would float on a wave the other one cannot see.
     const waves = this.match.environment.waveField;
     waves.time = this.from.waveTime + (this.to.waveTime - this.from.waveTime) * t;
     waves.windDirection = this.to.windDirection;
     waves.windStrength = this.to.windStrength;
-    // ⚠️ **E o rumo da ondulação de fundo junto**, que é o que faltava e o que
-    // fazia os dois jogadores navegarem mares diferentes. Quem o move é
-    // `WaveField.followWind`, e `followWind` mora no passo de quem simula: deste
-    // lado ele ficava congelado no valor de fábrica enquanto do outro girava
-    // 2% por segundo em direção ao vento. As duas ondas longas do espectro
-    // compõem a direção com ele — e são elas que levantam o casco.
+    // ⚠️ **And the background swell's heading with it**, which is what was missing
+    // and what had the two players sailing different seas. What moves it is
+    // `WaveField.followWind`, and `followWind` lives in the simulating side's step:
+    // on this side it stayed frozen at the factory value while on the other it turned
+    // 2% per second toward the wind. The spectrum's two long waves compose their
+    // direction with it — and they are the ones that lift the hull.
     waves.swellDirection = this.to.swellDirection;
     waves.syncUniforms();
 
@@ -588,13 +597,13 @@ export class GuestSession {
   }
 
   /**
-   * O céu e o tempo, escritos como chegaram.
+   * The sky and the weather, written as they arrived.
    *
-   * **Sem interpolar**, e é uma escolha, não um esquecimento: entre dois
-   * instantâneos passam 67 ms, e nesse tempo o sol de um dia de doze minutos
-   * anda três centésimos de grau. Interpolar isso custaria tratar a virada da
-   * meia-noite (0,99 → 0,01, que interpolado dá um dia inteiro ao contrário em
-   * um passo) para ganhar exatamente nada que se veja.
+   * **Without interpolating**, and that is a choice, not an oversight: 67 ms pass
+   * between two snapshots, and in that time the sun of a twelve-minute day moves
+   * three hundredths of a degree. Interpolating that would cost handling the midnight
+   * wrap (0.99 → 0.01, which interpolated gives a whole day backwards in one step) to
+   * gain exactly nothing anybody can see.
    */
   private applySky(): void {
     const sky = this.to.sky;
@@ -609,8 +618,9 @@ export class GuestSession {
       rain: sky.rain,
       visibility: sky.visibility,
       flash: sky.flash,
-      // Vento e rumo viajam como propriedade do mar, porque é o mar que os
-      // consome; o tempo os recebe de volta só para o HUD ter o que mostrar.
+      // Wind and heading travel as properties of the sea, because it is the sea
+      // that consumes them; the weather gets them back only so the HUD has something
+      // to show.
       wind: this.to.windStrength,
       direction: this.to.windDirection,
     });
@@ -628,25 +638,24 @@ export class GuestSession {
     ship.rudder.previousRudderAngle = ship.rudder.rudderAngle;
 
     if (mine) {
-      // A **minha** roda gira aqui, no mesmo passo em que o comando sai da minha
-      // mão — quem a integra é `Ship.fixedUpdateRemote`, e sem essa chamada ela
-      // não girava de jeito nenhum. É isto que tira a sensação de leme
-      // emperrado: o navio responder depois não é latência, é massa, e o jogador
-      // lê como massa.
+      // **My** wheel turns here, on the same step the command leaves my hand — what
+      // integrates it is `Ship.fixedUpdateRemote`, and without that call it did not
+      // turn at all. This is what takes away the feeling of a jammed helm: the ship
+      // responding later is not latency, it is mass, and the player reads it as mass.
       //
-      // Mas ela **também** é puxada de leve para o ângulo do host, e o motivo é
-      // o mesmo que obrigou o olhar a viajar absoluto: os dois lados chegam ao
-      // ângulo somando incrementos, e um comando que se perca deixa os dois
-      // ângulos diferentes **para sempre**, sem nada que os reaproxime. Aqui a
-      // deriva custa menos que no olhar — a roda bate no batente e volta ao meio
-      // várias vezes por combate, e cada uma dessas ressincroniza sozinha —, mas
-      // "menos" não é "nada" num duelo de dez minutos.
+      // But it is **also** nudged gently toward the host's angle, and the reason is
+      // the same one that forced the gaze to travel absolute: both sides reach the
+      // angle by adding increments, and one lost command leaves the two angles
+      // different **forever**, with nothing to bring them back together. Here the
+      // drift costs less than on the gaze — the wheel hits the stop and comes back
+      // amidships several times per fight, and each of those resynchronizes on its
+      // own — but "less" is not "nothing" in a ten-minute duel.
       //
-      // O ganho é deliberadamente pequeno. O valor que chega descreve o passado
-      // de meia ida e volta atrás; puxar forte para ele seria arrastar a roda
-      // contra a mão de quem está girando agora. A oito por cento por
-      // instantâneo, um erro fecha em cerca de um segundo de roda parada e é
-      // imperceptível com a roda em movimento.
+      // The gain is deliberately small. The value arriving describes the past of half
+      // a round trip ago; pulling hard toward it would be dragging the wheel against
+      // the hand of whoever is turning it now. At eight percent per snapshot, an
+      // error closes in about a second of a still wheel and is imperceptible with the
+      // wheel in motion.
       ship.rudder.setWheel(
         ship.rudder.wheelAngle + (to.wheelAngle - ship.rudder.wheelAngle) * WHEEL_CATCHUP,
       );
@@ -664,10 +673,10 @@ export class GuestSession {
       const target = to.cannons[i]!;
       const previous = from.cannons[i]!;
       cannon.beginStep();
-      // A peça que **eu** estou operando não é escrita por cima a cada passo: a
-      // mira responde ao meu mouse agora, e um cano que salta meio grau quinze
-      // vezes por segundo é impossível de apontar. Quem a reaproxima da verdade
-      // é `correctOperatedAim`, uma vez por instantâneo e de leve.
+      // The gun **I** am operating is not overwritten every step: the aim responds
+      // to my mouse now, and a barrel that jumps half a degree fifteen times a second
+      // is impossible to point. What brings it back toward the truth is
+      // `correctOperatedAim`, once per snapshot and gently.
       const operatedByMe = mine && this.operatedCannon === i;
       if (!operatedByMe) {
         cannon.traverse = previous.traverse + (target.traverse - previous.traverse) * t;
@@ -678,27 +687,27 @@ export class GuestSession {
       cannon.recoil = previous.recoil + (target.recoil - previous.recoil) * t;
     }
 
-    // Dano é sempre autoritativo: não há nada que o cliente possa prever sobre
-    // uma bala que o outro atirou.
+    // Damage is always authoritative: there is nothing the client can predict about
+    // a ball the other one fired.
     ship.damage.floodVolume = to.floodFraction * ship.damage.holdVolume;
     ship.damage.sinkTime = to.sinkTime;
     if (to.breaches) this.applyBreaches(ship, to.breaches, to.patches);
-    // Mesmo quando a lista não mudou, o esguicho muda: a onda andou e o casco
-    // adernou. Ver `refreshBreachInflow`.
+    // Even when the list has not changed, the jet does: the wave moved and the hull
+    // heeled. See `refreshBreachInflow`.
     else if (ship.damage.breaches.length > 0) this.refreshBreachInflow(ship);
 
-    // ⚠️ **E a lâmina d'água é resolvida aqui, todo passo.**
+    // ⚠️ **And the water sheet is solved here, every step.**
     //
-    // O volume chega pronto na linha de cima e sempre chegou — o HUD subia, o
-    // casco calava mais fundo, tudo certo. O que faltava era converter esse
-    // volume no **plano** que o desenho lê, e quem fazia essa conversão era
-    // `ShipDamage.fixedUpdate`, que é o caminho de quem simula. Deste lado o
-    // plano ficava em `-Infinity` para sempre, e `DamageView` esconde a água
-    // quando ele não é finito: o jogador descia ao porão com o casco furado e
-    // encontrava assoalho seco. "Abri rombo e não entra água" é exatamente isto.
+    // The volume arrives ready on the line above and always did — the HUD climbed,
+    // the hull sat deeper, all correct. What was missing was converting that volume
+    // into the **plane** the render reads, and what did that conversion was
+    // `ShipDamage.fixedUpdate`, which is the simulating side's path. On this side the
+    // plane stayed at `-Infinity` forever, and `DamageView` hides the water when it
+    // is not finite: the player went below with a holed hull and found a dry floor.
+    // "I opened a breach and no water comes in" is exactly this.
     //
-    // Todo passo, e não só quando a lista muda, porque o plano depende da
-    // adernada — e a adernada muda sessenta vezes por segundo.
+    // Every step, and not only when the list changes, because the plane depends on
+    // the heel — and the heel changes sixty times a second.
     ship.damage.solveWaterPlane(ship.body);
   }
 
@@ -716,23 +725,23 @@ export class GuestSession {
         normal: source.normal.clone(),
         area: source.area,
         repair: source.repair,
-        // A vazão **não** vem no fio, e não precisa vir: ela é uma função da
-        // pose do casco e do mar, e o guest tem os dois. Calcular aqui custa uma
-        // raiz por rombo e é o que faz o esguicho existir do lado de cá — antes
-        // este campo entrava zerado e o porão do guest ficava seco de água
-        // visível enquanto enchia de verdade, o que fazia o rombo parecer
-        // decorativo justamente para quem precisava correr para tapá-lo.
+        // The inflow does **not** come over the wire, and does not need to: it is a
+        // function of the hull's pose and of the sea, and the guest has both.
+        // Computing it here costs one square root per breach and is what makes the
+        // jet exist on this side — before, this field went in zeroed and the guest's
+        // hold stayed dry of visible water while it really filled, which made the
+        // breach look decorative to precisely the person who had to run and patch it.
         inflow: 0,
       });
     }
     this.refreshBreachInflow(ship);
 
-    // As tábuas vêm no mesmo campo condicional, e são o que faltava para o
-    // costado do adversário contar a história certa: sem elas, o rombo que ele
-    // acabou de tapar **sumia** do casco em vez de virar cicatriz com madeira
-    // por cima. Reescrever a lista inteira é seguro porque ela é autoritativa
-    // dos dois lados — inclusive a minha, que eu previ localmente e que o host
-    // acabou de confirmar.
+    // The planks come in the same conditional field, and they are what was missing
+    // for the opponent's planking to tell the right story: without them, the breach
+    // they had just patched **vanished** from the hull instead of becoming a scar
+    // with wood over it. Rewriting the whole list is safe because it is authoritative
+    // on both sides — including mine, which I predicted locally and the host has just
+    // confirmed.
     if (!patches) return;
     const list = ship.damage.patches;
     list.length = 0;
@@ -747,11 +756,11 @@ export class GuestSession {
   }
 
   /**
-   * Recalcula o esguicho de cada rombo com a pose e o mar deste instante.
+   * Recomputes each breach's jet with this instant's pose and sea.
    *
-   * Roda a cada passo, e não só quando a lista muda: a vazão depende de onde a
-   * onda está agora e de quanto o casco está adernado, e os dois mudam sessenta
-   * vezes por segundo enquanto a lista de rombos passa minutos igual.
+   * It runs every step, and not only when the list changes: the inflow depends on
+   * where the wave is now and on how far the hull is heeled, and both change sixty
+   * times a second while the breach list goes minutes without changing.
    */
   private refreshBreachInflow(ship: Ship): void {
     const waves = this.match.environment.waveField;
@@ -764,42 +773,40 @@ export class GuestSession {
   }
 
   /**
-   * O corpo do adversário é autoritativo; o meu, só nos campos que não prevejo.
+   * The opponent's body is authoritative; mine, only in the fields I do not predict.
    *
-   * ## Por que o corpo dele é interpolado como o casco
+   * ## Why their body is interpolated like the hull
    *
-   * Porque ele é **visto**, e desde que existe avatar do adversário isso deixou
-   * de ser detalhe. Escrever a pose do último instantâneo direto no controlador
-   * — que era o que se fazia, e bastava enquanto ninguém o desenhava — dá um
-   * marujo que anda a quinze quadros por segundo em cima de um convés que anda a
-   * cento e quarenta e quatro: o corpo aos trancos, e a cada tranco um pé
-   * patinando na madeira.
+   * Because it is **seen**, and since there has been an opponent avatar that has
+   * stopped being a detail. Writing the last snapshot's pose straight into the
+   * controller — which is what was done, and was enough while nobody drew it — gives
+   * a sailor moving at fifteen frames a second on top of a deck moving at a hundred
+   * and forty-four: the body in jerks, and with every jerk a foot skating on the wood.
    *
-   * O `t` é o **mesmo** do casco, e essa é a parte que não pode divergir: o
-   * corpo anda em coordenadas do navio, então corpo e convés precisam ser
-   * desenhados no mesmo instante ou o marujo desliza sobre o próprio piso.
+   * The `t` is the **same** as the hull's, and that is the part that cannot diverge:
+   * the body walks in ship coordinates, so body and deck have to be drawn at the same
+   * instant or the sailor slides over his own floor.
    *
-   * O que **não** se interpola são os campos discretos — posto, peça, escada,
-   * cabrestante, tábua. Eles valem do `from` até o `to` chegar, e é o `from` que
-   * descreve o instante que está sendo desenhado. Interpolar um posto não
-   * significa nada; adiantá-lo faria o corpo assumir o timão antes de chegar
-   * nele.
+   * What is **not** interpolated are the discrete fields — station, gun, ladder,
+   * capstan, plank. They hold from the `from` until the `to` arrives, and it is the
+   * `from` that describes the instant being drawn. Interpolating a station means
+   * nothing; advancing it would have the body take the helm before reaching it.
    *
-   * @param t onde o relógio de desenho está entre os dois instantâneos.
+   * @param t where the render clock sits between the two snapshots.
    */
   private applyCrew(t: number): void {
-    // Índices invertidos como em `applyWorld`: local 1 é sempre o adversário, e
-    // no fio ele é `this.remote`.
+    // Indices inverted as in `applyWorld`: local 1 is always the opponent, and on
+    // the wire they are `this.remote`.
     const remote = this.match.crew[1].controller;
     const to = this.to.crew[this.remote]!;
     const state = this.hasFrom ? this.from.crew[this.remote]! : to;
     const pose = this.remotePose;
 
-    // Assumir o leme ou montar a peça **teleporta** os pés metros de distância.
-    // Interpolar essa reta daria um pirata deslizando pelo convés em pose de
-    // parado; cravá-lo no posto de origem até a troca valer devolve o salto para
-    // quem sabe suavizá-lo — `PlayerAvatar.updateStation`, que leva o corpo até
-    // a estação na mesma curva de 0,28 s da câmera.
+    // Taking the helm or mounting the gun **teleports** the feet meters away.
+    // Interpolating that straight line would give a pirate sliding across the deck in
+    // an idle pose; pinning them to the origin station until the change applies hands
+    // the jump back to whoever knows how to smooth it — `PlayerAvatar.updateStation`,
+    // which takes the body to the station on the camera's same 0.28 s curve.
     const switching = state.station !== to.station || state.cannonIndex !== to.cannonIndex;
     if (switching) {
       pose.local.copy(state.local);
@@ -807,8 +814,8 @@ export class GuestSession {
       pose.pitch = state.pitch;
     } else {
       pose.local.lerpVectors(state.local, to.local, t);
-      // Pelo caminho curto: sem isto, cruzar ±π faz a cabeça dele dar quase uma
-      // volta inteira entre dois instantâneos.
+      // By the short path: without this, crossing ±π makes their head turn almost a
+      // full revolution between two snapshots.
       pose.yaw = state.yaw + wrapAngle(to.yaw - state.yaw) * t;
       pose.pitch = state.pitch + (to.pitch - state.pitch) * t;
     }
@@ -819,33 +826,34 @@ export class GuestSession {
     pose.onLadder = state.onLadder;
     pose.atCapstan = state.atCapstan;
     pose.patching = state.patching;
-    // A água entra na lista dos discretos, e é o certo: interpolar "está no mar"
-    // não significa nada, e adiantá-lo poria o adversário nadando pelo convés no
-    // último passo antes de ele de fato pular.
+    // The water joins the discrete list, and that is right: interpolating "is at
+    // sea" means nothing, and advancing it would have the opponent swimming across
+    // the deck on the last step before they actually jumped.
     pose.inWater = state.inWater;
 
-    // O passo do corpo dele: é aqui que a pose vira passada, pulo, escalada,
-    // mãos na roda e tábua na mão. Ver `PlayerController.applyRemoteStep`.
+    // Their body's step: this is where the pose becomes stride, jump, climb, hands
+    // on the wheel and plank in hand. See `PlayerController.applyRemoteStep`.
     remote.applyRemoteStep(FIXED_TIMESTEP, pose, this.match.ships[1]!);
 
-    // ⚠️ **O posto só é escrito quando o host já viu o comando que o mudou.**
+    // ⚠️ **The station is only written once the host has seen the command that
+    // changed it.**
     //
-    // Escrever sempre — que era o que se fazia — parte de uma premissa razoável
-    // e errada: a de que o cliente não prevê o posto. Ele prevê, e sempre
-    // previu, porque `Crewman.fixedUpdate` é o **mesmo** código dos dois lados e
-    // `Interaction.press` chama `takeHelm()` aqui também. O que havia era uma
-    // predição sem reconciliação: o jogador assumia o timão neste instante e o
-    // instantâneo seguinte, que descreve um passado anterior ao aperto, o
-    // devolvia ao convés. Com a ida e volta que este projeto tem, isso são cinco
-    // ou seis instantâneos desfazendo o comando antes de o host confirmá-lo — e
-    // o jogador vê a câmera pular entre o convés e a roda, com os controles
-    // trocando de significado a cada salto. Era o "os controles se invertem".
+    // Writing always — which is what was done — starts from a reasonable and wrong
+    // premise: that the client does not predict the station. It does, and it always
+    // did, because `Crewman.fixedUpdate` is the **same** code on both sides and
+    // `Interaction.press` calls `takeHelm()` here too. What there was was a prediction
+    // with no reconciliation: the player took the helm at this instant and the next
+    // snapshot, which describes a past earlier than the press, put them back on the
+    // deck. With the round trip this project has, that is five or six snapshots
+    // undoing the command before the host confirms it — and the player sees the camera
+    // jumping between the deck and the wheel, with the controls changing meaning on
+    // every jump. It was the "the controls invert".
     //
-    // `ackTick` é o recibo: enquanto o último comando que o host consumiu for
-    // anterior ao que causou a mudança daqui, o estado que chega ainda **não
-    // pode** falar sobre ela, e o certo é deixar a predição em pé. Quando o
-    // recibo passa, a autoridade volta a valer inteira — e se o host tiver
-    // recusado, a correção acontece aí, uma vez só, em vez de piscar.
+    // `ackTick` is the receipt: while the last command the host consumed is earlier
+    // than the one that caused the change over here, the state arriving **cannot** yet
+    // speak about it, and the right thing is to leave the prediction standing. When
+    // the receipt passes, the authority applies in full again — and if the host
+    // refused, the correction happens then, once, instead of flickering.
     const settled = this.stationPredictedAt < 0 || this.to.ackTick >= this.stationPredictedAt;
     if (!settled) return;
     this.stationPredictedAt = -1;
@@ -856,21 +864,21 @@ export class GuestSession {
     mine.cannonIndex = mineState.cannonIndex;
     mine.onLadder = mineState.onLadder;
     mine.atCapstan = mineState.atCapstan;
-    // A água entra pelo mesmo recibo que os outros — cair no mar é previsto aqui, e
-    // o instantâneo que descreve o passado anterior ao salto ainda diz "no convés".
-    // Por um método, e não por atribuição: entrar na água é trocar o corpo de
-    // referencial, e quem sabe fazer isso é o controlador. Ver
-    // `applyAuthoritativeWater`.
+    // The water comes in through the same receipt as the others — falling into the
+    // sea is predicted here, and the snapshot describing the past before the jump
+    // still says "on deck". Through a method, and not by assignment: entering the
+    // water means changing the body's frame, and what knows how to do that is the
+    // controller. See `applyAuthoritativeWater`.
     mine.applyAuthoritativeWater(mineState.inWater, this.match.ships[0]!);
   }
 
   /**
-   * Anota que o posto mudou **aqui**, e em que passo.
+   * Notes that the station changed **here**, and on which step.
    *
-   * Roda antes de `applyWorld`, e a ordem é o que torna a leitura possível: o
-   * passo do marujo local já aconteceu (`Match.fixedUpdateRemote` roda antes
-   * desta sessão), e a autoridade ainda não foi escrita por cima. Uma diferença
-   * em relação ao que ficou do passo anterior só pode ter vindo daqui.
+   * It runs before `applyWorld`, and the order is what makes the reading possible:
+   * the local sailor's step has already happened (`Match.fixedUpdateRemote` runs
+   * before this session), and the authority has not been written over it yet. A
+   * difference from what was left by the previous step can only have come from here.
    */
   private trackStationPrediction(tick: number): void {
     const mine = this.match.crew[0].controller;
@@ -879,10 +887,10 @@ export class GuestSession {
       mine.cannonIndex !== this.lastCannonIndex ||
       mine.onLadder !== this.lastOnLadder ||
       mine.atCapstan !== this.lastAtCapstan ||
-      // Cair no mar e sair dele são previstos aqui como qualquer troca de posto, e
-      // pelo mesmo motivo entram na conta do recibo: sem isto, o instantâneo que
-      // descreve o passado anterior ao salto devolveria o jogador ao convés meia
-      // dúzia de vezes antes de o host confirmar que ele pulou.
+      // Falling into the sea and leaving it are predicted here like any station
+      // change, and for the same reason they enter the receipt's arithmetic: without
+      // this, the snapshot describing the past before the jump would put the player
+      // back on deck half a dozen times before the host confirmed they jumped.
       mine.inWater !== this.lastInWater;
 
     if (changed) this.stationPredictedAt = tick;
@@ -890,7 +898,7 @@ export class GuestSession {
     this.rememberStation();
   }
 
-  /** Depois de `applyCrew`: a autoridade também conta como "o que ficou". */
+  /** After `applyCrew`: the authority also counts as "what was left". */
   private rememberStation(): void {
     const mine = this.match.crew[0].controller;
     this.lastStation = mine.station;
@@ -900,35 +908,36 @@ export class GuestSession {
     this.lastInWater = mine.inWater;
   }
 
-  // -- predição -------------------------------------------------------------------
+  // -- prediction -----------------------------------------------------------------
 
   private rememberPrediction(tick: number): void {
     const controller = this.match.crew[0].controller;
     const slot = this.historyPool.pop() ?? { position: new THREE.Vector3(), inWater: false };
-    // A grandeza que a predição **possui** neste passo, e não uma escolhida: no
-    // convés é o local, na água é o mundo. Ver `PredictedStep`.
+    // The quantity the prediction **owns** on this step, and not a chosen one: on
+    // deck it is the local one, in the water it is the world one. See `PredictedStep`.
     slot.inWater = controller.inWater;
     slot.position.copy(controller.inWater ? controller.worldFeet : controller.local);
     this.history.set(tick, slot);
-    // Um segundo de histórico basta: o instantâneo que vai cobrar a predição
-    // chega em menos de cem milissegundos.
+    // One second of history is enough: the snapshot that will charge the prediction
+    // arrives in under a hundred milliseconds.
     this.releaseHistory(tick - 60);
   }
 
   /**
-   * A posição do host **em mundo**, reconstruída com a pose do casco do mesmo
-   * instantâneo.
+   * The host's position **in world space**, rebuilt with the hull pose from the same
+   * snapshot.
    *
-   * ⚠️ **A pose tem de ser a do instantâneo, e não a de `ship.body`.** `applyWorld`
-   * escreve em `ship.body` a pose **interpolada**, que fica `INTERP_DELAY` passos
-   * atrás do relógio de desenho — e o relógio de desenho já está `lead` passos
-   * atrás do tick que está sendo cobrado. Usar aquela pose aqui reintroduziria
-   * exatamente o viés que este método existe para tirar. A pose que veio no pacote,
-   * essa sim, é a que o host tinha no tick `to.tick` — a mesma com que ele derivou
-   * o `local` que está sendo comparado.
+   * ⚠️ **The pose has to be the snapshot's, and not `ship.body`'s.** `applyWorld`
+   * writes the **interpolated** pose into `ship.body`, which sits `INTERP_DELAY`
+   * steps behind the render clock — and the render clock is already `lead` steps
+   * behind the tick being charged. Using that pose here would reintroduce exactly the
+   * bias this method exists to remove. The pose that came in the packet is the one
+   * the host had at tick `to.tick` — the same one it derived the `local` being
+   * compared from.
    *
-   * A conta é `ShipBody.localToWorld` letra por letra. `centerOfMass` não viaja no
-   * fio e não precisa: ele é uma constante do casco, calculada igual dos dois lados.
+   * The arithmetic is `ShipBody.localToWorld` letter for letter. `centerOfMass` does
+   * not travel on the wire and does not need to: it is a constant of the hull,
+   * computed identically on both sides.
    */
   private authoritativePosition(local: THREE.Vector3, ship: Ship): THREE.Vector3 {
     const state = this.to.ships[this.slot]!;
@@ -940,12 +949,12 @@ export class GuestSession {
   }
 
   /**
-   * Confere a predição do corpo contra a verdade do host.
+   * Checks the body's prediction against the host's truth.
    *
-   * **Não ressimula.** Com o corpo em coordenadas locais, o erro que sobra é o de
-   * um passo de caminhada — centímetros. Corrigir a posição e deixar o desenho
-   * alcançar em dois décimos é indistinguível de não ter errado, e custa uma
-   * subtração em vez de um histórico de estados inteiros para reexecutar.
+   * **It does not resimulate.** With the body in local coordinates, the error left is
+   * that of one walking step — centimeters. Correcting the position and letting the
+   * render catch up in two tenths is indistinguishable from not having missed, and it
+   * costs one subtraction instead of a history of whole states to replay.
    */
   private reconcile(): void {
     const authoritative = this.to.crew[this.slot]!;
@@ -954,40 +963,42 @@ export class GuestSession {
 
     const controller = this.match.crew[0].controller;
 
-    // ⚠️ **Os três têm de concordar sobre o referencial, senão não há o que
-    // comparar.** A predição guardou local ou mundo conforme o corpo estivesse no
-    // convés ou no mar; a autoridade descreve o mesmo passo do ponto de vista do
-    // host; e o corpo de agora é quem vai receber a correção. Quando eles divergem
-    // é porque alguém entrou ou saiu da água entre o passo cobrado e este — e aí a
-    // troca já é um teleporte legítimo que o recibo do posto cobre, em `applyCrew`.
-    // Medir a distância entre uma posição de mar e uma de convés daria um número
-    // grande e sem sentido, e o ramo de `ERROR_SNAP` o obedeceria.
+    // ⚠️ **All three have to agree about the frame, or there is nothing to
+    // compare.** The prediction saved local or world depending on whether the body
+    // was on deck or at sea; the authority describes the same step from the host's
+    // point of view; and the current body is the one that will receive the
+    // correction. When they diverge it is because somebody entered or left the water
+    // between the step being charged and this one — and then the change is already a
+    // legitimate teleport that the station's receipt covers, in `applyCrew`.
+    // Measuring the distance between a sea position and a deck position would give a
+    // large and meaningless number, and the `ERROR_SNAP` branch would obey it.
     if (predicted.inWater !== authoritative.inWater) return;
     if (predicted.inWater !== controller.inWater) return;
 
     const ship = this.match.ships[0]!;
-    // ⚠️ **A comparação é feita no referencial que a predição possui.**
+    // ⚠️ **The comparison is made in the frame the prediction owns.**
     //
-    // Comparar sempre em coordenadas locais parecia natural e escondia um viés
-    // sistemático que só a água revela. No convés não há viés nenhum: o `local` de
-    // quem anda não lê a pose do casco para nada, então os dois lados chegam ao
-    // mesmo número por caminhos independentes. Na água, não — o `local` do nadador
-    // **é** a posição de mundo convertida pela pose do casco, e as duas poses são
-    // diferentes: o host usa a real, o guest usa a interpolada da rede, atrasada de
-    // `lead + INTERP_DELAY` passos (150 a 300 ms, conforme a conexão). Duas
-    // posições de mundo *idênticas* viram `local` diferentes, e a reconciliação
-    // enxergava um erro que não existe no mundo.
+    // Always comparing in local coordinates seemed natural and hid a systematic bias
+    // that only the water reveals. On deck there is no bias at all: a walker's
+    // `local` does not read the hull's pose for anything, so both sides reach the
+    // same number by independent routes. In the water, no — a swimmer's `local` **is**
+    // the world position converted by the hull's pose, and the two poses are
+    // different: the host uses the real one, the guest uses the one interpolated from
+    // the network, `lead + INTERP_DELAY` steps behind (150 to 300 ms, depending on the
+    // connection). Two *identical* world positions become different `local`s, and the
+    // reconciliation saw an error that does not exist in the world.
     //
-    // Medido: só a translação do casco a 2,6 m/s dá 0,39 m a 150 ms e 0,78 m a
-    // 300 ms — cinco a dez vezes `ERROR_IGNORE`, do primeiro quadro na água e sem
-    // depender da distância. Com o navio guinando o termo cresce com o **raio**, e
-    // é justamente o cenário do recurso: ficar para trás enquanto o navio navega. A
-    // 0,4 rad/s o viés cruza `ERROR_SNAP` em 11 a 24 m, ou seja em 4 a 9 segundos
-    // de deriva — dentro da janela em que o resgate ainda nem abriu.
+    // Measured: the hull's translation alone at 2.6 m/s gives 0.39 m at 150 ms and
+    // 0.78 m at 300 ms — five to ten times `ERROR_IGNORE`, from the first frame in the
+    // water and without depending on distance. With the ship yawing the term grows
+    // with the **radius**, and that is exactly the feature's scenario: falling behind
+    // while the ship sails. At 0.4 rad/s the bias crosses `ERROR_SNAP` at 11 to 24 m,
+    // meaning in 4 to 9 seconds of drift — inside the window where the rescue has not
+    // even opened.
     //
-    // A saída é comparar onde os dois lados fazem a mesma conta com os mesmos
-    // dados: em **mundo**, reconstruindo a posição do host com a pose do casco que
-    // veio no mesmo pacote. Ver `authoritativePosition`.
+    // The way out is to compare where both sides do the same arithmetic with the same
+    // data: in **world space**, rebuilding the host's position with the hull pose that
+    // came in the same packet. See `authoritativePosition`.
     const target = predicted.inWater
       ? this.authoritativePosition(authoritative.local, ship)
       : authoritative.local;
@@ -997,22 +1008,24 @@ export class GuestSession {
     if (error < ERROR_IGNORE) return;
 
     if (error > ERROR_SNAP) {
-      // Teleporte legítimo. Ir direto, e sem desvio: arrastar o desenho por um
-      // metro e meio seria desenhar o jogador atravessando o convés.
+      // A legitimate teleport. Go straight there, with no offset: dragging the
+      // render across a meter and a half would be drawing the player going through
+      // the deck.
       controller.applyAuthoritative(target, predicted.inWater, ship);
       this.viewOffset.set(0, 0, 0);
       this.releaseHistory(Number.POSITIVE_INFINITY);
       return;
     }
 
-    // O desvio guarda a diferença **antes** de a posição ser corrigida, e o
-    // desenho o soma de volta — o corpo vai para o lugar certo sem que se veja.
+    // The offset saves the difference **before** the position is corrected, and the
+    // render adds it back — the body goes to the right place without anyone seeing.
     //
-    // ⚠️ **Em coordenadas do navio, sempre.** A comparação acontece no referencial
-    // que a predição possui, e na água esse referencial é o mundo — mas quem soma
-    // este vetor é `syncView`, que monta uma pose local. Somar um deslocamento de
-    // mundo ali entortaria a correção pelo rumo do casco, e o erro seria máximo
-    // justamente de través, que é a pose mais comum de um navio em combate.
+    // ⚠️ **In ship coordinates, always.** The comparison happens in the frame the
+    // prediction owns, and in the water that frame is the world — but what adds this
+    // vector is `syncView`, which assembles a local pose. Adding a world displacement
+    // there would skew the correction by the hull's heading, and the error would be
+    // largest exactly when beam-on, which is the most common pose of a ship in
+    // combat.
     _position.copy(predicted.position).sub(target);
     if (predicted.inWater) ship.body.worldDirToLocal(_position, _position);
     controller.absorbViewOffset(_position);
@@ -1028,20 +1041,20 @@ export class GuestSession {
     }
   }
 
-  // -- envio ------------------------------------------------------------------------
+  // -- sending ----------------------------------------------------------------------
 
   /**
-   * Enfileira o quadro e manda um lote a cada dois passos.
+   * Queues the frame and sends a batch every two steps.
    *
-   * O lote leva os quatro últimos quadros, dos quais dois são repetição. É o que
-   * torna a perda de um pacote invisível sem confirmação nem reenvio — ver
+   * The batch carries the last four frames, two of which are repeats. It is what
+   * makes a lost packet invisible with no acknowledgement and no retransmission — see
    * `INPUT_BATCH`.
    */
   private queueOutgoing(frame: InputFrame): void {
-    // O olhar que este passo produziu, medido **depois** de o marujo já ter
-    // andado — `Match.fixedUpdateRemote` roda antes desta sessão. É o ângulo
-    // exato com que a interação foi decidida aqui, e é o que o host tem de usar
-    // para decidir igual. Ver `PlayerController.applyLook`.
+    // The gaze this step produced, measured **after** the sailor has already moved —
+    // `Match.fixedUpdateRemote` runs before this session. It is the exact angle the
+    // interaction was decided with here, and it is what the host has to use to decide
+    // the same. See `PlayerController.applyLook`.
     const view = this.match.crew[0].controller;
     frame.yaw = view.yaw;
     frame.pitch = view.pitch;
@@ -1053,40 +1066,31 @@ export class GuestSession {
   }
 
   /**
-   * Ajusta o quanto o corpo corre à frente, pela fila do host.
+   * The initial lead, from the round-trip time already measured.
    *
-   * Fila vazia significa entrada chegando tarde: adiantar mais. Fila cheia
-   * significa entrada chegando cedo demais e envelhecendo na espera, o que é
-   * latência de comando pura: recuar. Um passo de cada vez, a cada dois segundos
-   * — mais rápido que isso e o ajuste vira o problema, porque cada mudança de
-   * avanço é um pulinho no relógio de quem joga.
-   */
-  /**
-   * O avanço inicial, a partir do tempo de ida e volta já medido.
+   * ## The arithmetic is the **whole** round trip, and not half of it
    *
-   * ## A conta é a ida e volta **inteira**, e não a metade
+   * It used to be half, on the reasoning that "only the outbound leg matters", and
+   * that arithmetic is wrong by a factor of two. The clock the guest stamps itself
+   * against is `hostTick`, and `hostTick` is the number that came **inside** a
+   * snapshot: by the time it arrives here, the host has already moved half a trip
+   * beyond it. The command stamped now will still take the other half trip to get
+   * there. Added together, it is the whole trip that separates the `hostTick` you know
+   * from the instant the command will be consumed.
    *
-   * Era metade, com o raciocínio de que "só o caminho de ida interessa", e a
-   * conta está errada por um fator de dois. O relógio contra o qual o guest se
-   * carimba é `hostTick`, e `hostTick` é o número que veio **dentro** de um
-   * instantâneo: quando ele chega aqui, o host já andou meia volta além dele. O
-   * comando carimbado agora ainda vai levar a outra meia volta para chegar lá.
-   * Somadas, é a volta inteira que separa o `hostTick` que se conhece do
-   * instante em que o comando será consumido.
+   * With half, the command arrived systematically late and was **discarded** —
+   * `InputBuffer.push` refuses a tick that has already passed. The host then repeated
+   * the last known frame: the `pressed` edges vanished (interacting, firing and
+   * jumping simply did not happen), the `held` state kept applying and the
+   * authoritative position drifted from the predicted one until it blew past
+   * `ERROR_SNAP`. What the player saw was a sailor who walks but does not obey, and
+   * who is yanked back to where they were every second.
    *
-   * Com metade, o comando chegava sistematicamente atrasado e era **descartado**
-   * — `InputBuffer.push` recusa tick que já passou. O host então repetia o
-   * último quadro conhecido: os `pressed` sumiam (interagir, atirar e pular
-   * simplesmente não aconteciam), o `held` continuava valendo e a posição
-   * autoritativa se afastava da prevista até estourar `ERROR_SNAP`. O que o
-   * jogador via era um marujo que anda mas não obedece, e que a cada segundo é
-   * puxado de volta para onde estava.
-   *
-   * O jitter entra somado porque ele é assimétrico no que importa: o pacote que
-   * chega adiantado só engorda a fila, o que chega atrasado é perdido. E a folga
-   * de quatro passos cobre a granularidade do instantâneo — ele sai a cada
-   * quatro passos, então o `hostTick` que se lê pode já ter até um intervalo
-   * inteiro de idade além da rede.
+   * The jitter is added in because it is asymmetric in what matters: a packet that
+   * arrives early only fattens the queue, one that arrives late is lost. And the
+   * four-step margin covers the snapshot's granularity — it goes out every four
+   * steps, so the `hostTick` you read can already be a whole interval old on top of
+   * the network.
    */
   private estimateLead(): number {
     const stepMs = FIXED_TIMESTEP * 1000;
@@ -1095,25 +1099,25 @@ export class GuestSession {
   }
 
   /**
-   * Ajusta o quanto o corpo corre à frente, pelo **fundo** da fila do host.
+   * Adjusts how far ahead the body runs, from the **floor** of the host's queue.
    *
-   * ## Por que o mínimo, e não a última leitura
+   * ## Why the minimum, and not the last reading
    *
-   * Porque avanço é latência de comando pura — cada passo a mais é um passo que
-   * o comando espera na fila antes de valer — e a única folga que se pode cortar
-   * com segurança é a que existiu o tempo **todo** desde o último ajuste. Uma
-   * fila que oscila entre zero e quatro tem média dois e gordura nenhuma: cortar
-   * ali é escolher passar fome no próximo vale.
+   * Because lead is pure command latency — every extra step is a step the command
+   * waits in the queue before applying — and the only slack you can cut safely is the
+   * one that existed the **whole** time since the last adjustment. A queue that
+   * oscillates between zero and four has a mean of two and no fat at all: cutting
+   * there means choosing to starve in the next trough.
    *
-   * ## O defeito que isto substitui
+   * ## The defect this replaces
    *
-   * A versão anterior olhava a última leitura, subia com fila abaixo de dois e
-   * só descia com fila acima de quatro. Entre os dois havia uma faixa morta, e
-   * qualquer engasgo que empurrasse o avanço para cima ficava lá: subir era
-   * fácil, descer exigia uma fila gorda que o próprio avanço alto impedia de
-   * acontecer. Era uma catraca, e ela girava sempre no mesmo sentido — o
-   * jogador que relatou isto estava com avanço 22 (366 ms de atraso em toda
-   * ação que depende do host) numa conexão de 127 ms, que pede 12.
+   * The previous version looked at the last reading, went up with a queue below two
+   * and only came down with a queue above four. Between the two there was a dead
+   * band, and any hitch that pushed the lead up stayed there: going up was easy,
+   * coming down required a fat queue that the high lead itself prevented from
+   * happening. It was a ratchet, and it always turned the same way — the player who
+   * reported this had a lead of 22 (366 ms of delay on every action that depends on
+   * the host) on a 127 ms connection, which asks for 12.
    */
   private adjustLead(): void {
     this.leadTimer++;
@@ -1124,21 +1128,22 @@ export class GuestSession {
     const starved = this.starvedSinceAdjust;
     this.minDepthSinceAdjust = Number.POSITIVE_INFINITY;
     this.starvedSinceAdjust = 0;
-    // Nenhum instantâneo na janela: não há o que medir, e chutar seria pior.
+    // No snapshot in the window: there is nothing to measure, and guessing would be
+    // worse.
     if (!Number.isFinite(floor)) return;
 
-    // Subir é resposta a **fome de verdade**, relatada pelo host, e não a uma
-    // fila vazia. Os dois pareciam a mesma coisa e não são: a fila fica em zero
-    // também quando o comando chega exatamente na hora, que é o alvo. Guiar por
-    // ela fazia o avanço subir justamente quando ele estava certo, e nunca mais
-    // descer.
+    // Going up is a response to **real starvation**, reported by the host, and not
+    // to an empty queue. The two looked like the same thing and are not: the queue
+    // sits at zero also when the command arrives exactly on time, which is the
+    // target. Steering by it made the lead climb precisely when it was right, and
+    // never come back down.
     //
-    // O tamanho do passo de subida acompanha o tamanho da fome. Era dois
-    // sempre, e dois é a resposta certa para uma rede que engasgou de verdade —
-    // não para o único passo perdido que um pacote atrasado produz. Como avanço
-    // é latência de comando pura, subir dois por causa de um custa 33 ms de
-    // atraso permanente em toda ação que dependa do host, e o ajuste seguinte só
-    // devolve um deles.
+    // The size of the step up follows the size of the starvation. It used to be two
+    // always, and two is the right answer for a network that really hitched — not for
+    // the single lost step one late packet produces. Since lead is pure command
+    // latency, going up two because of one costs 33 ms of permanent delay on every
+    // action that depends on the host, and the next adjustment only gives one of them
+    // back.
     if (starved >= 4) this.lead = Math.min(this.lead + 2, LEAD_MAX);
     else if (starved > 0) this.lead = Math.min(this.lead + 1, LEAD_MAX);
     else if (floor > DEPTH_TARGET) this.lead = Math.max(this.lead - 1, LEAD_MIN);

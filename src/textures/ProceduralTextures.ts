@@ -1,24 +1,24 @@
 /**
- * Texturas geradas em código: madeira, lona, cordame e ferro.
+ * Textures generated in code: wood, canvas, rope and iron.
  *
- * Nada é baixado. Cada material sai de um canvas 2D desenhado na
- * inicialização, o que resolve três coisas de uma vez: zero peso no bundle,
- * zero licença de terceiros e ladrilho perfeito por construção (todo desenho
- * aqui envolve nas bordas de propósito).
+ * Nothing is downloaded. Every material comes out of a 2D canvas drawn at
+ * startup, which solves three things at once: zero bundle weight, zero
+ * third-party licensing and perfect tiling by construction (every drawing here
+ * wraps at the edges on purpose).
  *
- * Cada material devolve três mapas no formato que o PBR do three espera:
- * - `map`     — cor base, em sRGB;
- * - `normalMap` — relevo, derivado de um mapa de altura por Sobel;
- * - `ormMap`  — oclusão em R, rugosidade em G, metalicidade em B (a convenção
- *   do glTF). Empacotar os três numa textura só corta duas amostragens por
- *   pixel, e o three lê exatamente esses canais quando o mesmo objeto é
- *   atribuído a `aoMap`, `roughnessMap` e `metalnessMap`.
+ * Every material returns three maps in the format three's PBR expects:
+ * - `map`     — base color, in sRGB;
+ * - `normalMap` — relief, derived from a height map by Sobel;
+ * - `ormMap`  — occlusion in R, roughness in G, metalness in B (the glTF
+ *   convention). Packing the three into a single texture cuts two samples per
+ *   pixel, and three reads exactly those channels when the same object is
+ *   assigned to `aoMap`, `roughnessMap` and `metalnessMap`.
  */
 
 import * as THREE from 'three';
 import { clamp01, createRandom, lerp, smoothstep } from '../core/MathUtils';
 
-/** Resolução padrão. 512 é o ponto em que a fibra da madeira ainda se lê. */
+/** Default resolution. 512 is the point where the wood grain still reads. */
 const DEFAULT_SIZE = 512;
 
 export interface MaterialMaps {
@@ -27,15 +27,15 @@ export interface MaterialMaps {
   ormMap: THREE.CanvasTexture;
 }
 
-// --- ruído -------------------------------------------------------------------
+// --- noise -------------------------------------------------------------------
 
 /**
- * Ruído de valor **periódico**.
+ * **Periodic** value noise.
  *
- * O `period` é o que garante o ladrilho: as células da grade dão a volta em vez
- * de continuar para o infinito, então o pixel da borda direita amostra a mesma
- * célula do pixel da borda esquerda. Sem isso toda textura repetida mostraria
- * uma costura vertical no casco.
+ * `period` is what guarantees the tiling: the grid cells wrap around instead of
+ * running off to infinity, so the pixel on the right edge samples the same cell
+ * as the pixel on the left edge. Without it every repeated texture would show a
+ * vertical seam on the hull.
  */
 function createNoise(seed: number) {
   const random = createRandom(seed);
@@ -55,7 +55,7 @@ function createNoise(seed: number) {
     const xf = x - xi;
     const yf = y - yi;
 
-    // Curva de suavização de Perlin: derivada nula nas células, sem quadriculado.
+    // Perlin's smoothing curve: zero derivative at the cells, no grid artifacts.
     const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10);
     const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
 
@@ -68,7 +68,7 @@ function createNoise(seed: number) {
   };
 }
 
-/** Soma de oitavas do ruído periódico, mantendo a periodicidade. */
+/** Sum of octaves of the periodic noise, keeping the periodicity. */
 function fbm(
   noise: (x: number, y: number, period: number) => number,
   x: number,
@@ -91,7 +91,7 @@ function fbm(
   return sum / total;
 }
 
-// --- infraestrutura de canvas ------------------------------------------------
+// --- canvas infrastructure ---------------------------------------------------
 
 function createContext(size: number): CanvasRenderingContext2D {
   const canvas = document.createElement('canvas');
@@ -112,20 +112,20 @@ function toTexture(
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.copy(repeat);
-  // 8x é o teto da maioria das GPUs; o driver corta sozinho se pedir demais, e
-  // sem isso o convés visto de raspão vira uma poça cinza.
+  // 8x is the ceiling on most GPUs; the driver clamps it if asked for more, and
+  // without it the deck viewed at a grazing angle turns into a gray smear.
   texture.anisotropy = 8;
   texture.needsUpdate = true;
   return texture;
 }
 
 /**
- * Converte altura em normal por diferença central (Sobel simplificado).
+ * Converts height into a normal by central difference (simplified Sobel).
  *
- * Gerar o normal a partir da mesma altura que desenhou a cor é o que mantém
- * junta de tábua, prego e nó exatamente no mesmo lugar nos dois mapas — se cada
- * um fosse desenhado por conta, o relevo apareceria deslocado da cor e a
- * madeira pareceria decalque.
+ * Generating the normal from the same height that drew the color is what keeps
+ * plank seam, nail and knot in exactly the same place in both maps — if each
+ * were drawn on its own, the relief would show up offset from the color and the
+ * wood would look like a decal.
  */
 function heightToNormal(height: Float32Array, size: number, strength: number): CanvasRenderingContext2D {
   const ctx = createContext(size);
@@ -139,7 +139,7 @@ function heightToNormal(height: Float32Array, size: number, strength: number): C
       const dx = (sample(x + 1, y) - sample(x - 1, y)) * strength;
       const dy = (sample(x, y + 1) - sample(x, y - 1)) * strength;
 
-      // A normal de um campo de altura é (-∂h/∂x, -∂h/∂y, 1), normalizada.
+      // The normal of a height field is (-∂h/∂x, -∂h/∂y, 1), normalized.
       const length = Math.hypot(dx, dy, 1);
       const index = (y * size + x) * 4;
       data[index] = ((-dx / length) * 0.5 + 0.5) * 255;
@@ -153,7 +153,7 @@ function heightToNormal(height: Float32Array, size: number, strength: number): C
   return ctx;
 }
 
-/** Monta o ORM a partir de três campos escalares já em 0..1. */
+/** Builds the ORM from three scalar fields already in 0..1. */
 function packOrm(
   size: number,
   occlusion: Float32Array,
@@ -175,20 +175,20 @@ function packOrm(
   return ctx;
 }
 
-// --- madeira -----------------------------------------------------------------
+// --- wood --------------------------------------------------------------------
 
 export interface WoodOptions {
-  /** Cor média da tábua, em 0..1 linear-ish (é escrita direto no canvas sRGB). */
+  /** Mean plank color, in 0..1 linear-ish (written straight to the sRGB canvas). */
   base: [number, number, number];
-  /** Cor do veio escuro. */
+  /** Color of the dark grain. */
   grain: [number, number, number];
-  /** Quantas tábuas cabem na altura da textura. */
+  /** How many planks fit in the height of the texture. */
   planks: number;
-  /** Proporção largura/altura da tábua, para o comprimento aparente. */
+  /** Plank width/height ratio, for the apparent length. */
   plankAspect: number;
-  /** 0 = envernizada, 1 = castigada pelo sal. */
+  /** 0 = varnished, 1 = beaten by the salt. */
   wear: number;
-  /** Desenha cabeças de prego nas pontas das tábuas. */
+  /** Draws nail heads at the ends of the planks. */
   nails: boolean;
   seed: number;
   size?: number;
@@ -196,11 +196,11 @@ export interface WoodOptions {
 }
 
 /**
- * Tábuas de madeira: veio, juntas calafetadas, nós e desgaste.
+ * Wooden planks: grain, caulked seams, knots and wear.
  *
- * O veio é ruído **anisotrópico** — muito esticado no comprimento da tábua —
- * porque é assim que a fibra da árvore corta a peça. Só isso já separa "madeira"
- * de "mármore marrom", que é o que sai de um fbm isotrópico qualquer.
+ * The grain is **anisotropic** noise — heavily stretched along the length of the
+ * plank — because that's how the tree's fiber runs through the piece. That alone
+ * separates "wood" from "brown marble", which is what any isotropic fbm gives.
  */
 export function createWoodMaps(options: WoodOptions): MaterialMaps {
   const size = options.size ?? DEFAULT_SIZE;
@@ -218,19 +218,19 @@ export function createWoodMaps(options: WoodOptions): MaterialMaps {
   const plankRows = options.planks;
   const plankHeight = size / plankRows;
 
-  // Tom e deslocamento próprios de cada tábua: madeira serrada nunca sai de uma
-  // peça só, e fileiras idênticas denunciam a textura na hora.
+  // Each plank gets its own tone and offset: sawn timber never comes from a
+  // single piece, and identical rows give the texture away instantly.
   const plankTone: number[] = [];
   const plankShift: number[] = [];
   const plankSplit: number[] = [];
   for (let i = 0; i < plankRows; i++) {
     plankTone.push(0.82 + random() * 0.36);
     plankShift.push(random() * 100);
-    // Onde a tábua "termina" e começa a próxima, no eixo longo.
+    // Where the plank "ends" and the next one begins, on the long axis.
     plankSplit.push(random());
   }
 
-  // Nós da madeira, espalhados sem cair em cima das juntas.
+  // Wood knots, scattered without landing on top of the seams.
   const knots: { x: number; y: number; r: number }[] = [];
   const knotCount = Math.round(plankRows * 0.8);
   for (let i = 0; i < knotCount; i++) {
@@ -249,37 +249,37 @@ export function createWoodMaps(options: WoodOptions): MaterialMaps {
     for (let x = 0; x < size; x++) {
       const index = y * size + x;
 
-      // --- veio: ruído esticado ao longo da tábua ---------------------------
+      // --- grain: noise stretched along the plank ---------------------------
       const grainX = (x / size) * 3 * options.plankAspect + plankShift[row]!;
       const grainY = (y / size) * plankRows * 5;
       const warp = fbm(noise, grainX * 0.6, grainY * 0.25, 24, 3) - 0.5;
 
-      // As linhas de crescimento: uma onda apertada, empenada pelo próprio ruído.
+      // The growth lines: a tight wave, warped by the noise itself.
       //
-      // A amplitude do empeno é a diferença entre madeira e mármore. `|sin(π·g)|`
-      // tem período 1 em `grainY`, então deslocar por `warp * 3.2` movia cada
-      // ponto em até **1,6 anéis** — mais que o espaçamento entre eles. Anéis
-      // vizinhos se cruzavam e o veio virava um redemoinho de pedra polida, bem
-      // visível no timão e no mastro, que são as peças de anel mais espaçado
-      // (`planks: 1`) e onde o efeito era mais grosseiro.
+      // The warp amplitude is the difference between wood and marble. `|sin(π·g)|`
+      // has period 1 in `grainY`, so offsetting by `warp * 3.2` moved every point
+      // by as much as **1.6 rings** — more than the spacing between them.
+      // Neighboring rings crossed and the grain became a swirl of polished stone,
+      // clearly visible on the helm and the mast, which are the pieces with the
+      // widest ring spacing (`planks: 1`) and where the effect was crudest.
       //
-      // Em ±0,27 de anel o veio ondula como madeira serrada de verdade: as
-      // linhas seguem o comprimento da peça e só abrem em catedral perto dos nós,
-      // que é justamente o que o termo `knot` já faz mais abaixo.
+      // At ±0.27 of a ring the grain ripples like real sawn timber: the lines
+      // follow the length of the piece and only flare into cathedral figure near
+      // the knots, which is exactly what the `knot` term already does below.
       const rings = Math.abs(Math.sin((grainY + warp * 0.55) * Math.PI));
       let grain = Math.pow(rings, 0.6);
-      // O borrão de ruído por cima quebra a regularidade do seno. Em 0,35 ele
-      // comia metade do veio e devolvia manchas; em 0,22 só tira o ar de listra.
+      // The noise smear on top breaks the sine's regularity. At 0.35 it ate half
+      // the grain and gave back blotches; at 0.22 it only kills the striped look.
       grain = lerp(grain, fbm(noise, grainX * 4, grainY * 1.2, 48, 3), 0.22);
 
-      // --- junta entre tábuas ----------------------------------------------
-      // A junta é escura e afundada; a borda logo ao lado é mais clara, porque é
-      // a quina que o pé e a corda lixam primeiro.
+      // --- seam between planks ----------------------------------------------
+      // The seam is dark and recessed; the edge right next to it is lighter,
+      // because that's the corner feet and rope sand down first.
       const edge = Math.min(withinPlank, 1 - withinPlank);
       const gap = 1 - smoothstep(0.0, 0.035, edge);
       const chamfer = smoothstep(0.035, 0.11, edge);
 
-      // --- topo da tábua (a junta transversal) ------------------------------
+      // --- plank butt (the transverse seam) ---------------------------------
       const along = (x / size + plankSplit[row]!) % 1;
       const buttEdge = Math.min(along, 1 - along);
       const butt = 1 - smoothstep(0.0, 0.006, buttEdge);

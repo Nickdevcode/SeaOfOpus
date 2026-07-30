@@ -1,17 +1,18 @@
 /**
- * Entrada unificada: teclado, mouse e gamepad falam a mesma língua de "ações".
+ * Unified input: keyboard, mouse and gamepad all speak the same language of
+ * "actions".
  *
- * O resto do jogo nunca pergunta "a tecla F está pressionada?" — pergunta
- * "a ação INTERACT foi acionada?". O ganho é que teclado e controle entram pelo
- * mesmo funil e a interface tem uma única tabela de rótulos para consultar
- * (`ACTION_LABELS`): trocar um binding aqui reescreve o prompt no convés e a
- * linha na tela de controles sem tocar em nenhum dos dois.
+ * The rest of the game never asks "is the F key down?" — it asks "was the
+ * INTERACT action triggered?". The gain is that keyboard and controller come in
+ * through the same funnel and the UI has a single table of labels to look up
+ * (`ACTION_LABELS`): changing a binding here rewrites the prompt on deck and the
+ * line on the controls screen without touching either one.
  *
- * Os bindings são fixos. Não há remapeamento pelo jogador — se um dia houver, o
- * lugar é `KEY_BINDINGS`/`PAD_BINDINGS`, e nada fora daqui precisa saber.
+ * The bindings are fixed. There is no player remapping — if there ever is, the
+ * place is `KEY_BINDINGS`/`PAD_BINDINGS`, and nothing outside here needs to know.
  *
- * Bindings fiéis ao Sea of Thieves: F interage, R carrega o canhão, LMB
- * dispara, RMB mira. No controle: X interage, Y carrega, RT dispara, LT mira.
+ * Bindings faithful to Sea of Thieves: F interacts, R loads the cannon, LMB
+ * fires, RMB aims. On the controller: X interacts, Y loads, RT fires, LT aims.
  */
 
 import { GamepadButton, GamepadManager, type GamepadLayout } from './Gamepad';
@@ -35,7 +36,7 @@ export type Action =
   | 'debug'
   | 'pause';
 
-/** Tecla (`KeyboardEvent.code`) → ação. */
+/** Key (`KeyboardEvent.code`) → action. */
 const KEY_BINDINGS: Record<string, Action> = {
   KeyW: 'moveForward',
   KeyS: 'moveBack',
@@ -57,7 +58,7 @@ const KEY_BINDINGS: Record<string, Action> = {
   Escape: 'pause',
 };
 
-/** Botão do gamepad → ação. */
+/** Gamepad button → action. */
 const PAD_BINDINGS: Array<[number, Action]> = [
   [GamepadButton.A, 'jump'],
   [GamepadButton.B, 'exit'],
@@ -71,26 +72,26 @@ const PAD_BINDINGS: Array<[number, Action]> = [
 ];
 
 /**
- * Rótulo de uma ação que não tem botão no aparelho perguntado.
+ * The label for an action with no button on the device being asked about.
  *
- * Vale como valor, e não como string solta, porque a interface **decide** com
- * base nele: a tabela de controles mostra o travessão desbotado, mas uma linha
- * de dica de rodapé se esconde inteira em vez de anunciar um aperto que não
- * existe (ver `Menu.syncGlyphs`).
+ * It's a value, not a loose string, because the UI **decides** based on it: the
+ * controls table shows the em dash grayed out, but a footer hint line hides
+ * itself entirely instead of announcing a press that doesn't exist (see
+ * `Menu.syncGlyphs`).
  */
 export const NO_BINDING = '—';
 
 /**
- * Rótulos legíveis para a tela de controles.
+ * Readable labels for the controls screen.
  *
- * Em inglês, e sem sotaque: "Take the helm", não "Belay there, matey". A
- * interface é o lugar onde o jogo **instrui**, e instrução com sotaque custa uma
- * fração de segundo de decodificação toda vez que é lida. O tema fica na
- * madeira, no latão e no mar; o texto fica claro.
+ * In English, and with no accent: "Take the helm", not "Belay there, matey". The
+ * UI is where the game **instructs**, and instruction with an accent costs a
+ * fraction of a second of decoding every time it's read. The theme lives in the
+ * wood, the brass and the sea; the text stays clear.
  *
- * O campo `gamepad` guarda sempre o nome do layout padrão (Xbox). Quem mostra na
- * tela deve passar por `Input.padLabel`, que traduz para o layout do controle que
- * está de fato ligado.
+ * The `gamepad` field always holds the standard layout's name (Xbox). Whatever
+ * puts it on screen must go through `Input.padLabel`, which translates it to the
+ * layout of the controller actually plugged in.
  */
 export const ACTION_LABELS: Record<Action, { name: string; keyboard: string; gamepad: string }> = {
   moveForward: { name: 'Move forward', keyboard: 'W', gamepad: 'Left stick' },
@@ -111,16 +112,16 @@ export const ACTION_LABELS: Record<Action, { name: string; keyboard: string; gam
 };
 
 /**
- * Como cada botão se chama num controle da Sony.
+ * What each button is called on a Sony controller.
  *
- * A tabela é de **rótulos**, não de bindings: o índice do botão não muda (a
- * Gamepad API normaliza tudo para o layout "standard"), muda o que está gravado
- * nele. Mostrar `A` para quem tem um DualSense na mão é a mesma classe de erro
- * que mostrar `F` para quem está de controle — a interface está descrevendo um
- * aparelho que não é o que o jogador está segurando.
+ * The table is of **labels**, not bindings: the button index doesn't change (the
+ * Gamepad API normalizes everything to the "standard" layout), what changes is
+ * what's printed on it. Showing `A` to someone holding a DualSense is the same
+ * class of error as showing `F` to someone on a controller — the UI is describing
+ * a device that isn't the one the player is holding.
  *
- * A chave é o rótulo Xbox de `ACTION_LABELS`, e não a ação: assim uma ação nova
- * que reaproveite um botão já traduzido não precisa de linha aqui.
+ * The key is the Xbox label from `ACTION_LABELS`, not the action: that way a new
+ * action reusing an already-translated button needs no line here.
  */
 const PLAYSTATION_GLYPHS: Readonly<Record<string, string>> = {
   A: '✕',
@@ -135,70 +136,71 @@ const PLAYSTATION_GLYPHS: Readonly<Record<string, string>> = {
   Menu: 'Options',
 };
 
-/** Traduz um rótulo de botão do layout padrão (Xbox) para o layout em uso. */
+/** Translates a button label from the default layout (Xbox) into the one in use. */
 function padGlyph(xboxLabel: string, layout: GamepadLayout): string {
   if (layout !== 'playstation') return xboxLabel;
   return PLAYSTATION_GLYPHS[xboxLabel] ?? xboxLabel;
 }
 
-/** Radianos de rotação por pixel de mouse, antes da sensibilidade do jogador. */
+/** Radians of rotation per mouse pixel, before the player's sensitivity. */
 const MOUSE_RADIANS_PER_PIXEL = 0.0022;
-/** Radianos por segundo com o analógico direito no talo. */
+/** Radians per second with the right stick at full deflection. */
 const PAD_RADIANS_PER_SECOND = 3.2;
 
-/** Que aparelho o jogador está usando **agora**. */
+/** Which device the player is using **right now**. */
 export type InputDevice = 'keyboard' | 'gamepad';
 
 /**
- * Movimento de mouse, em pixels num frame, que conta como "voltei ao mouse".
+ * Mouse movement, in pixels within one frame, that counts as "back on the mouse".
  *
- * Não é zero de propósito. Mouse ótico parado ainda emite eventos de um pixel por
- * tremor de mesa, e com limiar zero o rótulo piscaria entre tecla e botão enquanto
- * o jogador joga de controle com a mão perto do mouse.
+ * It is not zero on purpose. A still optical mouse still emits one-pixel events from
+ * the desk shaking, and with a threshold of zero the label would flicker between key
+ * and button while the player plays on a pad with their hand near the mouse.
  */
 const MOUSE_WAKE_PIXELS = 6;
 
 /**
- * Fração do curso do analógico que conta como intenção de usar o controle.
+ * Fraction of the stick's range that counts as intent to use the pad.
  *
- * Bem acima da zona morta de propósito: ver a nota em `beginFrame`.
+ * Well above the dead zone on purpose: see the note in `beginFrame`.
  */
 const STICK_INTENT = 0.5;
 
-/** Quadros de carência depois de travar o ponteiro. Ver `onMouseMove`. */
+/** Grace frames after locking the pointer. See `onMouseMove`. */
 const LOCK_SETTLE_FRAMES = 2;
 
 /**
- * As únicas ações de controle que atravessam a entrada congelada.
+ * The only pad actions that get through frozen input.
  *
- * É a mesma exceção que o teclado faz para `Esc` em `onKeyDown`, e existe pelo
- * mesmo motivo: o botão que abre uma tela precisa poder fechá-la. Sem isto, Menu
- * e View ficavam mudos justamente com o menu no ar — quem entrou de controle não
- * tinha como sair sem encostar no teclado.
+ * It is the same exception the keyboard makes for `Esc` in `onKeyDown`, and it
+ * exists for the same reason: the button that opens a screen has to be able to close
+ * it. Without this, Menu and View went mute precisely with the menu up — whoever
+ * came in on a pad had no way out without touching the keyboard.
  *
- * O resto continua barrado, e isso não é excesso de zelo: `A` confirma um botão
- * do menu, e se ele passasse, o mesmo aperto viraria pulo a bordo no quadro em
- * que a tela fecha.
+ * The rest stays blocked, and that is not excessive caution: `A` confirms a menu
+ * button, and if it got through, that same press would become a jump aboard on the
+ * frame the screen closes.
  */
 const CAPTURED_PAD_ACTIONS: ReadonlySet<Action> = new Set<Action>(['pause', 'controls']);
 
 export class Input {
   readonly gamepad = new GamepadManager();
 
-  /** Delta de olhar acumulado desde o último frame, já em radianos. */
+  /** Look delta accumulated since the last frame, already in radians. */
   readonly look = { x: 0, y: 0 };
 
-  /** Verdadeiro quando o ponteiro está travado no canvas (modo jogo). */
+  /** True when the pointer is locked to the canvas (game mode). */
   pointerLocked = false;
 
   /**
-   * Aparelho que o jogador acabou de usar. **Toda a interface lê daqui** para
-   * decidir se mostra `F` ou `X`, `Shift` ou `L3`.
+   * The device the player has just used. **The whole UI reads from here** to decide
+   * whether to show `F` or `X`, `Shift` or `L3`.
    *
-   * É "último usado", e não "está conectado", e a diferença é a que o jogador
-   * percebe: com um controle plugado na mesa e as mãos no teclado, olhar a conexão
-   * mostraria botões que ele não está tocando. Aqui, os rótulos trocam no instante
-   * em que ele encosta no analógico, e voltam quando ele volta ao WASD.
+   * It is "last used", and not "is connected", and the difference is the one the
+   * player notices: with a pad plugged in on the desk and hands on the keyboard,
+   * looking at the connection would show buttons they are not touching. Here, the
+   * labels swap the instant they touch the stick, and come back when they go back to
+   * WASD.
    */
   activeDevice: InputDevice = 'keyboard';
 
@@ -207,10 +209,10 @@ export class Input {
 
   private mouseDelta = { x: 0, y: 0 };
   private wheelDelta = 0;
-  /** Quadros restantes de carência após travar o ponteiro. */
+  /** Grace frames left after locking the pointer. */
   private lockSettleFrames = 0;
 
-  /** Quando true, a entrada de jogo é ignorada (menu aberto). */
+  /** When true, game input is ignored (menu open). */
   private captured = false;
 
   private canvas: HTMLElement | null = null;
@@ -226,38 +228,38 @@ export class Input {
     window.addEventListener('wheel', this.onWheel, { passive: true });
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
-    // Sem isso o menu de contexto rouba o botão direito (mira focada).
+    // Without this the context menu steals the right button (focused aim).
     canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   }
 
   /**
-   * Pede o pointer lock.
+   * Requests the pointer lock.
    *
-   * `unadjustedMovement` é o que separa uma mira de jogo de uma mira de
-   * planilha. Sem ele o navegador entrega o delta **já processado pelo sistema
-   * operacional**: no Windows isso inclui a aceleração de ponteiro, que
-   * multiplica movimentos rápidos e não mexe nos lentos. O efeito é uma câmera
-   * que responde diferente ao mesmo gesto conforme a velocidade da mão — o
-   * jogador sente "peso" e "escorregão" que não estão em lugar nenhum do código,
-   * e nenhum ajuste de sensibilidade conserta porque o problema não é escala, é
-   * a curva. Pedindo movimento não ajustado, chega o delta cru do sensor.
+   * `unadjustedMovement` is what separates a game's aim from a spreadsheet's aim.
+   * Without it the browser delivers the delta **already processed by the operating
+   * system**: on Windows that includes pointer acceleration, which multiplies fast
+   * movements and leaves slow ones alone. The effect is a camera that responds
+   * differently to the same gesture depending on the speed of the hand — the player
+   * feels "weight" and "slip" that are nowhere in the code, and no sensitivity
+   * setting fixes it because the problem is not scale, it is the curve. Asking for
+   * unadjusted movement gets the sensor's raw delta.
    *
-   * A promessa é rejeitada em navegadores que não suportam a opção; nesse caso
-   * a chamada simples é a única saída, e a aceleração do sistema volta a valer.
+   * The promise is rejected in browsers that do not support the option; in that case
+   * the plain call is the only way out, and the system's acceleration applies again.
    */
   requestPointerLock(): void {
     const canvas = this.canvas;
     if (!canvas?.requestPointerLock) return;
-    // Já travado: pedir de novo não é erro, mas gasta uma promessa e um evento
-    // de `pointerlockchange` que reinicia a carência de `lockSettleFrames` — e
-    // aí o primeiro movimento depois de cada clique some.
+    // Already locked: asking again is not an error, but it spends a promise and a
+    // `pointerlockchange` event that restarts the `lockSettleFrames` grace period —
+    // and then the first movement after every click disappears.
     if (document.pointerLockElement === canvas) return;
 
-    // As duas chamadas podem ser recusadas, e a recusa é normal: o navegador
-    // impõe uma carência de pouco mais de um segundo depois de o jogador sair do
-    // lock com `Esc`. Uma promessa rejeitada sem `catch` vira um erro vermelho no
-    // console a cada clique dentro dessa janela, o que faz procurar defeito onde
-    // não há — quem devolve o ponteiro é o clique seguinte.
+    // Both calls can be refused, and refusal is normal: the browser imposes a grace
+    // period of a little over a second after the player leaves the lock with `Esc`.
+    // A promise rejected without a `catch` becomes a red error in the console on
+    // every click inside that window, which sends you looking for a defect where
+    // there is none — what gives the pointer back is the next click.
     const request = canvas.requestPointerLock({ unadjustedMovement: true }) as
       | Promise<void>
       | undefined;
@@ -272,8 +274,8 @@ export class Input {
   }
 
   /**
-   * Congela a entrada de jogo (usado enquanto o menu está aberto), sem
-   * desmontar os listeners.
+   * Freezes game input (used while the menu is open), without tearing the listeners
+   * down.
    */
   setCaptured(captured: boolean): void {
     this.captured = captured;
@@ -284,7 +286,7 @@ export class Input {
     }
   }
 
-  /** Roda no início de cada frame, antes de qualquer sistema ler a entrada. */
+  /** Runs at the start of every frame, before any system reads the input. */
   beginFrame(dt: number): void {
     this.gamepad.poll();
     if (this.lockSettleFrames > 0) this.lockSettleFrames--;
@@ -298,14 +300,14 @@ export class Input {
       this.look.x = 0;
       this.look.y = 0;
     } else {
-      // Mouse: delta bruto em pixels vira radianos.
+      // Mouse: the raw delta in pixels becomes radians.
       let lookX = this.mouseDelta.x * MOUSE_RADIANS_PER_PIXEL * prefs.mouseSensitivity;
       let lookY = this.mouseDelta.y * MOUSE_RADIANS_PER_PIXEL * prefs.mouseSensitivity;
       this.mouseDelta.x = 0;
       this.mouseDelta.y = 0;
 
-      // Gamepad: velocidade angular integrada no tempo (o analógico é posição,
-      // não delta), com dt limitado para não dar um giro absurdo após um travo.
+      // Gamepad: angular velocity integrated over time (the stick is a position,
+      // not a delta), with dt capped so a hitch does not give an absurd spin.
       if (pad.connected) {
         const step = Math.min(dt, 0.1) * PAD_RADIANS_PER_SECOND * prefs.gamepadSensitivity;
         lookX += pad.rightStick.x * step;
@@ -318,24 +320,24 @@ export class Input {
 
     if (!pad.connected) return;
 
-    // Botões do gamepad geram as mesmas bordas de "pressionado" do teclado.
+    // Gamepad buttons generate the same "pressed" edges as the keyboard.
     //
-    // O laço roda **também com o menu aberto**, e os dois motivos são
-    // independentes. Um: `pause` e `controls` precisam chegar ao laço principal
-    // (ver `CAPTURED_PAD_ACTIONS`). Dois: é aqui, e no teste de analógico logo
-    // abaixo, que se descobre que o jogador largou o teclado e pegou o controle —
-    // cortar o laço com o menu no ar era o que fazia a tela de Controles anunciar
-    // `Tab`, `F` e `Esc` para quem estava com as duas mãos no gamepad, que é
-    // justamente a tela onde o rótulo errado custa mais caro.
+    // The loop runs **with the menu open too**, and the two reasons are
+    // independent. One: `pause` and `controls` need to reach the main loop (see
+    // `CAPTURED_PAD_ACTIONS`). Two: it is here, and in the stick test just below,
+    // that we find out the player put down the keyboard and picked up the pad —
+    // cutting the loop with the menu up was what made the Controls screen announce
+    // `Tab`, `F` and `Esc` to somebody with both hands on the gamepad, which is
+    // exactly the screen where the wrong label costs the most.
     let padActive = false;
     for (const [button, action] of PAD_BINDINGS) {
       const pressed = pad.wasPressed(button);
       const down = pad.isDown(button);
       if (pressed || down) padActive = true;
 
-      // Congelado, só as ações de menu viram estado. As de jogo nem entram em
-      // `held`: o menu limpa o conjunto ao abrir, e reabastecê-lo aqui seria
-      // devolver o controle do jogador para trás da sobreposição.
+      // Frozen, only the menu actions become state. The game ones do not even enter
+      // `held`: the menu clears the set on opening, and refilling it here would give
+      // the player's control back behind the overlay.
       if (this.captured && !CAPTURED_PAD_ACTIONS.has(action)) continue;
 
       if (pressed) this.pressedThisFrame.add(action);
@@ -343,42 +345,43 @@ export class Input {
       else if (!this.isKeyboardSource(action)) this.held.delete(action);
     }
 
-    // Analógico só conta como uso acima de um limiar **bem** acima da zona morta.
+    // The stick only counts as use above a threshold **well** above the dead zone.
     //
-    // A zona morta padrão é 18% do curso, e é calibrada para o jogo não andar
-    // sozinho. Ela não serve como prova de intenção: um analógico gasto passa
-    // dela de vez em quando parado na mesa, e com o teste em "diferente de zero"
-    // bastava um desses tremores para a interface inteira trocar para botões de
-    // controle e ficar lá — o jogador de teclado via `X` e `L3` no HUD sem ter
-    // encostado no controle. Meio curso é gesto, não ruído.
+    // The default dead zone is 18% of the range, and it is calibrated so the game
+    // does not move on its own. It does not work as proof of intent: a worn stick
+    // crosses it now and then sitting still on the desk, and with the test at
+    // "different from zero" one of those twitches was enough for the whole UI to
+    // switch to pad buttons and stay there — the keyboard player saw `X` and `L3` in
+    // the HUD without having touched the pad. Half the range is a gesture, not
+    // noise.
     const moved =
       Math.hypot(pad.leftStick.x, pad.leftStick.y) > STICK_INTENT ||
       Math.hypot(pad.rightStick.x, pad.rightStick.y) > STICK_INTENT;
     if (moved || padActive) this.setDevice('gamepad');
   }
 
-  /** Troca o aparelho em uso. A interface lê `activeDevice` por conta própria. */
+  /** Switches the device in use. The UI reads `activeDevice` on its own. */
   private setDevice(device: InputDevice): void {
     this.activeDevice = device;
   }
 
-  /** Atalho de leitura para a interface. */
+  /** Read shortcut for the UI. */
   get usingGamepad(): boolean {
     return this.activeDevice === 'gamepad';
   }
 
   /**
-   * Rótulo do botão de controle para uma ação, já no layout do aparelho ligado.
+   * The pad button's label for an action, already in the connected device's layout.
    *
-   * A interface deve chamar isto em vez de ler `ACTION_LABELS[...].gamepad`
-   * direto: a tabela guarda o nome do layout padrão (Xbox), e é aqui que ele
-   * vira `✕`/`○`/`□`/`△` quando quem está na mão é um DualSense.
+   * The UI should call this instead of reading `ACTION_LABELS[...].gamepad`
+   * directly: the table stores the default layout's name (Xbox), and this is where
+   * it becomes `✕`/`○`/`□`/`△` when what is in hand is a DualSense.
    */
   padLabel(action: Action): string {
     return padGlyph(ACTION_LABELS[action].gamepad, this.gamepad.layout);
   }
 
-  /** Roda no fim do frame: limpa as bordas. */
+  /** Runs at the end of the frame: clears the edges. */
   endFrame(): void {
     this.pressedThisFrame.clear();
     this.wheelDelta = 0;
@@ -388,12 +391,12 @@ export class Input {
     return this.held.has(action);
   }
 
-  /** Verdadeiro apenas no frame em que a ação foi acionada. */
+  /** True only on the frame the action was triggered. */
   wasPressed(action: Action): boolean {
     return this.pressedThisFrame.has(action);
   }
 
-  /** Eixo de movimento combinado: X é lateral (direita+), Y é frente (frente+). */
+  /** Combined movement axis: X is lateral (right+), Y is forward (forward+). */
   getMoveAxis(): { x: number; y: number } {
     let x = 0;
     let y = 0;
@@ -403,17 +406,18 @@ export class Input {
     if (this.held.has('moveForward')) y += 1;
     if (this.held.has('moveBack')) y -= 1;
 
-    // Normaliza a diagonal do teclado para não andar mais rápido na diagonal.
+    // Normalizes the keyboard's diagonal so you do not walk faster diagonally.
     const length = Math.hypot(x, y);
     if (length > 1) {
       x /= length;
       y /= length;
     }
 
-    // O analógico some junto com o resto da entrada de jogo enquanto o menu está
-    // aberto. Sem este teste, o mesmo empurrão que desce um item da lista voava a
-    // câmera livre pela cena atrás da sobreposição — o teclado já estava coberto
-    // porque `setCaptured` esvazia `held`, o controle é lido direto e não estava.
+    // The stick disappears along with the rest of game input while the menu is
+    // open. Without this test, the same push that moves down a list item flew the
+    // free camera across the scene behind the overlay — the keyboard was already
+    // covered because `setCaptured` empties `held`, the pad is read directly and was
+    // not.
     const pad = this.gamepad;
     if (pad.connected && !this.captured) {
       x = clamp(x + pad.leftStick.x, -1, 1);
@@ -423,14 +427,14 @@ export class Input {
     return { x, y };
   }
 
-  /** Rolagem do mouse desde o último frame, em "cliques" normalizados. */
+  /** Mouse scroll since the last frame, in normalized "clicks". */
   getWheelDelta(): number {
     return this.wheelDelta;
   }
 
   private isKeyboardSource(action: Action): boolean {
-    // Ações que também têm binding de teclado/mouse não podem ser apagadas
-    // pelo gamepad quando o botão está solto.
+    // Actions that also have a keyboard/mouse binding cannot be erased by the
+    // gamepad when the button is released.
     return this.keyboardHeld.has(action);
   }
 
@@ -440,15 +444,15 @@ export class Input {
     const action = KEY_BINDINGS[event.code];
     if (!action) return;
 
-    // Tab move o foco e Espaço rola a página: nenhum dos dois é bem-vindo **em
-    // jogo**. Com o menu aberto é o oposto — Tab *é* a navegação e Espaço aciona
-    // o `<button>` focado, e engolir os dois antes de olhar para `captured`
-    // deixava a sobreposição inteira inoperável no teclado: nem tabular entre os
-    // botões, nem apertar o que estava focado. Por isso a supressão é condicional,
-    // e não incondicional como era.
+    // Tab moves the focus and Space scrolls the page: neither is welcome **in
+    // game**. With the menu open it is the opposite — Tab *is* the navigation and
+    // Space activates the focused `<button>`, and swallowing both before looking at
+    // `captured` left the whole overlay unusable on the keyboard: no tabbing between
+    // the buttons, no pressing the focused one. That is why the suppression is
+    // conditional, and not unconditional as it used to be.
     //
-    // O teste fica antes de `event.repeat` de propósito: segurar Espaço no convés
-    // repete o keydown, e cada repetição precisa ser suprimida ou a página rola.
+    // The test comes before `event.repeat` on purpose: holding Space on deck repeats
+    // the keydown, and every repeat has to be suppressed or the page scrolls.
     if (!this.captured && (event.code === 'Tab' || event.code === 'Space' || event.code === 'F3')) {
       event.preventDefault();
     }
@@ -471,11 +475,11 @@ export class Input {
   };
 
   private onMouseDown = (event: MouseEvent): void => {
-    // Clicar é gesto de mouse sem ambiguidade, e por isso a detecção de aparelho
-    // vem **antes** do congelamento: é assim que os rótulos voltam para o teclado
-    // depois de uma passada pelo controle, já que o simples mover do cursor não
-    // troca mais nada com o menu aberto (ver `onMouseMove`). O que o menu congela
-    // é a ação — disparar e mirar —, não a leitura de quem está jogando.
+    // Clicking is an unambiguous mouse gesture, and that is why device detection
+    // comes **before** the freeze: it is how the labels come back to the keyboard
+    // after a stint on the pad, since simply moving the cursor no longer changes
+    // anything with the menu open (see `onMouseMove`). What the menu freezes is the
+    // action — firing and aiming — not the reading of who is playing.
     this.setDevice('keyboard');
     if (this.captured) return;
 
@@ -497,14 +501,14 @@ export class Input {
   };
 
   private onMouseMove = (event: MouseEvent): void => {
-    // Mover o mouse só desperta o teclado **em jogo**.
+    // Moving the mouse only wakes the keyboard **in game**.
     //
-    // Com o menu aberto o cursor está solto, e chegar a um botão exige movê-lo —
-    // inclusive para quem está de controle e esbarra no mouse ao lado do teclado.
-    // Enquanto isso trocava o aparelho, a tela de Controles voltava para `Tab` e
-    // `F` no instante em que se ia lê-la de controle, que era exatamente o
-    // contrário do que ela existe para fazer. Aberto o menu, quem troca para
-    // teclado é a tecla ou o clique — gestos que ninguém dá sem querer.
+    // With the menu open the cursor is free, and reaching a button takes moving it —
+    // including for somebody on a pad who bumps the mouse beside the keyboard. While
+    // that switched the device, the Controls screen went back to `Tab` and `F` the
+    // instant you went to read it on a pad, which was exactly the opposite of what
+    // it exists to do. With the menu open, what switches to keyboard is the key or
+    // the click — gestures nobody makes by accident.
     if (
       !this.captured &&
       Math.abs(event.movementX) + Math.abs(event.movementY) >= MOUSE_WAKE_PIXELS
@@ -513,13 +517,13 @@ export class Input {
     }
     if (!this.pointerLocked || this.captured) return;
 
-    // Descarta o pico do primeiro evento depois de travar o ponteiro.
+    // Discards the spike from the first event after locking the pointer.
     //
-    // Ao entrar em pointer lock o navegador entrega, no primeiro `mousemove`, o
-    // deslocamento acumulado desde a última posição conhecida do cursor — que
-    // pode ser a tela inteira. O sintoma é a câmera dar um giro violento e
-    // aleatório no instante em que se clica para jogar, e depois se comportar
-    // normalmente. Dois quadros de carência custam nada e matam o salto.
+    // On entering pointer lock the browser delivers, in the first `mousemove`, the
+    // displacement accumulated since the cursor's last known position — which can be
+    // the whole screen. The symptom is the camera making a violent, random spin the
+    // instant you click to play, and behaving normally afterwards. Two grace frames
+    // cost nothing and kill the jump.
     if (this.lockSettleFrames > 0) return;
 
     this.mouseDelta.x += event.movementX;
@@ -531,7 +535,7 @@ export class Input {
     this.wheelDelta += Math.sign(event.deltaY);
   };
 
-  /** Perder o foco da janela precisa soltar tudo, senão a tecla "gruda". */
+  /** Losing window focus has to release everything, or the key "sticks". */
   private onBlur = (): void => {
     this.held.clear();
     this.keyboardHeld.clear();

@@ -1,18 +1,18 @@
 /**
- * A porta de entrada do servidor de sala.
+ * The room server's front door.
  *
- * Três rotas, todas terminando no mesmo lugar: um `WebSocket` ligado a um
- * `DuelRoom`. O que muda entre elas é **como se descobre o código da sala**.
+ * Three routes, all ending in the same place: a `WebSocket` wired to a
+ * `DuelRoom`. What changes between them is **how the room code is found**.
  *
- * | rota | como |
+ * | route | how |
  * |---|---|
- * | `GET /room/new` | sorteia um código na hora |
- * | `GET /room/:code` | usa o que o jogador digitou |
- * | `GET /queue` | pergunta ao `Matchmaker` se há alguém esperando |
+ * | `GET /room/new` | draws a code on the spot |
+ * | `GET /room/:code` | uses what the player typed |
+ * | `GET /queue` | asks the `Matchmaker` whether anyone is waiting |
  *
- * `idFromName(code)` é o que amarra o código à sala: o mesmo texto sempre leva ao
- * mesmo Durable Object, em qualquer ponto do mundo. Não há registro de salas para
- * manter, nem busca para fazer — o código **é** o endereço.
+ * `idFromName(code)` is what ties the code to the room: the same text always
+ * leads to the same Durable Object, anywhere in the world. There is no room
+ * registry to keep and no lookup to do — the code **is** the address.
  */
 
 import { isValidCode } from '../../shared/protocol';
@@ -23,15 +23,16 @@ import { Matchmaker } from './Matchmaker';
 export { DuelRoom, Matchmaker };
 
 /**
- * A origem que pediu tem permissão?
+ * Is the requesting origin allowed?
  *
- * Sem esta checagem, qualquer página da internet abre salas neste Worker — e a
- * cota de requests que se queima é a sua. Não é proteção contra um cliente
- * adulterado (o cabeçalho é falsificável fora do navegador); é a cerca que
- * impede um site aleatório de embutir o jogo e viver da sua conta.
+ * Without this check, any page on the internet opens rooms on this Worker — and
+ * the request quota it burns is yours. It is not protection against a tampered
+ * client (the header is forgeable outside the browser); it's the fence that keeps
+ * a random site from embedding the game and living off your account.
  *
- * Sem cabeçalho `Origin` a conexão passa: é o caso de `wrangler dev` e de
- * ferramentas de linha de comando, e não é ninguém consumindo cota em escala.
+ * With no `Origin` header the connection goes through: that's the case for
+ * `wrangler dev` and command-line tools, and it isn't anyone eating quota at
+ * scale.
  */
 function originAllowed(request: Request, env: Env): boolean {
   const origin = request.headers.get('Origin');
@@ -40,7 +41,7 @@ function originAllowed(request: Request, env: Env): boolean {
   return allowed.includes(origin);
 }
 
-/** Encaminha para a sala daquele código. */
+/** Forwards to the room for that code. */
 function toRoom(request: Request, env: Env, code: string, extra: Record<string, string> = {}): Promise<Response> {
   const id = env.DUEL_ROOM.idFromName(code);
   const url = new URL(request.url);
@@ -50,21 +51,21 @@ function toRoom(request: Request, env: Env, code: string, extra: Record<string, 
 }
 
 /**
- * Recusa a conexão **dizendo por quê**.
+ * Refuses the connection **and says why**.
  *
- * Um status HTTP não chega ao jogador, e é limitação do protocolo, não escolha:
- * quando o aperto de mão de um WebSocket falha, o navegador não entrega o
- * código nem o corpo da resposta ao JavaScript — o que chega é um `close` mudo.
- * O cliente então conta a única história que lhe resta, "a conexão caiu", para
- * causas completamente diferentes; e duas das três o jogador resolveria sozinho
- * em cinco segundos se soubesse qual era.
+ * An HTTP status never reaches the player, and that is a protocol limitation, not
+ * a choice: when a WebSocket handshake fails, the browser hands neither the
+ * status code nor the response body to JavaScript — what arrives is a mute
+ * `close`. The client then tells the only story left to it, "the connection
+ * dropped", for completely different causes; and two of the three the player
+ * would sort out himself in five seconds if he knew which one it was.
  *
- * Aceitar para poder falar, então. Aceitar **aqui**, e não dentro do Durable
- * Object, é o detalhe que evita o remédio pior que a doença: um socket aceito lá
- * dentro entraria em `getWebSockets()`, e o fechamento dele dispararia
- * `webSocketClose` — ou seja, um terceiro jogador batendo na porta de um duelo
- * em andamento faria a sala declarar a partida encerrada e mandar os dois para
- * casa. Deste lado o socket não existe para a sala.
+ * So accept, in order to be able to speak. Accepting **here**, and not inside the
+ * Durable Object, is the detail that avoids a cure worse than the disease: a
+ * socket accepted in there would enter `getWebSockets()`, and closing it would
+ * fire `webSocketClose` — that is, a third player knocking at the door of a duel
+ * in progress would make the room declare the match over and send both players
+ * home. On this side the socket does not exist as far as the room is concerned.
  */
 function refuse(reason: string): Response {
   const pair = new WebSocketPair();
@@ -76,20 +77,20 @@ function refuse(reason: string): Response {
 }
 
 /**
- * Entra na fila, e **insiste** se a vaga que ela deu não servir.
+ * Joins the queue, and **insists** if the slot it handed back is no good.
  *
- * ⚠️ Este segundo pedido é a diferença entre a partida rápida funcionar e não
- * funcionar, e o defeito que ele conserta é invisível de fora. A fila entrega o
- * código de quem estava esperando e apaga a vaga no mesmo passo — a partir dali
- * aquele código não pertence mais a ninguém. Se a sala recusar (o outro capitão
- * caiu sem que o fechamento tivesse chegado, ou dois pedidos se cruzaram e ela
- * já está cheia), quem pediu fica com um código morto na mão: ele não entra
- * naquela sala, não é o dono da vaga e **não está mais na fila**. Senta e espera
- * um adversário que nunca vai ser mandado para lá.
+ * ⚠️ This second request is the difference between quick match working and not
+ * working, and the defect it fixes is invisible from the outside. The queue hands
+ * over the code of whoever was waiting and erases the slot in the same step —
+ * from there on that code belongs to nobody. If the room refuses (the other
+ * captain dropped without the close having arrived, or two requests crossed and
+ * the room is already full), the requester is left holding a dead code: he does
+ * not get into that room, he does not own the slot, and he is **no longer in the
+ * queue**. He sits down and waits for an opponent who will never be sent there.
  *
- * Pedindo de novo, a fila responde a coisa certa para essa situação: não há
- * mais ninguém esperando, então abre uma vaga nova e este jogador passa a ser o
- * dono dela. Ele volta a estar na fila, que é onde ele achava que estava.
+ * Asking again, the queue answers the right thing for that situation: there is
+ * nobody else waiting, so it opens a new slot and this player becomes its owner.
+ * He is back in the queue, which is where he thought he was.
  */
 async function claimRoom(request: Request, env: Env): Promise<Response> {
   const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'));
@@ -97,12 +98,12 @@ async function claimRoom(request: Request, env: Env): Promise<Response> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const response = await matchmaker.fetch('https://matchmaker/claim');
     const { code, waited } = (await response.json()) as { code: string; waited: boolean };
-    // Quem **abriu** a vaga precisa que a sala saiba disso: é ela que vai avisar
-    // a fila quando esvaziar. Ver `DuelRoom.releaseQueueSlot`.
+    // Whoever **opened** the slot needs the room to know: the room is what warns
+    // the queue when it empties out. See `DuelRoom.releaseQueueSlot`.
     const room = await toRoom(request, env, code, waited ? {} : { queued: '1' });
     if (room.status < 400) return room;
-    // Uma vaga que não serve não vale uma segunda tentativa se ela era nossa:
-    // acabamos de abri-la, e uma sala recém-aberta que recusa é outro problema.
+    // A slot that's no good isn't worth a second attempt if it was ours: it was
+    // just opened here, and a freshly opened room that refuses is another problem.
     if (!waited) break;
   }
 
@@ -122,10 +123,10 @@ export default {
     }
 
     if (url.pathname === '/room/new') {
-      // Duas tentativas porque o código é sorteado: um milhão de salas possíveis
-      // torna a colisão rara, e "rara" não é "impossível". Cair num código
-      // ocupado e recusar seria mandar o jogador tentar de novo para que o
-      // programa sorteasse outro número — trabalho que o programa faz melhor.
+      // Two attempts because the code is drawn at random: a million possible
+      // rooms makes a collision rare, and "rare" is not "impossible". Landing on
+      // a taken code and refusing would mean telling the player to try again so
+      // the program could draw another number — work the program does better.
       for (let attempt = 0; attempt < 2; attempt++) {
         const room = await toRoom(request, env, generateCode());
         if (room.status < 400) return room;
@@ -140,14 +141,14 @@ export default {
     const match = /^\/room\/([A-Za-z0-9]+)$/.exec(url.pathname);
     if (match) {
       const code = (match[1] ?? '').toUpperCase();
-      // Validado aqui, e não na sala: um código malformado não deve nem chegar a
-      // instanciar um Durable Object — cada instanciação é um request pago.
+      // Validated here, not in the room: a malformed code shouldn't even get to
+      // instantiate a Durable Object — each instantiation is a paid request.
       if (!isValidCode(code)) {
         return refuse('That is not a room code.');
       }
-      // Esta rota é a de **entrar**, e a sala precisa saber disso para poder
-      // recusar um código que ninguém abriu. Abrir sala é `/room/new`; a fila é
-      // `/queue`. Ver `DuelRoom.fetch`.
+      // This route is the **join** one, and the room needs to know that so it can
+      // refuse a code nobody opened. Opening a room is `/room/new`; the queue is
+      // `/queue`. See `DuelRoom.fetch`.
       const room = await toRoom(request, env, code, { join: '1' });
       if (room.status === 404) {
         return refuse('No room with that code. Check the letters and try again.');

@@ -1,376 +1,368 @@
-# 🪵 Wooden Plank — a tábua de reparo
+# 🪵 Wooden Plank — the repair plank
 
-A tábua que o pirata carrega atravessada no peito para tapar buraco de casco, no
-estilo do *Sea of Thieves*. **Modelada e texturizada inteiramente por script** no
-Blender — dá pra apagar tudo e reconstruir com um comando.
+The plank the pirate carries across his chest to patch a hole in the hull, in the style
+of *Sea of Thieves*. **Modeled and textured entirely by script** in Blender — you can
+wipe everything and rebuild it with one command.
 
 ![turnaround](preview/turnaround.png)
 
 ---
 
-## 📦 O que tem aqui
+## 📦 What is in here
 
-| Arquivo | O que é |
+| File | What it is |
 |---|---|
-| `plank.blend` | Cena completa (malha + materiais + texturas) |
-| `export/SM_Plank.glb` | glTF binário — three.js, Godot, web |
-| `export/SM_Plank_web.glb` | O mesmo, com as texturas em WebP: **64 KB** contra 378 |
+| `plank.blend` | The complete scene (mesh + materials + textures) |
+| `export/SM_Plank.glb` | Binary glTF — three.js, Godot, web |
+| `export/SM_Plank_web.glb` | The same, with the textures in WebP: **64 KB** against 378 |
 | `export/SM_Plank.fbx` | FBX — Unreal, Unity, Maya |
-| `textures/T_Plank_*.png` | Atlas 1024² — base color, roughness, normal |
-| `scripts/` | O pipeline inteiro em Python |
-| `preview/` | Renders de conferência |
+| `textures/T_Plank_*.png` | 1024² atlas — base color, roughness, normal |
+| `scripts/` | The whole pipeline in Python |
+| `preview/` | Check renders |
 
-> [!note] `SM_`, não `SK_`
-> *Static Mesh*. A tábua não tem esqueleto — o prefixo é o mesmo vocabulário que
-> o personagem usa com `SK_Pirate`, só do outro lado da cerca.
+> [!note] `SM_`, not `SK_`
+> *Static Mesh*. The plank has no skeleton — the prefix is the same vocabulary the
+> character uses with `SK_Pirate`, just on the other side of the fence.
 
 ---
 
-## 📊 Especificação técnica
+## 📊 Technical specification
 
-| Item | Valor |
+| Item | Value |
 |---|---|
-| **Triângulos** | **480** |
-| **Vértices** | 242 |
+| **Triangles** | **480** |
+| **Vertices** | 242 |
 | **Faces** | 224 quads + 32 tris, **zero n-gons** |
-| **Malha** | fechada: 0 arestas de borda, 0 non-manifold, 0 normais invertidas |
-| **Dimensões nominais** | **1,15 × 0,22 × 0,045 m** |
-| Caixa envolvente | 1,150 × 0,221 × 0,053 m |
-| Largura real (anel a anel) | 213,2 – 219,6 mm |
-| Espessura real (anel a anel) | 44,8 – 47,2 mm |
-| **Material** | 1 (`M_Plank`, atlas único) |
-| **Texel density** | **8,83 px/cm @ 1024²** |
-| Mapas | Base Color, Roughness, Normal |
-| **Escala** | 1 unidade = 1 metro, transforms aplicados, **origem no centro** |
-| Peso do GLB | 378 KB (autoria) / **64 KB** (WebP) |
+| **Mesh** | closed: 0 boundary edges, 0 non-manifold, 0 flipped normals |
+| **Nominal dimensions** | **1.15 × 0.22 × 0.045 m** |
+| Bounding box | 1.150 × 0.221 × 0.053 m |
+| Real width (ring to ring) | 213.2 – 219.6 mm |
+| Real thickness (ring to ring) | 44.8 – 47.2 mm |
+| **Material** | 1 (`M_Plank`, single atlas) |
+| **Texel density** | **8.83 px/cm @ 1024²** |
+| Maps | Base Color, Roughness, Normal |
+| **Scale** | 1 unit = 1 meter, transforms applied, **origin at the center** |
+| GLB weight | 378 KB (authoring) / **64 KB** (WebP) |
 
-> [!note] 480 tris é 5,4% do personagem
-> O pirata inteiro custa 8.960. Uma tábua tem de custar uma fração disso, e cada
-> triângulo aqui está pagando silhueta: chanfro, empeno, ondulação da aresta e
-> corte enviesado das pontas. Nenhum foi gasto em subdivisão uniforme.
+> [!note] 480 tris is 5.4% of the character
+> The whole pirate costs 8,960. A plank has to cost a fraction of that, and every
+> triangle here is paying for silhouette: chamfer, bow, edge wobble and the skewed cut of
+> the ends. None was spent on uniform subdivision.
 
-> [!warning] A caixa envolvente **não** é a espessura da peça
-> A caixa dá 53,2 mm e a tábua tem 45. A diferença é o empeno: o meio da peça
-> sobe 6 mm, e a caixa soma isso. Quem quiser a medida de trena tem de medir
-> **anel por anel** — é o que `build_plank._section_sizes` faz, e é de lá que
-> saem os 44,8–47,2 mm da tabela.
+> [!warning] The bounding box is **not** the thickness of the piece
+> The box gives 53.2 mm and the plank is 45. The difference is the bow: the middle of the
+> piece rises 6 mm, and the box adds that in. Anyone who wants the tape-measure figure has
+> to measure **ring by ring** — which is what `build_plank._section_sizes` does, and where
+> the table's 44.8–47.2 mm come from.
 
 ---
 
-## 📐 De onde vêm as medidas
+## 📐 Where the measurements come from
 
-Nada foi escolhido no olho. Cada número tem três fontes cruzadas — o jogo, o
-personagem e marcenaria naval real — e todas batem.
+Nothing was chosen by eye. Every number has three cross-checked sources — the game, the
+character and real naval carpentry — and they all agree.
 
-| Medida | Valor | Por quê |
+| Measurement | Value | Why |
 |---|---|---|
-| **Largura** | **0,22 m** | É *exatamente* a largura do tabuado do convés da Chalupa: `HullGeometry.ts` mapeia `DECK_BAND_TILE = 1,76 m` sobre uma textura de `planks: 8` → 1,76 / 8 = 0,22. O jogador pisa nessa largura o jogo inteiro. |
-| **Comprimento** | **1,15 m** | Pegada de ~0,58 m (o personagem tem 0,50 m de ombro a ombro) + 0,28 m de sobra de cada lado. Razão 5,2:1, dentro da faixa 5:1–6:1 medida no render de inventário do jogo. |
-| **Espessura** | **0,045 m** | Tabuado de costado de sloop real: 1½"–2" (38–50 mm). Bate também com a razão do render oficial: espessura entre ⅕ e ¼ da largura. |
+| **Width** | **0.22 m** | It is *exactly* the width of the Sloop's deck planking: `HullGeometry.ts` maps `DECK_BAND_TILE = 1.76 m` over a texture of `planks: 8` → 1.76 / 8 = 0.22. The player walks on that width for the whole game. |
+| **Length** | **1.15 m** | A grip of ~0.58 m (the character is 0.50 m shoulder to shoulder) + 0.28 m of overhang at each side. A 5.2:1 ratio, inside the 5:1–6:1 range measured on the game's inventory render. |
+| **Thickness** | **0.045 m** | Real sloop hull planking: 1½"–2" (38–50 mm). It also matches the ratio in the official render: thickness between ⅕ and ¼ of the width. |
 
-Referências externas que sustentam os números: a *shole* do manual de **damage
-control da US Navy** (mínimo 1" de espessura, 8"–12" de largura), a definição
-formal de "plank" (acima de 1½"; a DIN 68252 exige 40 mm) e o tabuado de convés
-histórico (6"–12" de largura, 2½"–3½" de espessura).
+External references backing the numbers: the *shole* in the **US Navy damage control**
+manual (minimum 1" thick, 8"–12" wide), the formal definition of "plank" (above 1½"; DIN
+68252 requires 40 mm) and historical deck planking (6"–12" wide, 2½"–3½" thick).
 
-**Confere no peso:** 0,0114 m³ × 700 kg/m³ (carvalho) = **8 kg**. Carga de duas
-mãos. Uma tábua de estoque inteira, de 2,44 m, daria 17 kg e ninguém carrega isso
-atravessado no peito — daí o corte curto.
+**It checks out on weight:** 0.0114 m³ × 700 kg/m³ (oak) = **8 kg**. A two-handed load. A
+whole stock plank, 2.44 m long, would come to 17 kg and nobody carries that across their
+chest — hence the short cut.
 
-![escala](preview/scale.png)
+![scale](preview/scale.png)
 
-> [!note] O pirata aparece em pose de repouso, de propósito
-> O importador de glTF aplica a **primeira animação do arquivo**, e o
-> `SK_Pirate_web.glb` leva cinco clipes. A primeira versão desta imagem saiu com
-> o personagem no meio de um salto: flutuando, sem pé no chão, inútil como régua.
-> `pose_position = "REST"` devolve a pose de bind, que é determinística e tem a
-> sola em Z = 0. A régua no chão tem 1 m em barras de 10 cm.
+> [!note] The pirate appears in the rest pose, on purpose
+> The glTF importer applies the **first animation in the file**, and `SK_Pirate_web.glb`
+> carries five clips. The first version of this image came out with the character in the
+> middle of a jump: floating, no foot on the ground, useless as a ruler.
+> `pose_position = "REST"` returns the bind pose, which is deterministic and has the sole
+> at Z = 0. The ruler on the floor is 1 m in 10 cm bars.
 >
-> O GLB do personagem é aberto **somente para leitura**. Ele é o entregável de
-> outro asset; nada neste pipeline o regrava.
+> The character's GLB is opened **read-only**. It is another asset's deliverable; nothing
+> in this pipeline rewrites it.
 
 ---
 
-## 🪚 O que impede a peça de ser um cubo esticado
+## 🪚 What keeps the piece from being a stretched cube
 
-A regra de arte que a Rare aplica no *Sea of Thieves* é **"realistically
-wonky"**: o objeto tem de parecer usado, nunca saído de fábrica. Cinco coisas
-fazem isso aqui, e **nenhuma custa triângulo** — todas moram em vértices que a
-topologia já precisava ter.
+The art rule Rare applies in *Sea of Thieves* is **"realistically wonky"**: the object has
+to look used, never fresh from the factory. Five things do that here, and **none of them
+costs a triangle** — they all live in vertices the topology already needed to have.
 
-| # | O quê | Quanto | Por quê |
+| # | What | How much | Why |
 |---|---|---|---|
-| 1 | **Aresta longa ondulada** | ±4 mm | É a observação mais forte do render oficial: nenhuma linha da tábua é reta. A peça é lavrada, não aplainada. |
-| 2 | **Pontas cortadas em plano enviesado** | 6,5° e −4° de guinada, ângulos diferentes nas duas | Serrote de bordo não faz esquadro. Corte limpo, porém torto — não lascado. |
-| 3 | **Chanfro nas quatro arestas longas** | 4 mm | O que uma plaina de mão tira num passe. É a faixa que o *pointiness* clareia, e é ela que desenha o contorno da peça contra o fundo. |
-| 4 | **Empeno + barriga** (*bow* + *cup*) | 6 mm no comprimento, 2,5 mm na largura | Toda tábua serrada tem. O *cup* move as **duas** faces para o mesmo lado, que é como madeira encana de verdade. |
-| 5 | **Facetamento por ruído** | 1,2 mm | Mesma função do personagem (`piratelib.facet`). Subliminar de longe, quebra de luz de perto. |
+| 1 | **Wavy long edge** | ±4 mm | It is the strongest observation from the official render: no line on the plank is straight. The piece is hewn, not planed. |
+| 2 | **Ends cut on a skewed plane** | 6.5° and −4° of yaw, different angles on the two | A shipboard handsaw does not cut square. A clean cut, but crooked — not splintered. |
+| 3 | **Chamfer on all four long edges** | 4 mm | What a hand plane takes off in one pass. It is the band the *pointiness* lightens, and it is what draws the piece's outline against the background. |
+| 4 | **Bow + cup** | 6 mm along the length, 2.5 mm across the width | Every sawn plank has it. The cup moves **both** faces to the same side, which is how wood really warps. |
+| 5 | **Faceting by noise** | 1.2 mm | The same function as the character's (`piratelib.facet`). Subliminal from a distance, breaks the light up close. |
 
-Mais: conicidade de 3% de uma ponta à outra, torção de 1,8° no comprimento e
-bisel de 3 mm em volta dos dois topos.
+On top of that: a 3% taper from one end to the other, 1.8° of twist along the length and a
+3 mm bevel around both ends.
 
-![topologia](preview/topology.png)
+![topology](preview/topology.png)
 
-A topologia é um *sweep*: quinze seções transversais de dezesseis pontos
-costuradas com quads, exatamente o motor que constrói o personagem
-(`piratelib.sweep`). Triângulos só nas duas tampas, em leque a partir do
-centroide.
+The topology is a *sweep*: fifteen cross sections of sixteen points stitched with quads,
+exactly the engine that builds the character (`piratelib.sweep`). Triangles only on the
+two caps, fanned out from the centroid.
 
-> [!note] Por que a origem fica no centro
-> É o ponto de equilíbrio da peça — o que a mão segura e o que a física vai usar
-> como centro de massa quando a tábua for solta no convés. Com a origem numa
-> ponta, a tábua orbitaria o punho em vez de girar nele.
+> [!note] Why the origin sits at the center
+> It is the piece's balance point — what the hand holds and what the physics will use as
+> the center of mass when the plank is dropped on the deck. With the origin at one end, the
+> plank would orbit the fist instead of turning in it.
 
 ---
 
-## 🎨 A textura
+## 🎨 The texture
 
-Materiais **procedurais**, bakeados para um atlas. Dois shaders: a face serrada e
-o **topo**. Separá-los não é preciosismo — madeira cortada de través é outro
-material: bebe mais luz, é mais fosca e mostra os anéis em arco em vez de faixas
-compridas.
+**Procedural** materials, baked to an atlas. Two shaders: the sawn face and the **end
+grain**. Separating them is not fussiness — wood cut across the grain is another material:
+it drinks more light, it is more matte and it shows the rings in arcs instead of long
+bands.
 
-![detalhe](preview/detail.png)
+![detail](preview/detail.png)
 
-O que decide a aparência, na ordem em que importa:
+What decides the look, in order of importance:
 
-1. **Contenção.** A regra da Rare é literal: o asset carrega *"só detalhe
-   suficiente para dar a impressão do que ele é"*. O render oficial da tábua tem
-   **duas a quatro faixas largas** na face inteira e quase nenhum detalhe fino.
-   Um veio de carvalho fotográfico aqui seria tecnicamente melhor e
-   estilisticamente errado.
-2. **Espaço de objeto, não UV.** Todo o desenho é amostrado nas coordenadas de
-   objeto. O veio corre no comprimento da peça independentemente de como as ilhas
-   caíram — e isso libera o empacotador de UV para otimizar área em vez de
-   preservar um alinhamento que ninguém usaria.
-3. **Pointiness nas quinas.** O mesmo termo que dá o couro puído do personagem
-   aqui dá a quina lixada do chanfro.
-4. **Nós que atravessam a peça**, com o veio abrindo em catedral ao contorná-los.
-5. **Face estreita mais escura que a larga** — corte radial contra corte
-   tangencial.
+1. **Restraint.** Rare's rule is literal: the asset carries *"only enough detail to give
+   the impression of what it is"*. The official render of the plank has **two to four wide
+   bands** across the entire face and almost no fine detail. A photographic oak grain here
+   would be technically better and stylistically wrong.
+2. **Object space, not UV.** The whole pattern is sampled in object coordinates. The grain
+   runs along the length of the piece regardless of how the islands fell — and that frees
+   the UV packer to optimize area instead of preserving an alignment nobody would use.
+3. **Pointiness on the edges.** The same term that gives the character's worn leather gives
+   the sanded edge of the chamfer here.
+4. **Knots that go through the piece**, with the grain opening into a cathedral as it
+   passes around them.
+5. **The narrow face darker than the wide one** — a radial cut against a tangential one.
 
-### A paleta
+### The palette
 
-| Papel | Hex (sRGB) | Nota |
+| Role | Hex (sRGB) | Note |
 |---|---|---|
-| Corpo | `#BE8355` | Tan/ocre, matiz 25°, S 0,55 |
-| Veio escuro | `#96603A` | Um degrau de valor, não um contraste |
-| Nó | `#5E3A22` | O único valor baixo da peça |
-| Quina gasta | `#DCB98F` | Mais clara **e** dessaturada |
-| Topo serrado | `#A5714B` / anéis `#6F4A2E` | |
-| *(referência)* Convés da Chalupa | `#8F704F` | `ShipMaterials.ts`, matiz 31°, V 0,56 |
+| Body | `#BE8355` | Tan/ochre, hue 25°, S 0.55 |
+| Dark grain | `#96603A` | One step of value, not a contrast |
+| Knot | `#5E3A22` | The only low value on the piece |
+| Worn edge | `#DCB98F` | Lighter **and** desaturated |
+| Sawn end | `#A5714B` / rings `#6F4A2E` | |
+| *(reference)* Sloop deck | `#8F704F` | `ShipMaterials.ts`, hue 31°, V 0.56 |
 
-A tábua é madeira **recém-serrada**: sobe em valor e em saturação e desce em
-matiz em relação ao convés lixado pelo sal. É por isso que ela pega o olho no
-porão sem destoar do navio.
+The plank is **freshly sawn** wood: it goes up in value and saturation and down in hue
+relative to the salt-scoured deck. That is why it catches the eye in the hold without
+clashing with the ship.
 
-> [!warning] A referência submersa mentiu sobre a cor
-> A primeira paleta saiu do screenshot do jogo — que é **debaixo d'água**, com
-> filtro ciano por cima de tudo. Amostrada ali, a tábua dá `#964627`: laranja
-> profundo. Copiado como albedo, isso virou uma tábua cor de salmão que lia como
-> plástico. A água come o verde e o azul, então tudo lá dentro *parece* mais
-> saturado do que é. O que a referência prova é a **relação** (a tábua é muito
-> mais quente e mais clara que tudo em volta) e a **frequência** (variação larga,
-> superfície quase chapada). O valor absoluto veio da paleta que o jogo já tem.
+> [!warning] The submerged reference lied about the color
+> The first palette came from the game's screenshot — which is **underwater**, with a cyan
+> filter over everything. Sampled there, the plank gives `#964627`: a deep orange. Copied
+> as albedo, that became a salmon-colored plank that read as plastic. Water eats the green
+> and the blue, so everything down there *looks* more saturated than it is. What the
+> reference does prove is the **relationship** (the plank is much warmer and lighter than
+> everything around it) and the **frequency** (wide variation, an almost flat surface). The
+> absolute value came from the palette the game already has.
 
-### Os mapas
+### The maps
 
-| Mapa | Sufixo | Espaço | Existe? |
+| Map | Suffix | Space | Present? |
 |---|---|---|---|
 | Base Color | `_D` | sRGB | ✅ |
 | Roughness | `_R` | Non-Color | ✅ |
 | Normal | `_N` | Non-Color | ✅ |
-| Metallic | `_M` | — | ❌ madeira é dielétrica pura; entra como escalar 0 |
-| Ambient Occlusion | `_AO` | — | ❌ **medido**: oclusão média 0,9998, percentil 1 em 1,0 |
+| Metallic | `_M` | — | ❌ wood is a pure dielectric; it goes in as the scalar 0 |
+| Ambient Occlusion | `_AO` | — | ❌ **measured**: mean occlusion 0.9998, 1st percentile at 1.0 |
 
-> [!warning] Base color se bakeia por EMIT, não por DIFFUSE
-> A armadilha está documentada no `PirateCharacter/README.md` e o remédio é
-> reusado daqui, importado de `finalize.py` em vez de recopiado. Aqui não há
-> metal, então o sintoma seria outro — o passe `DIFFUSE` traria a cor *depois* da
-> conta de luz, e não o valor cru que a engine espera —, mas a cura é a mesma.
+> [!warning] Base color is baked by EMIT, not by DIFFUSE
+> The trap is documented in `PirateCharacter/README.md` and the remedy is reused from
+> there, imported from `finalize.py` instead of copied over. There is no metal here, so the
+> symptom would be different — the `DIFFUSE` pass would bring the color *after* the light
+> calculation, and not the raw value the engine expects — but the cure is the same.
 
-> [!warning] O mínimo do mapa de AO mente
-> O mínimo medido foi **0,039**, o que sugeriria oclusão profundíssima numa peça
-> que não tem uma única reentrância. São os pixels da **borda da ilha de UV**,
-> onde o raio de oclusão sai da superfície. Média 0,9998 e percentil 1 em 1,0
-> contam a história verdadeira: o mapa é branco com uma franja. Por isso o corte
-> é pela **média**, e por isso o `_AO` não é entregue.
+> [!warning] The AO map's minimum lies
+> The measured minimum was **0.039**, which would suggest very deep occlusion on a piece
+> that does not have a single recess. Those are the pixels at the **edge of the UV island**,
+> where the occlusion ray leaves the surface. A mean of 0.9998 and a 1st percentile at 1.0
+> tell the true story: the map is white with a fringe. That is why the cutoff is on the
+> **mean**, and why `_AO` is not shipped.
 
 ---
 
-## 🧵 UV e densidade de texel
+## 🧵 UV and texel density
 
-**1024², e não 4096².** Medido, não estimado.
+**1024², and not 4096².** Measured, not estimated.
 
-| | Tábua | Personagem |
+| | Plank | Character |
 |---|---|---|
-| Área de superfície | 0,5986 m² | ~19 m² (com geometria interna) |
+| Surface area | 0.5986 m² | ~19 m² (with interior geometry) |
 | Atlas | 1024² | 4096² |
-| Uso do atlas | 44,5% | — |
-| **Densidade** | **8,83 px/cm** | 8,69 px/cm |
-| Memória dos mapas | ~350 KB em PNG | ~28 MB |
+| Atlas usage | 44.5% | — |
+| **Density** | **8.83 px/cm** | 8.69 px/cm |
+| Map memory | ~350 KB as PNG | ~28 MB |
 
-Os 44,5% não são desleixo do empacotador: a face larga é 5,2:1, e **oito
-configurações** de `smart_project` + `pack_islands` (CONCAVE / CONVEX / AABB,
-margens de 3 a 6 px, limites de ângulo de 45° a 89°) ficaram todas entre 39,9% e
-44,7%. É o teto da forma dentro de um atlas quadrado.
+The 44.5% is not the packer being sloppy: the wide face is 5.2:1, and **eight
+configurations** of `smart_project` + `pack_islands` (CONCAVE / CONVEX / AABB, margins of 3
+to 6 px, angle limits from 45° to 89°) all landed between 39.9% and 44.7%. It is the
+ceiling of that shape inside a square atlas.
 
-**Por que 8,83 px/cm basta aqui**, apesar de prop de primeira pessoa viver na
-faixa de 1024–2048 px/m: o que a textura carrega é gradiente largo. A faixa de
-veio tem ~6 cm (53 texels) e o realce de chanfro, a menor feição do mapa, tem
-4 mm (3,5 texels). Não existe detalhe fino para perder — a contenção de estilo do
-*Sea of Thieves* é justamente essa.
+**Why 8.83 px/cm is enough here**, even though a first-person prop lives in the
+1024–2048 px/m range: what the texture carries is a wide gradient. The grain band is ~6 cm
+(53 texels) and the chamfer highlight, the smallest feature on the map, is 4 mm
+(3.5 texels). There is no fine detail to lose — *Sea of Thieves*' stylistic restraint is
+exactly that.
 
-> [!note] As duas alavancas, se um dia a quina ler mole em primeira pessoa
-> 1. `plank_spec.ATLAS = 2048` — dobra tudo, o pipeline reconstrói sem mais nada,
->    e custa 4× de memória.
-> 2. Cortar as ilhas das faces largas ao meio no comprimento, para o empacotador
->    poder usar duas colunas. Vale **+21%** de densidade (8,83 → ~10,7) ao preço
->    de uma costura no meio da face. Não foi feito porque, com o desenho todo em
->    espaço de objeto, a costura não aparece na cor — mas também não paga o preço
->    de complexidade para uma textura sem alta frequência.
+> [!note] The two levers, if the edge ever reads soft in first person
+> 1. `plank_spec.ATLAS = 2048` — doubles everything, the pipeline rebuilds with nothing
+>    else, and it costs 4× the memory.
+> 2. Cutting the wide faces' islands in half along the length, so the packer can use two
+>    columns. It is worth **+21%** of density (8.83 → ~10.7) at the price of a seam down the
+>    middle of the face. It was not done because, with the whole pattern in object space,
+>    the seam does not show in the color — but it also does not pay the complexity price for
+>    a texture with no high frequency.
 
 ---
 
-## 🔁 Reconstruindo do zero
+## 🔁 Rebuilding from scratch
 
-**Sempre headless.** Existe uma instância de GUI do Blender aberta no projeto com
-o personagem; nada aqui pode encostar nela.
+**Always headless.** There is a GUI instance of Blender open in the project with the
+character; nothing here may touch it.
 
 ```bash
 "C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe" \
   --background --python Props/Plank/scripts/build_all.py
 ```
 
-Etapas soltas, na ordem em que aparecerem:
+Individual stages, in whatever order they come up:
 
 ```bash
 ... --python build_all.py -- geo mat atlas
 ... --python build_all.py -- preview
 ```
 
-Tempo total: **~70 s**, dos quais 60 são o Cycles dos previews. A geometria e os
-materiais levam 0,01 s cada.
+Total time: **~70 s**, of which 60 are Cycles rendering the previews. The geometry and the
+materials take 0.01 s each.
 
-### Os scripts
+### The scripts
 
-| Script | Papel |
+| Script | Role |
 |---|---|
-| `plank_spec.py` | Todas as medidas e cores, cada uma com a procedência ao lado |
-| `build_plank.py` | A malha: sweep, ondulação, empeno, corte enviesado das pontas |
-| `plank_materials.py` | Os dois shaders procedurais + atribuição por face |
-| `plank_finalize.py` | UV, bake do atlas, material final |
-| `plank_export.py` | Checklist pré-export, escrita de `.blend` / FBX / GLB / GLB web e **conferência do GLB gravado** |
-| `plank_preview.py` | Os quatro renders de conferência |
-| `build_all.py` | Ponto de entrada |
+| `plank_spec.py` | Every measurement and color, each with its provenance beside it |
+| `build_plank.py` | The mesh: sweep, wobble, bow, skewed cut of the ends |
+| `plank_materials.py` | The two procedural shaders + per-face assignment |
+| `plank_finalize.py` | UV, atlas bake, final material |
+| `plank_export.py` | Pre-export checklist, writing `.blend` / FBX / GLB / web GLB and **checking the GLB it wrote** |
+| `plank_preview.py` | The four check renders |
+| `build_all.py` | Entry point |
 
-> [!note] A tábua importa o motor do personagem
-> `piratelib.py` (sweep com *parallel transport*, superelipses, facetamento) e as
-> partes delicadas de `finalize.py` (o desvio por Emission, a medida de densidade
-> de texel) e de `preview.py` (câmera, luzes, escolha de engine entre versões)
-> são **importadas** de `PirateCharacter/scripts/`, não copiadas. É um
-> acoplamento consciente: existe uma armadilha documentada de bake no projeto, e
-> ela tem de existir **uma vez só**.
+> [!note] The plank imports the character's engine
+> `piratelib.py` (sweep with *parallel transport*, superellipses, faceting) and the delicate
+> parts of `finalize.py` (the Emission detour, the texel density measurement) and of
+> `preview.py` (camera, lights, engine choice across versions) are **imported** from
+> `PirateCharacter/scripts/`, not copied. It is a deliberate coupling: there is a documented
+> bake trap in this project, and it has to exist **exactly once**.
 >
-> O preço é que renomear a pasta do personagem quebra a tábua — por isso
-> `build_plank` falha com mensagem explícita se não achar o caminho. Quando
-> chegar o terceiro prop (o balde), essas funções sobem para um lugar comum em
-> vez de morar dentro da pasta de um asset.
+> The price is that renaming the character's folder breaks the plank — which is why
+> `build_plank` fails with an explicit message if it cannot find the path. When the third
+> prop arrives (the bucket), those functions move up to a common place instead of living
+> inside one asset's folder.
 
-> [!note] Por que os módulos têm prefixo `plank_`
-> Os scripts do personagem entram no `sys.path` junto com estes. Dois
-> `proportions.py`, dois `export.py` ou dois `preview.py` no caminho fariam o
-> `import` pegar o errado **sem avisar**.
-
----
-
-## ⚠️ As armadilhas que este asset desenterrou
-
-**O Wave do Blender não conta ciclos como parece.** A onda é
-`sin(coord · Scale · 20)`, então o período em metros é `2π / (20 · Scale)`. Em
-Scale 18 — o palpite inicial — isso dá 17,5 mm: **doze faixas** atravessando os
-22 cm da tábua. Renderizado, virou **veludo cotelê**: listra regular demais para
-ser madeira e fina demais para o atlas sustentar. Em 5,0 o período sobe para
-63 mm e sobram ~3,5 faixas, que é a leitura da referência.
-
-**O bump quis ser dez vezes maior do que devia.** A primeira versão usava 0,9 mm
-com força 0,5 e a tábua saiu **corrugada**, com brilho em faixas — cada anel
-virou uma calha. Madeira intemperizada tem *décimos* de milímetro de alívio entre
-lenho de primavera e de verão. 0,25 mm com força 0,3 é o que se vê de perto e
-some de longe.
-
-**O raio do nó não está em metros.** A janela do disco entrava como
-`RAIO / ESCALA`, por analogia errada com unidades de mundo. A saída `Distance` do
-Voronoi já vem no espaço multiplicado pela escala — o raio de uma célula vale
-~0,5 ali dentro. Com o divisor, a janela ficava em 0,017 e **nenhum pixel
-passava**: a tábua saiu sem um nó sequer e nada no log reclamou.
-
-**E o Voronoi dos nós tem de ser 2D.** Com o campo em 3D, as sementes se espalham
-também na espessura, e a tábua é uma fatia de 4,5 cm num espaço de células de
-14 cm: o número esperado de nós na peça inteira dava **meio**. Em 2D o nó vira um
-cilindro que atravessa a prancha — que é literalmente o que um nó é, o galho
-cortado de lado a lado — e ele aparece nas duas faces, no mesmo lugar, de graça.
-
-**O corte enviesado dobrava a geometria.** O desvio da ponta chega a 30 mm na
-largura, enquanto o anel do bisel fica a 13 mm da ponta: movendo só o anel de
-topo, o canto mais recuado passava **para trás** do bisel, a face virava do
-avesso e aparecia um degrau de fatia arrancada na quina. Serrote corta um plano,
-não um anel — os dois anéis da ponta andam juntos agora.
-
-**E a pior de todas: `os.path.basename` mentiu sobre o caminho da textura.**
-Depois de salvar o `.blend`, o Blender reescreve os caminhos das imagens para a
-forma relativa dele — `//textures\T_Plank_D.png`. No Windows, o `ntpath` lê
-aqueles dois primeiros caracteres como início de **caminho UNC**
-(`\\servidor\compartilhamento`), engole a string inteira como "drive" e devolve
-`basename() == ""`.
-
-A cadeia de estrago, toda em silêncio: o alvo virava a *pasta* `textures\`;
-`os.path.exists` dizia que sim, porque pasta existe; o código "consertava" o
-caminho apontando a imagem para um diretório; o `reload()` esvaziava os pixels; e
-o GLB web saía com **três texturas e uma imagem** — cor base, rugosidade e normal
-todas no mesmo arquivo. Código de saída zero, um WARNING de uma linha perdido no
-log, e um arquivo de 35 KB que abre sem reclamar em qualquer visualizador.
-
-Duas correções, e a segunda é a que importa:
-
-1. `bpy.path.abspath()` **antes** de qualquer `os.path`, e `isfile` em vez de
-   `exists`.
-2. **`inspect_glb`**: o pipeline agora abre o GLB que acabou de escrever, lê o
-   bloco JSON e falha se alguma textura estiver sem imagem. Conferir o
-   **artefato**, e não o processo, é a única checagem que não mente — foi ela que
-   provou a correção, e é ela que impede este bug de voltar sem avisar.
-
-> [!warning] O topo não estava escuro; a cena estava
-> Nos primeiros renders o topo saía marrom-escuro, e a leitura natural era "o
-> material do topo ficou escuro demais". Medido no atlas bakeado, o topo sai em
-> `#BA8F67` — mais **claro** que a face. O que estava errado era a iluminação: o
-> trio de luzes herdado do personagem vem todo de cima, de trás e da esquerda, e
-> uma face olhando para +X recebia contribuição de exatamente uma delas.
-> **Depurar o shader por causa disso teria estragado um material que estava
-> certo.** A lição vale além daqui: antes de mexer no material, medir o mapa.
+> [!note] Why the modules are prefixed `plank_`
+> The character's scripts enter `sys.path` alongside these. Two `proportions.py`, two
+> `export.py` or two `preview.py` on the path would make `import` pick the wrong one
+> **without warning**.
 
 ---
 
-## 🧭 Limitações e decisões que valem revisão
+## ⚠️ The traps this asset dug up
 
-- **Não há ponto de encaixe, nem rig, nem mãos.** Foi decisão de escopo: a tábua
-  foi modelada, texturizada e entregue para aprovação; onde ela se prende ao
-  personagem vem depois. Quando vier, o candidato natural é um *empty* na origem
-  (que já é o centro de massa) e um bone `plank_socket` na mão direita.
-- **Sem LODs.** Com 480 tris a peça já é praticamente um LOD; o que faria
-  diferença numa pilha de tábuas é *instancing*, não LOD.
-- **Sem variantes.** Toda tábua sai idêntica — mesmos nós, mesmo veio, mesmo
-  corte. Num barril de cem, isso vai aparecer. A saída barata é somar um deslocamento
-  aleatório por instância às coordenadas de objeto do shader (é o mesmo truque
-  que a Rare usa nas rochas), mas isso exige que a tábua deixe de ser um atlas
-  bakeado único — ou que se bakeiem duas ou três variantes.
-- **A textura não ladrilha e nem deveria.** Diferente da madeira do navio
-  (`ProceduralTextures.ts`), aqui o UV é um atlas de peça única.
-- **Espessura de 45 mm é o número mais discutível.** Está no meio da faixa de
-  costado real (38–50 mm) e bate com a razão do render oficial, mas é uma tábua
-  **gorda**: 25,6:1 de comprimento por espessura, contra 32:1 de um 2×8 comercial.
-  Foi escolhido assim de propósito — abaixo de ~35 mm o low-poly começa a parecer
-  papelão. Se a tábua ler pesada demais na mão, é este número que muda.
-- **O `_web.glb` não reduz resolução**, diferente do personagem (que desce de 4K
-  para 2K). 1024² já é o mínimo que sustenta o realce do chanfro; o ganho de
-  378 KB → 64 KB vem só do WebP.
+**Blender's Wave does not count cycles the way it looks like it does.** The wave is
+`sin(coord · Scale · 20)`, so the period in meters is `2π / (20 · Scale)`. At Scale 18 —
+the initial guess — that comes to 17.5 mm: **twelve bands** crossing the plank's 22 cm.
+Rendered, it turned into **corduroy**: too regular a stripe to be wood and too fine for the
+atlas to hold. At 5.0 the period rises to 63 mm and ~3.5 bands are left, which is the
+reading from the reference.
+
+**The bump wanted to be ten times bigger than it should.** The first version used 0.9 mm
+with a strength of 0.5 and the plank came out **corrugated**, with the highlight in bands —
+every ring became a gutter. Weathered wood has *tenths* of a millimeter of relief between
+spring and summer growth. 0.25 mm at a strength of 0.3 is what you see up close and what
+vanishes from a distance.
+
+**The knot's radius is not in meters.** The disc's window went in as `RADIUS / SCALE`, by a
+wrong analogy with world units. The Voronoi's `Distance` output already comes in the space
+multiplied by the scale — a cell's radius is worth ~0.5 in there. With the divisor, the
+window sat at 0.017 and **no pixel got through**: the plank came out without a single knot
+and nothing in the log complained.
+
+**And the knots' Voronoi has to be 2D.** With the field in 3D, the seeds spread through the
+thickness as well, and the plank is a 4.5 cm slice in a space of 14 cm cells: the expected
+number of knots on the whole piece came to **half of one**. In 2D the knot becomes a
+cylinder that goes through the board — which is literally what a knot is, the branch cut
+right through — and it shows up on both faces, in the same place, for free.
+
+**The skewed cut folded the geometry.** The end's offset reaches 30 mm across the width,
+while the bevel's ring sits 13 mm from the end: moving only the end ring, the more recessed
+corner passed **behind** the bevel, the face turned inside out and a step of torn-off slice
+appeared at the corner. A saw cuts a plane, not a ring — the end's two rings move together
+now.
+
+**And the worst of all: `os.path.basename` lied about the texture's path.** After saving the
+`.blend`, Blender rewrites the images' paths into its own relative form —
+`//textures\T_Plank_D.png`. On Windows, `ntpath` reads those first two characters as the
+start of a **UNC path** (`\\server\share`), swallows the entire string as the "drive" and
+returns `basename() == ""`.
+
+The chain of damage, all in silence: the target became the `textures\` *folder*;
+`os.path.exists` said yes, because a folder exists; the code "fixed" the path by pointing
+the image at a directory; `reload()` emptied the pixels; and the web GLB came out with
+**three textures and one image** — base color, roughness and normal all in the same file.
+Exit code zero, a one-line WARNING lost in the log, and a 35 KB file that opens without
+complaint in any viewer.
+
+Two fixes, and the second is the one that matters:
+
+1. `bpy.path.abspath()` **before** any `os.path`, and `isfile` instead of `exists`.
+2. **`inspect_glb`**: the pipeline now opens the GLB it just wrote, reads the JSON block and
+   fails if any texture is missing its image. Checking the **artifact**, and not the
+   process, is the only check that does not lie — it is what proved the fix, and it is what
+   keeps this bug from coming back unannounced.
+
+> [!warning] The end grain was not dark; the scene was
+> In the first renders the end grain came out dark brown, and the natural reading was "the
+> end grain's material came out too dark". Measured on the baked atlas, the end grain comes
+> out at `#BA8F67` — **lighter** than the face. What was wrong was the lighting: the trio of
+> lights inherited from the character all come from above, behind and the left, and a face
+> looking at +X received a contribution from exactly one of them. **Debugging the shader
+> over that would have ruined a material that was correct.** The lesson goes beyond here:
+> before touching the material, measure the map.
+
+---
+
+## 🧭 Limitations and decisions worth revisiting
+
+- **There is no attachment point, no rig and no hands.** That was a scoping decision: the
+  plank was modeled, textured and delivered for approval; where it attaches to the character
+  comes later. When it does, the natural candidate is an *empty* at the origin (which is
+  already the center of mass) and a `plank_socket` bone in the right hand.
+- **No LODs.** At 480 tris the piece is practically a LOD already; what would make a
+  difference in a stack of planks is *instancing*, not LOD.
+- **No variants.** Every plank comes out identical — same knots, same grain, same cut. In a
+  barrel of a hundred, that will show. The cheap way out is to add a random per-instance
+  offset to the shader's object coordinates (the same trick Rare uses on rocks), but that
+  requires the plank to stop being a single baked atlas — or two or three variants to be
+  baked.
+- **The texture does not tile, and it should not.** Unlike the ship's wood
+  (`ProceduralTextures.ts`), the UV here is a single-piece atlas.
+- **The 45 mm thickness is the most arguable number.** It is in the middle of the real hull
+  planking range (38–50 mm) and it matches the ratio in the official render, but it is a
+  **fat** plank: 25.6:1 of length to thickness, against 32:1 for a commercial 2×8. It was
+  chosen that way on purpose — below ~35 mm, low-poly starts to look like cardboard. If the
+  plank reads too heavy in the hand, this is the number that changes.
+- **The `_web.glb` does not reduce the resolution**, unlike the character's (which goes from
+  4K down to 2K). 1024² is already the minimum that holds the chamfer highlight; the
+  378 KB → 64 KB gain comes from WebP alone.

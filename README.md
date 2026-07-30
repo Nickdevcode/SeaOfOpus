@@ -1,1219 +1,1271 @@
-# 🏴‍☠️ Sea of Opus — Duelo de Chalupas
+# 🏴‍☠️ Sea of Opus — Sloop Duels
 
-Jogo web 3D de combate naval, inspirado no Sea of Thieves. Você comanda uma chalupa
-sozinho — anda no convés, assume o timão, larga a âncora, sobe à gávea, carrega e
-aponta os canhões, desce ao porão para tapar rombos e bombear água — contra uma
-chalupa inimiga tripulada por uma IA de dois homens.
+A 3D naval combat game for the browser, inspired by Sea of Thieves. You command a
+sloop single-handed — walk the deck, take the helm, drop the anchor, climb to the
+topsail platform, load and lay the guns, go below to patch breaches and pump water
+out — against an enemy sloop crewed by a two-man AI.
 
-Roda no navegador, em WebGL2. Casco, texturas, mar, céu, chuva e todo o áudio são
-**gerados em código** — o único arquivo binário do projeto é o personagem, e ele
-também nasceu de script (ver `PirateCharacter/`).
+It runs in the browser on WebGL2. Hull, textures, sea, sky, rain and every sound are
+**generated in code** — the only binary asset in the project is the character, and it
+too came out of a script (see `PirateCharacter/`).
 
-> 🇬🇧 A interface do jogo é em **inglês**. Este README e os comentários do código
-> ficam em português — é onde eu penso, e o jogo é onde eu falo com quem joga.
+![the pirate on deck](PirateCharacter/preview/in_game.png)
 
 ---
 
-## 🚀 Como rodar
+## Contents
+
+- [🚀 Running it](#-running-it)
+- [🎮 Controls](#-controls)
+- [⚔️ How a duel is won](#️-how-a-duel-is-won)
+- [🌩️ The weather](#️-the-weather)
+- [🤖 The enemy AI](#-the-enemy-ai)
+- [🏴‍☠️ The body aboard](#️-the-body-aboard)
+- [🌊 What is actually simulated](#-what-is-actually-simulated)
+- [🪵 Three parts of the ship that are gameplay](#-three-parts-of-the-ship-that-are-gameplay)
+- [🎨 The interface](#-the-interface)
+- [🗂️ Layout](#️-layout)
+- [⚙️ Performance](#️-performance)
+- [🧪 Tests](#-tests)
+- [🧭 Status and what comes next](#-status-and-what-comes-next)
+- [🌐 The networked duel](#-the-networked-duel)
+- [📦 Stack](#-stack)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+
+---
+
+## 🚀 Running it
 
 ```bash
 npm install
-npm run dev      # servidor de desenvolvimento (Vite)
+npm run dev      # dev server (Vite)
 ```
 
-| Comando | O que faz |
+| Command | What it does |
 |---|---|
-| `npm run dev` | Sobe o servidor de desenvolvimento com HMR |
-| `npm run build` | Confere os tipos e gera o `dist/` |
-| `npm run preview` | Serve o `dist/` já construído |
-| `npm run check` | Só a checagem de tipos (`tsc --noEmit`) |
-| `npm run check:all` | Tipos do jogo **e** do servidor de sala |
-| `npm run dev:server` | Sobe o servidor de sala local (`wrangler dev`, porta 8930) |
+| `npm run dev` | Starts the dev server with HMR |
+| `npm run build` | Checks the types and produces `dist/` |
+| `npm run preview` | Serves the built `dist/` |
+| `npm run check` | Type check only (`tsc --noEmit`) |
+| `npm run check:all` | Types for the game **and** the room server |
+| `npm run dev:server` | Starts the local room server (`wrangler dev`, port 8930) |
 
-> ⚠️ O áudio só abre depois do **primeiro clique ou tecla**. Não é bug: todo
-> navegador atual recusa iniciar um `AudioContext` fora de um gesto do usuário.
+> ⚠️ Audio only comes up after the **first click or keypress**. That is not a bug:
+> every current browser refuses to start an `AudioContext` outside a user gesture.
 
-### Para duelar em rede localmente
+### Dueling over the network locally
 
-Precisa dos **dois** servidores no ar, cada um num terminal:
+You need **both** servers up, each in its own terminal:
 
 ```bash
-npm run dev          # o jogo, em :5173
-npm run dev:server   # o servidor de sala, em :8930
+npm run dev          # the game, on :5173
+npm run dev:server   # the room server, on :8930
 ```
 
-O `wrangler dev` roda os Durable Objects na sua máquina e **não pede conta na
-Cloudflare** — só o `deploy` pede.
+`wrangler dev` runs the Durable Objects on your machine and **does not ask for a
+Cloudflare account** — only `deploy` does.
 
-Para conferir num segundo que o servidor de sala é mesmo o seu:
+To confirm in one second that the room server really is yours:
 
 ```bash
-curl http://127.0.0.1:8930/health     # tem que responder {"ok":true}
+curl http://127.0.0.1:8930/health     # has to answer {"ok":true}
 ```
 
-> ⚠️ **Por que 8930 e não a 8787 padrão do wrangler.** No Windows, dois processos
-> conseguem escutar a mesma porta quando o primeiro liga com `SO_REUSEADDR` — que
-> é o padrão do `python -m http.server`. Quando isso acontece, o wrangler sobe
-> anunciando sucesso e as conexões vão para o outro processo: o jogo recebe um
-> "connection dropped" sem nenhuma pista, e não há erro para achar em lado
-> nenhum. Se o `/health` acima devolver HTML em vez de JSON, é exatamente isso —
-> tem outra coisa na porta. A porta está fixa em `server/wrangler.jsonc` e no
-> `.env.development`; mudou numa, muda na outra.
+> ⚠️ **Why 8930 and not wrangler's default 8787.** On Windows, two processes can
+> listen on the same port when the first one binds with `SO_REUSEADDR` — which is
+> what `python -m http.server` does by default. When that happens, wrangler comes up
+> announcing success and the connections go to the other process: the game gets a
+> "connection dropped" with no clue attached, and there is no error to find
+> anywhere. If the `/health` above returns HTML instead of JSON, that is exactly
+> what happened — something else is on the port. The port is pinned in
+> `server/wrangler.jsonc` and in `.env.development`; change it in one, change it in
+> the other.
 
-> ⚠️ Teste em **duas janelas**, não em duas abas. Navegador estrangula o
-> `requestAnimationFrame` de aba em segundo plano, e como quem hospeda simula os
-> dois cascos, o duelo inteiro para. Uma janela normal e uma anônima é o jeito
-> mais rápido — assim cada uma tem o próprio apelido salvo.
+> ⚠️ Test in **two windows**, not two tabs. Browsers throttle
+> `requestAnimationFrame` in a background tab, and since the host simulates both
+> hulls, the whole duel stops. One normal window and one incognito is the quickest
+> way — that way each has its own saved nickname.
 
 ---
 
-## 🎮 Controles
+## 🎮 Controls
 
-Teclado e controle funcionam juntos, e a interface **troca os rótulos no instante em
-que você encosta no controle** — não quando ele é plugado. Voltar ao WASD traz os
-rótulos de teclado de volta (em jogo, mexer o mouse também basta; no menu, onde o
-cursor está solto, é preciso uma tecla ou um clique).
+Keyboard and gamepad work together, and the interface **swaps the labels the moment
+you touch the pad** — not when it gets plugged in. Going back to WASD brings the
+keyboard labels back (in game, moving the mouse is enough; in the menu, where the
+cursor is free, it takes a key or a click).
 
-Num controle da Sony os rótulos saem no layout de lá: `✕ ○ □ △`, `L1/L2`, `Create` e
-`Options`. Os botões são os mesmos — só o que está gravado neles muda.
+On a Sony pad the labels come out in that layout: `✕ ○ □ △`, `L1/L2`, `Create` and
+`Options`. The buttons are the same ones — only what is printed on them changes.
 
-> 🖱️ **No mouse, dê um clique na tela ao entrar na partida.** O navegador só
-> entrega movimento cru de mouse para quem *travou o ponteiro*, e travar exige um
-> gesto — não há como o jogo fazer isso sozinho quando a partida começa, ainda
-> mais em rede, onde o começo vem do servidor e não da sua mão. Enquanto o
-> ponteiro está solto, o jogo escreve **"Click to look around"** na base da tela.
-> Quem joga de controle nunca vê esse aviso: o analógico direito olha em volta
-> sem depender de trava nenhuma.
+> 🖱️ **On mouse, click the screen once when you enter a match.** The browser only
+> hands raw mouse movement to whoever has *locked the pointer*, and locking takes a
+> gesture — there is no way for the game to do it by itself when the match starts,
+> least of all online, where the start comes from the server and not from your hand.
+> While the pointer is free, the game writes **"Click to look around"** at the
+> bottom of the screen. Gamepad players never see that notice: the right stick looks
+> around without depending on any lock.
 
-| Ação | Teclado | Controle |
+| Action | Keyboard | Gamepad |
 |---|---|---|
-| Andar / correr / pular | `W A S D` · `Shift` · `Espaço` | Analógico esq. · `L3` · `A` |
-| Nadar (na água, sem correr — ver abaixo) | `W A S D` | Analógico esq. |
-| Interagir (timão, cabrestante, canhão, escadas, bomba, rombo) | `F` | `X` |
-| Subir a bordo pela escada de embarque · pedir um cabo | `F` | `X` |
-| Sair do posto atual — e soltar a escada | `X` | `B` |
-| Carregar o canhão | `R` | `Y` |
-| Disparar | Botão esquerdo | `RT` |
-| Mira focada | Botão direito | `LT` |
-| Ver controles | `Tab` | `View` |
-| Pausar / ajustes | `Esc` | `Menu` |
-| Telemetria de física | `F3` | — |
-| Câmera livre de inspeção | `C` | — |
+| Walk / run / jump | `W A S D` · `Shift` · `Space` | Left stick · `L3` · `A` |
+| Swim (in water, no running — see below) | `W A S D` | Left stick |
+| Interact (helm, capstan, gun, ladders, pump, breach) | `F` | `X` |
+| Board via the boarding ladder · call for a rope | `F` | `X` |
+| Leave the current station — and let go of the ladder | `X` | `B` |
+| Load the gun | `R` | `Y` |
+| Fire | Left button | `RT` |
+| Focused aim | Right button | `LT` |
+| See the controls | `Tab` | `View` |
+| Pause / settings | `Esc` | `Menu` |
+| Physics telemetry | `F3` | — |
+| Free inspection camera | `C` | — |
 
-### O que **não** tem tecla, de propósito
+### What deliberately has **no** key
 
-Duas coisas a bordo são feitas **andando**, e é isso que as faz parecer trabalho em
-vez de menu:
+Two things aboard are done **by walking**, and that is what makes them feel like
+work instead of a menu:
 
-- 🪜 **Descer ao porão.** A escada é um lance inclinado, não uma escada de mão.
-  Você anda para o buraco e desce. Nenhuma tecla, nenhum modo. Os pés pisam
-  degrau a degrau; a **vista** desce pela rampa, senão cada espelho de 26 cm
-  daria um tranco na câmera.
-- ⚓ **Suspender a âncora.** Um toque de `F` no cabrestante **assume as barras** —
-  daí em diante não há botão a segurar: você **anda para frente** e ele gira o
-  tanto que você andou, volta após volta, com a câmera acompanhando o giro. Outro
-  toque de `F` (ou `X`) larga as barras. Largar o ferro é um toque; suspendê-lo
-  custa **onze segundos** de caminhada — e **sem parar**: parar a passada por mais
-  de nove décimos manda a amarra de volta ao fundo, como no Sea of Thieves.
+- 🪜 **Going below.** The stair is a sloped flight, not a rigging ladder. You walk
+  into the hatch and down you go. No key, no mode. The feet take it step by step;
+  the **view** rides down the ramp, because otherwise every 26 cm riser would jolt
+  the camera.
+- ⚓ **Weighing the anchor.** One tap of `F` on the capstan **takes the bars** —
+  from then on there is no button to hold: you **walk forward** and it turns as far
+  as you walked, turn after turn, with the camera following the sweep. Another tap
+  of `F` (or `X`) lets go of the bars. Dropping the anchor is one tap; weighing it
+  costs **eleven seconds** of walking — and **without stopping**: letting the stride
+  rest for more than nine tenths of a second sends the cable back to the bottom,
+  like in Sea of Thieves.
 
-### E a que tem, pelo motivo oposto
+### And the one that does have a key, for the opposite reason
 
-- 🧗 **A escada do mastro.** `F` para agarrar, `W`/`S` para subir e descer, `F`
-  (ou `X`, ou `Espaço`) para largar. **Frente sobe e ré desce nas duas pontas** —
-  no convés e na gávea. Enquanto bastava encostar andando, subir acontecia sem
-  ninguém pedir (o mastro fica no meio do corredor) e não havia como descer,
-  porque descer exigia exatamente o gesto de subir.
+- 🧗 **The mast ladder.** `F` to grab it, `W`/`S` to go up and down, `F` (or `X`, or
+  `Space`) to let go. **Forward climbs and back descends at both ends** — on deck
+  and on the platform. While bumping into it while walking was enough, climbing
+  happened without anyone asking for it (the mast sits in the middle of the
+  walkway), and there was no way down, because going down needed exactly the gesture
+  that went up.
 
 ---
 
-## ⚔️ Como se ganha um duelo
+## ⚔️ How a duel is won
 
-Não existe barra de vida. **O estado do navio é a água dentro dele.**
+There is no health bar. **The state of the ship is the water inside it.**
 
-1. Um tiro abre um furo numa posição do casco.
-2. Água entra por ele na vazão que a diferença de pressão manda (Torricelli).
-3. O peso dessa água faz o navio calar mais fundo.
-4. Calando mais fundo, **mais furos ficam submersos** e a vazão cresce.
+1. A shot opens a hole at some position on the hull.
+2. Water comes in at the rate the pressure difference dictates (Torricelli).
+3. The weight of that water makes the ship sit deeper.
+4. Sitting deeper, **more holes end up submerged** and the inflow grows.
 
-O navio afunda quando ninguém segura essa realimentação. Por isso tapar rombo vem
-antes de bombear: a bomba tira 750 L/s e cada rombo submerso mete até 130 L/s, então
-**a partir de seis furos abertos a água sobe enquanto você bombeia**. Com o casco
-fechado, a bomba esvazia um porão a 30% em meio minuto.
+The ship sinks when nobody holds that feedback loop back. That is why patching comes
+before pumping: the pump takes out 750 L/s and each submerged breach lets in up to
+130 L/s, so **from six open holes on, the water rises while you pump**. With the hull
+closed, the pump empties a hold at 30% in half a minute.
 
-A bomba do inimigo é essa mesma, com a mesma vazão. O que ele faz de diferente é
-**largá-la antes de o porão secar** — ver a seção da IA. Você pode secar o seu até a
-última gota; ele carrega o que ficou.
+The enemy's pump is that same pump, with the same rate. What it does differently is
+**let go of it before the hold is dry** — see the AI section. You can dry yours to
+the last drop; it carries whatever is left.
 
-A 92% de porão o convés entra n'água e não há mais volta — daí em diante o mar passa
-por cima e o casco inteiro enche. São **74 m³ de água** para afundar uma chalupa.
+At 92% of the hold the deck goes under and there is no coming back — from there on
+the sea comes over the top and the whole hull fills. It takes **74 m³ of water** to
+sink a sloop.
 
-### O ponto de mira que importa
+### The aim point that matters
 
-Só o que entra **abaixo do convés** alaga. Tiro na amurada arranca lasca e nada mais.
-E um rombo acima da linha d'água só bebe quando passa crista de onda. Mire na linha
-d'água — é lá que o furo custa caro.
+Only what gets in **below the deck** floods. A shot into the bulwark tears splinters
+and nothing else. And a breach above the waterline only drinks when a wave crest
+passes. Aim at the waterline — that is where a hole costs dearly.
 
-### 💥 Abalroar quebra os dois cascos
+### 💥 Ramming breaks both hulls
 
-O canhão não é o único jeito de abrir casco. Duas chalupas de 37 t se encontrando a
-3 m/s trocam **157 kJ** — mais energia do que quase qualquer bala do jogo entrega —, e
-madeira não tem como não ceder. Bateu, quebrou:
+The gun is not the only way to open a hull. Two 37 t sloops meeting at 3 m/s trade
+**157 kJ** — more energy than almost any cannonball in the game delivers — and wood
+has no way not to give. Hit, broken:
 
-| Aproximação | O que abre em **cada** casco |
+| Closing speed | What opens in **each** hull |
 |---|---|
-| até 1,2 m/s | nada. É atracar: os cascos rangem e se afastam |
-| 1,2 – 2,1 m/s | 1 rombo |
-| 2,1 – 3,0 m/s | 2 rombos |
-| acima de 3,0 m/s | 3 rombos |
+| up to 1.2 m/s | nothing. That is coming alongside: the hulls groan and drift apart |
+| 1.2 – 2.1 m/s | 1 breach |
+| 2.1 – 3.0 m/s | 2 breaches |
+| above 3.0 m/s | 3 breaches |
 
-Três decisões sustentam isso:
+Three decisions hold this up:
 
-- **O estrago é simétrico.** Quem investe leva o mesmo que dá, e é isso que mantém o
-  abalroamento como *risco* em vez de estratégia ótima. Uma investida a 4 m/s abre
-  três furos na linha d'água dos dois — 400 L/s de cada lado, contra 750 da bomba.
-  Dá para sobreviver, e não dá para ignorar.
-- **Os rombos não se fundem.** Eles nascem espalhados 90 cm ao longo do costado, mais
-  que os 42 cm da distância de fusão: três buracos separados bebem três vezes, e um
-  buraco alargado três vezes satura. Sem esse espaçamento, a pancada mais forte do
-  jogo valeria menos que a soma das partes dela.
-- **Encostar não conta.** O limiar de 1,2 m/s é mais do que o mar empurra dois cascos
-  encostados numa ondulação normal. Sem ele, colar no adversário e deixar a onda
-  trabalhar afundaria os dois de graça — e há um rearme de um segundo e meio para que
-  um costado a costado longo conte uma vez, e não sessenta por segundo.
+- **The damage is symmetric.** Whoever charges takes as much as they give, and that
+  is what keeps ramming a *risk* instead of the optimal strategy. A 4 m/s charge
+  opens three holes at the waterline of both — 400 L/s each side, against 750 from
+  the pump. Survivable, and impossible to ignore.
+- **The breaches do not merge.** They are born spread 90 cm apart along the hull
+  side, more than the 42 cm merge distance: three separate holes drink three times
+  over, while one hole widened three times saturates. Without that spacing, the
+  hardest hit in the game would be worth less than the sum of its parts.
+- **Touching does not count.** The 1.2 m/s threshold is more than the sea pushes two
+  hulls lying alongside each other in a normal swell. Without it, sticking to your
+  opponent and letting the waves work would sink both for free — and there is a
+  one-and-a-half-second rearm so that a long side-by-side counts once, and not sixty
+  times a second.
 
-> 🪵 E os cascos de fato **param** um no outro agora. Ver
-> [o abalroamento, por dentro](#-o-que-é-simulado-de-verdade) — a queixa de "um barco
-> entra dentro do outro" tinha duas causas de aritmética, e nenhuma delas aparecia
-> como erro em lugar nenhum.
+> 🪵 And the hulls do in fact **stop** on each other now. See
+> [what is actually simulated](#-what-is-actually-simulated) — the "one ship goes
+> inside the other" complaint had two arithmetic causes, and neither of them showed
+> up as an error anywhere.
 
-### 🎯 Acertar duas vezes no mesmo lugar vale por dois
+### 🎯 Hitting the same spot twice counts twice
 
-Parece óbvio, e por muito tempo não foi. O modelo de avaria tinha duas regras que se
-somavam mal: um tiro a menos de **90 cm** de um rombo aberto *alargava* aquele rombo em
-vez de abrir outro, e a vazão de cada rombo era limitada por um teto **fixo** — o mesmo
-para um furo pequeno e para um do dobro do tamanho. Juntas, elas diziam que alargar um
-buraco não vale quase nada.
+It sounds obvious, and for a long time it was not. The damage model had two rules
+that added up badly: a shot less than **90 cm** from an open breach *widened* that
+breach instead of opening another one, and each breach's inflow was capped by a
+**fixed** ceiling — the same one for a small hole and for one twice the size.
+Together they said that widening a hole is worth almost nothing.
 
-O resultado era perverso, e medido:
+The result was perverse, and measured:
 
-| Dispersão dos seus 8 acertos | Dano entregue (antes) | Agora |
+| Spread of your 8 hits | Damage delivered (before) | Now |
 |---|---|---|
-| ±0,5 m — mira excelente | **22%** | **72%** |
-| ±1,0 m — mira boa | 36% | 81% |
-| ±2,0 m — mira mediana | 53% | 89% |
-| ±5,0 m — praticamente sorte | 70% | 93% |
+| ±0.5 m — excellent aim | **22%** | **72%** |
+| ±1.0 m — good aim | 36% | 81% |
+| ±2.0 m — average aim | 53% | 89% |
+| ±5.0 m — basically luck | 70% | 93% |
 
-**Quanto melhor você mirava, menos dano causava** — um jogador preciso entregava um
-terço do dano de um relaxado, e a IA, que varre o costado por doutrina, jogava no
-topo daquela curva enquanto você jogava no fundo dela. Era essa a razão de "acerto
-nele e não alaga nada".
+**The better you aimed, the less damage you did** — a precise player delivered a
+third of what a sloppy one did, and the AI, which sweeps the hull side by doctrine,
+was playing at the top of that curve while you played at the bottom of it. That was
+the reason behind "I hit it and nothing floods".
 
-As duas regras foram consertadas na raiz: a fusão passou a sair do vão real do rombo
-(26 cm de buraco → **42 cm** de fusão, em vez de 90) e o teto de vazão virou uma
-**velocidade de veia**, que multiplicada pela área do rombo cresce junto com ele. Um
-rombo alargado quatro vezes bebe quatro vezes mais, como qualquer buraco faria.
+Both rules were fixed at the root: merging now comes out of the breach's real span
+(a 26 cm hole → **42 cm** of merging, instead of 90) and the inflow ceiling became a
+**jet speed**, which multiplied by the breach area grows along with it. A breach
+widened four times drinks four times more, as any hole would.
 
-Sobra um resíduo de ~28% no caso extremo, e ele é honesto: oito balas num palmo de
-costado **realmente** se sobrepõem. O que não sobra é a curva invertida.
+A residue of ~28% is left in the extreme case, and it is honest: eight balls into one
+hand's width of hull side **really do** overlap. What is not left is the inverted
+curve.
 
-### 🎒 Os dois paióis, e por que eles **não** decidem o duelo
+### 🎒 The two magazines, and why they **do not** decide the duel
 
-Nada reabastece no mar. O que o navio leva na largada é o que ele tem para a partida
-inteira, dos dois lados:
+Nothing resupplies at sea. What the ship carries at the start is what it has for the
+whole match, on both sides:
 
-| Paiol | Carga | Consome quando |
+| Magazine | Load | Spent when |
 |---|---|---|
-| 💣 **Balas** | 160 | carrega um canhão |
-| 🪵 **Tábuas** | 48 | um rombo **termina** de fechar |
+| 💣 **Cannonballs** | 160 | you load a gun |
+| 🪵 **Planks** | 48 | a breach **finishes** closing |
 
-A tábua sai do paiol **no fim do trabalho, não no começo**. Quem solta o botão no meio
-não perde a peça, e o progresso parcial fica guardado no rombo para a próxima tentativa
-— o reparo é interrompido o tempo todo pela onda, pelo tiro que chega e pela bomba que
-precisa de alguém, e cobrar adiantado transformaria cada interrupção numa multa.
+The plank leaves the magazine **at the end of the work, not the start**. Letting go
+of the button halfway does not cost you the piece, and the partial progress stays
+with the breach for the next attempt — repair work is interrupted constantly by the
+waves, by the incoming shot and by the pump that needs somebody, and charging up
+front would turn every interruption into a fine.
 
-**Os dois números existem para nunca serem alcançados num duelo honesto.** É a terceira
-afinação deles, e as duas primeiras erraram pelo mesmo motivo: tratavam o paiol como
-peça de balanceamento. Ele não é. Um duelo tem de terminar por quem manobra e mira
-melhor — se ele termina porque um dos dois ficou sem bala, o que a partida mediu foi
-contabilidade, e não briga. Em 80, a telemetria mostrava o capitão Legend zerando o
-paiol aos quatro minutos com o alvo em 74% de porão: o limite estava decidindo a
-partida, e pelo relógio. Em 160 ele tem quase sete minutos de fogo ininterrupto, e um
-duelo não é ininterrupto.
+**Both numbers exist in order never to be reached in an honest duel.** This is their
+third tuning, and the first two missed for the same reason: they treated the magazine
+as a balancing knob. It is not one. A duel has to end because of who maneuveres and
+shoots better — if it ends because one of the two ran out of shot, what the match
+measured was bookkeeping, not a fight. At 80, the telemetry showed a Legend captain
+emptying the magazine at four minutes with the target at 74% of hold: the limit was
+deciding the match, and by the clock. At 160 it has almost seven minutes of
+uninterrupted fire, and a duel is not uninterrupted.
 
-O teto continua tendo função — tiro a esmo a 150 m custa bala, e o paiol é a única
-coisa que cobra por isso — e continua criando a decisão que interessa: com o casco
-furado em cinco lugares e três deles acima da linha d'água, **tapar tudo não é de
-graça**. O inimigo joga pela mesma regra; quando a madeira dele acaba, o marujo larga
-o buraco e vai para a bomba, a única coisa que ainda funciona sem tábua.
+The ceiling still has a job — wild shooting at 150 m costs shot, and the magazine is
+the only thing that charges for it — and it still creates the decision that matters:
+with the hull holed in five places and three of them above the waterline, **patching
+everything is not free**. The enemy plays by the same rule; when its wood runs out,
+the deckhand leaves the hole and goes to the pump, the only thing that still works
+without a plank.
 
-### 🪚 O casco conta a história do combate
+### 🪚 The hull tells the story of the fight
 
-O rombo era um disco preto de nove lados, e o problema dele não era ser feio — era
-não ser **legível**. Um disco chapado no meio de um costado alcatroado não diz onde
-a bala bateu; diz que ali falta alguma coisa. O que denuncia um rombo de verdade é
-o que está **em volta** dele, e a marca hoje tem três zonas:
+The breach used to be a nine-sided black disc, and the problem with it was not that
+it was ugly — it was that it was not **legible**. A flat disc in the middle of a
+tarred hull side does not say where the ball hit; it says something is missing there.
+What gives away a real breach is what is **around** it, and the mark today has three
+zones:
 
-| Zona | Raio | O que é |
+| Zone | Radius | What it is |
 |---|---|---|
-| 🕳️ Furo | 31 cm de vão | O porão, visto de fora. Escuro em qualquer hora do dia |
-| 🪵 Miolo | até 54 cm | A madeira de dentro da tábua, clara, com fibra e lascas em relevo |
-| 🌫️ Fuligem | até 90 cm | A mancha da explosão, apagando na madeira sã |
+| 🕳️ Hole | 31 cm of span | The hold, seen from outside. Dark at any hour of the day |
+| 🪵 Core | up to 54 cm | The wood inside the plank, pale, with grain and splinters in relief |
+| 🌫️ Soot | up to 90 cm | The blast stain, fading out into sound wood |
 
-Três decisões sustentam isso, e nenhuma é a óbvia:
+Three decisions hold this up, and none of them is the obvious one:
 
-- **A silhueta não é um círculo, e a irregularidade mora nos dois lados.** A mesma
-  função deforma os vértices no shader de vértice e decide onde cada zona de cor
-  começa no de fragmento. Se as duas divergissem, a pintura escorregaria para fora
-  da forma — que é exatamente o defeito que faz um decalque parecer adesivo.
-- **A madeira parte ao longo da fibra.** O furo é 35% mais largo que alto, e as
-  fendas que saem dele correm no sentido do tabuado, atravessando a borda do
-  estrago para dentro da madeira sã. É a coisa que mais separa "buraco de bala em
-  madeira" de "buraco de bala em qualquer outra coisa".
-- **O furo tem profundidade sem ter geometria.** Afundar a malha para dentro do
-  casco não funciona: o costado é opaco e o z-buffer esconderia o buraco. Então o
-  fundo é amostrado com um deslocamento proporcional à direção de visão e *desliza*
-  quando a câmera anda. As lascas, essas sim, são geometria — elas sobem 4,5 cm
-  para **fora**, onde não há z-buffer para brigar.
+- **The silhouette is not a circle, and the irregularity lives on both sides.** The
+  same function displaces the vertices in the vertex shader and decides where each
+  color zone starts in the fragment shader. If the two diverged, the paint would
+  slide off the shape — which is exactly the defect that makes a decal look like a
+  sticker.
+- **Wood splits along the grain.** The hole is 35% wider than it is tall, and the
+  cracks leaving it run with the planking, crossing the edge of the damage into sound
+  wood. It is the thing that most separates "cannonball hole in wood" from
+  "cannonball hole in anything else".
+- **The hole has depth without having geometry.** Sinking the mesh into the hull does
+  not work: the hull side is opaque and the z-buffer would hide the hole. So the
+  bottom is sampled with an offset proportional to the view direction and *slides*
+  as the camera moves. The splinters, those are geometry — they rise 4.5 cm
+  **outward**, where there is no z-buffer to argue with.
 
-### 🔨 O remendo fica onde ele foi pregado
+### 🔨 The patch stays where it was nailed
 
-A tábua é pregada **por dentro**, no forro do porão — que é onde o jogador está
-quando prega. Parece detalhe e não é: com a peça do lado de fora, o reparo vira uma
-coisa que só o inimigo enxerga, e quem fez o trabalho nunca vê o próprio trabalho.
+The plank is nailed **from inside**, onto the hold's ceiling planking — which is
+where the player is standing when nailing it. It sounds like a detail and it is not:
+with the piece on the outside, the repair becomes something only the enemy can see,
+and whoever did the work never sees their own work.
 
-Isso muda o que se vê de cada lado, e os dois estão certos ao mesmo tempo:
+That changes what each side sees, and both of them are right at the same time:
 
-| De onde se olha | O que aparece |
+| Where you look from | What shows up |
 |---|---|
-| 🪵 **Do porão** | a tábua nova, atravessada e fora do prumo, pregada no forro |
-| ⚓ **Do mar** | o furo continua aberto no costado — mas o fundo dele agora é **madeira clara**, a tábua vista pelo buraco, em vez do breu do porão |
+| 🪵 **From the hold** | the new plank, crooked and off-plumb, nailed to the ceiling planking |
+| ⚓ **From the sea** | the hole is still open in the hull side — but its bottom is now **pale wood**, the plank seen through the hole, instead of the pitch dark of the hold |
 
-O furo **não some** ao ser tapado, e essa foi a segunda correção: um casco que para de
-fazer água sem nada acontecer na madeira era a parte menos convincente da coisa toda.
-O que o remendo muda é o fundo do buraco, e é isso que deixa distinguir, de longe,
-um rombo aberto de um rombo remendado.
+The hole **does not vanish** when it gets patched, and that was the second fix: a
+hull that stops taking water with nothing happening in the wood was the least
+convincing part of the whole thing. What the patch changes is the bottom of the hole,
+and that is what lets you tell an open breach from a patched one at a distance.
 
-### 🕳️ O rombo atravessa — e a face de dentro não é a de fora espelhada
+### 🕳️ The breach goes through — and the inner face is not the outer one mirrored
 
-Mudar a tábua de lado consertou metade do problema e deixou a outra metade à mostra:
-o **rombo** continuou sendo desenhado só na face externa. O costado tem 13 cm de
-espessura e forro dos dois lados, então o jogador descia para tapar o buraco e
-encontrava uma parede intacta — e conseguia pregar a tábua assim mesmo, porque a mira
-do reparo é por ângulo e não por raio. O rombo funcionava sem existir.
+Moving the plank to the other side fixed half the problem and left the other half on
+show: the **breach** was still being drawn only on the outer face. The hull side is
+13 cm thick with planking on both faces, so the player went below to patch the hole
+and found an intact wall — and could nail the plank there anyway, because the
+repair's aim is by angle and not by radius. The breach worked without existing.
 
-Agora cada rombo tem **duas** marcas, e elas são diferentes de propósito. Numa tábua,
-o lado por onde o projétil sai estilhaça muito mais que o lado por onde ele entra — é
-o *spall*, que em navio de linha feria mais gente que a própria bala:
+Now every breach has **two** marks, and they are different on purpose. In a plank,
+the side the projectile exits shatters far more than the side it enters — that is
+*spall*, which aboard a ship of the line wounded more men than the ball itself:
 
-| | ⚓ Face de fora (entrada) | 🪵 Face de dentro (saída) |
+| | ⚓ Outer face (entry) | 🪵 Inner face (exit) |
 |---|---|---|
-| **Quem manda** | a pólvora | a fibra |
-| **Lasca** | 4,5 cm | 7,6 cm, e o furo é 12% maior |
-| **Queimadura** | borda chamuscada e fuligem larga | quase nenhuma — carvalho cru |
-| **Fundo do furo** | o breu do porão | madeira encharcada, com a água entrando |
+| **What rules** | the powder | the grain |
+| **Splinters** | 4.5 cm | 7.6 cm, and the hole is 12% bigger |
+| **Burn** | charred edge and wide soot | almost none — raw oak |
+| **Bottom of the hole** | the pitch dark of the hold | soaked wood, with the water coming in |
 
-O fundo de dentro **não** é uma janela para o mar, e isso é escolha: um vão do tamanho
-de um punho mostrando oceano lê como recorte de cenário, enquanto madeira molhada lê
-como buraco na hora. E como no porão não há sol competindo com nada, a face de dentro
-pode gritar mais alto que a de fora — é ela que o jogador procura quando desce com a
-tábua na mão.
+The inner bottom is **not** a window to the sea, and that is a choice: a fist-sized
+opening showing ocean reads as a cut-out in the scenery, while wet wood reads as a
+hole instantly. And since there is no sun in the hold competing with anything, the
+inner face can shout louder than the outer one — it is the one the player looks for
+when going below with a plank in hand.
 
-Com o rombo tapado, a cicatriz de dentro continua lá: a tábua tem 22 cm de largura
-contra quase 1 m de marca, então o que sobra da madeira arrancada **escapa pelos lados
-dela**. A colcha de retalhos que o casco vira num combate longo passou a existir nas
-duas faces.
+With the breach patched, the inner scar is still there: the plank is 22 cm wide
+against nearly 1 m of mark, so what is left of the torn wood **escapes around its
+edges**. The patchwork quilt a hull turns into over a long fight now exists on both
+faces.
 
-A pose da tábua é sorteada a partir do identificador do rombo — giro de até ±23° em
-torno da normal e uns centímetros de escorregamento —, o que dá duas coisas: nenhuma
-fica igual à outra, e nenhuma treme entre quadros. Um tiro novo no mesmo lugar
-**arranca a tábua** e devolve o rombo do tamanho que ele tinha: um remendo é a parte
-fraca do casco, e quem tapou um buraco alargado por três balas não recomeça de um
-furo pequeno.
+The plank's pose is drawn from the breach's identifier — up to ±23° of roll around
+the normal and a few centimeters of slide — which buys two things: no two are alike,
+and none of them jitters between frames. A fresh shot in the same place **tears the
+plank off** and gives back the breach at the size it was: a patch is the weak part of
+a hull, and whoever patched a hole widened by three balls does not start over from a
+small one.
 
-> [!note] Por que a cor estava dez vezes errada
-> `diffuseColor` vive em espaço **linear**, e as cores do resto do navio chegam lá
-> pela textura, que o Three converte sozinho. Uma cor escrita à mão pula essa etapa:
-> escrever `0.36` achando que é o mesmo `0.36` do costado põe a madeira dez vezes
-> mais clara que ele. O sintoma foi uma coroa branca em volta do furo, com cara de
-> espuma do mar.
+> [!note] Why the color was ten times off
+> `diffuseColor` lives in **linear** space, and the rest of the ship's colors get
+> there through the texture, which Three converts on its own. A color written by
+> hand skips that step: writing `0.36` thinking it is the same `0.36` as the hull
+> side makes the wood ten times brighter than it. The symptom was a white crown
+> around the hole, looking like sea foam.
 
 ---
 
-## 🌩️ O tempo
+## 🌩️ The weather
 
-O mar **não é uma constante**. Quatro estados de tempo se encadeiam numa cadeia de
-Markov de transições restritas, cada transição levando cerca de dois minutos:
+The sea **is not a constant**. Four weather states chain together in a Markov chain
+with restricted transitions, each transition taking about two minutes:
 
 | | ☀️ Clear skies | 🌬️ Fresh wind | 🌧️ Squall | ⛈️ Storm |
 |---|---|---|---|---|
-| Vento | 0,34 | 0,62 | 0,82 | 1,00 |
-| Visibilidade | 4,2 km | 3,2 km | 1,5 km | **750 m** |
-| Chuva | — | — | média | fechada |
-| Rajadas / min | 0 | 2 | 5 | 9 |
-| Relâmpagos / min | — | — | 0,4 | 6 |
+| Wind | 0.34 | 0.62 | 0.82 | 1.00 |
+| Visibility | 4.2 km | 3.2 km | 1.5 km | **750 m** |
+| Rain | — | — | medium | heavy |
+| Gusts / min | 0 | 2 | 5 | 9 |
+| Lightning / min | — | — | 0.4 | 6 |
 
-Não se passa de céu limpo para temporal: passa-se por um vento que encrespa, uma
-nuvem que fecha, um aguaceiro que engrossa. A escalada e a calmaria acontecem em
-ordem, e o jogador aprende a ler o que vem antes de ele chegar.
+You do not go from clear skies to a storm: you go through a wind that ruffles the
+water, a cloud that closes in, a downpour that thickens. The build-up and the calming
+happen in order, and the player learns to read what is coming before it arrives.
 
-O que isso muda no jogo, além da paisagem:
+What that changes in the game, beyond the scenery:
 
-- 🌊 **A onda quadruplica de amplitude** entre a calmaria e o temporal. Mar grosso
-  mexe com a pontaria dos dois lados: a peça é presa ao convés, e o convés está se
-  mexendo.
-- 💨 **O vento gira sempre**, 20° por minuto, mesmo dentro de um único tempo. O bordo
-  rápido de agora não é o bordo rápido de dois minutos atrás.
-- 🌀 **Rajadas** empurram os dois navios ao mesmo tempo, sem que nenhum tenha feito
-  nada — e é isso que dá momentos numa perseguição que a física, sozinha, empataria.
-- 🔀 **Mar cruzado.** A ondulação de fundo segue o vento a um quarto da velocidade,
-  então o ângulo entre as duas famílias de onda se abre ao longo da partida. É o que
-  separa um mar de uma chapa ondulada.
+- 🌊 **The waves quadruple in amplitude** between calm and storm. Heavy seas mess
+  with both sides' gunnery: the gun is fixed to the deck, and the deck is moving.
+- 💨 **The wind always turns**, 20° per minute, even within a single weather state.
+  The fast point of sail now is not the fast point of sail two minutes ago.
+- 🌀 **Gusts** shove both ships at once, without either of them having done anything —
+  and that is what creates moments in a chase that physics alone would keep even.
+- 🔀 **Cross seas.** The underlying swell follows the wind at a quarter of its speed,
+  so the angle between the two wave families opens up over the course of a match. It
+  is what separates a sea from a corrugated sheet.
 
-Quem quiser um mar previsível — para treinar tiro, ou para *ver* o temporal sem
-esperar — trava o tempo nos Ajustes.
+Anyone who wants a predictable sea — to practice gunnery, or to *see* the storm
+without waiting for it — locks the weather in the Settings.
 
 ---
 
-## 🤖 A IA inimiga
+## 🤖 The enemy AI
 
-### Uma tripulação de dois, e é isso que a torna justa
+### A crew of two, and that is what makes it fair
 
-O caminho fácil seria dar ao bot uma consciência única que governa, aponta as duas
-peças e prega tábua ao mesmo tempo. Isso produz um inimigo incombatível, e a única
-coisa que o jogador aprende é que o jogo trapaceia.
+The easy path would be to give the bot a single mind that steers, lays both guns and
+nails planks all at once. That produces an unbeatable enemy, and the only thing the
+player learns from it is that the game cheats.
 
-Então a chalupa inimiga é tripulada como uma chalupa de verdade: **por dois**. Um fica
-no timão do começo ao fim. O outro é um homem só, e um homem só está em **um** lugar —
-canhão de boreste, de bombordo, ou porão. Ir de um ao outro custa o tempo de
-atravessar o convés (2,2 s) ou descer a escada (4,2 s).
+So the enemy sloop is crewed like a real sloop: **by two**. One stays at the helm from
+start to finish. The other is one man, and one man is in **one** place — starboard
+gun, port gun, or the hold. Getting from one to another costs the time it takes to
+cross the deck (2.2 s) or go down the stair (4.2 s).
 
-Três coisas caem disso de graça:
+Three things fall out of that for free:
 
-- 🩹 **O combate ganha respiro.** Quando o inimigo toma rombo, o fogo dele para. Você
-  *vê* isso acontecer e entende que acertou — sem número na tela.
-- 🔄 **Trocar de bordo tem preço.** Cruze a popa dele e apareça do outro lado: o
-  artilheiro tem de atravessar o convés, e há uma janela real em que só você atira.
-- ⚖️ **A simetria fica honesta.** Você também não consegue mirar e bombear ao mesmo
-  tempo. A diferença é que você tem timoneiro de graça, e ele paga com o segundo homem.
+- 🩹 **The fight gets room to breathe.** When the enemy takes a breach, its fire
+  stops. You *see* that happen and understand that you hit — with no number on
+  screen.
+- 🔄 **Switching sides has a price.** Cross its stern and appear on the other side:
+  the gunner has to cross the deck, and there is a real window where only you are
+  shooting.
+- ⚖️ **The symmetry stays honest.** You cannot aim and pump at the same time either.
+  The difference is that you get a helmsman for free, and it pays with its second
+  man.
 
-A simetria vale para os paióis também: o inimigo larga das mesmas 160 balas e das
-mesmas 48 tábuas. Quando a madeira dele acaba, o marujo do porão **para de escolher
-rombo** e vai direto para a bomba — não porque desistiu, mas porque é a única coisa que
-ainda funciona sem tábua. Um bot que insistisse no buraco ficaria parado na frente dele
-afundando sozinho, e é exatamente esse o bug que a checagem evita.
+The symmetry holds for the magazines too: the enemy sets out with the same 160 balls
+and the same 48 planks. When its wood runs out, the deckhand in the hold **stops
+choosing breaches** and goes straight to the pump — not because it gave up, but
+because that is the only thing that still works without a plank. A bot that insisted
+on the hole would stand in front of it sinking on its own, and that is exactly the bug
+the check prevents.
 
-### 🔁 O serviço da peça: o metrônomo que virou ritmo
+### 🔁 Serving the gun: the metronome that became a rhythm
 
-Uma medição derrubou a versão anterior deste inimigo. O intervalo entre tiros do
-capitão Legend era de **1,533 s — e o mínimo era igual à mediana**, também 1,533 s. Um
-artilheiro que em oitenta tiros nunca perde um décimo de segundo não é um artilheiro, é
-um metrônomo. Era exatamente essa a sensação de jogar contra ele: a de que a peça dele
-nunca precisava ser recarregada.
+One measurement brought down the previous version of this enemy. The interval between
+shots from the Legend captain was **1.533 s — and the minimum equalled the median**,
+also 1.533 s. A gunner who in eighty shots never loses a tenth of a second is not a
+gunner, it is a metronome. That was exactly what playing against it felt like: as if
+its gun never needed reloading.
 
-O erro não era um número mal escolhido, era uma omissão. O único custo do ciclo de tiro
-era socar a bala, e ele corria **em paralelo** com o recuo e com a pontaria — o
-servente carregava, corria a carreta e apontava tudo ao mesmo tempo, com dois braços
-que ele não tem. Três coisas passaram a acontecer em fila, que é como acontecem numa
-peça de bordo servida por um homem só:
+The mistake was not a badly chosen number, it was an omission. The only cost in the
+firing cycle was ramming the ball home, and it ran **in parallel** with the recoil and
+with the aiming — the server loaded, ran the carriage up and laid the gun all at once,
+with two arms it does not have. Three things now happen in sequence, which is how they
+happen on a shipboard gun served by one man:
 
-| Etapa | Custo | Vale para |
+| Step | Cost | Applies to |
 |---|---|---|
-| 🛞 A carreta corre de volta ao batente | 0,69 s | **os dois** — é da peça, não de quem a serve |
-| 🫱 Largar o espeque e trazer a bala | 0,11–0,60 s | o inimigo (o seu equivalente é apertar `R`) |
-| 🧨 Socar a carga | 1,5 s | os dois |
-| 🎯 Reencontrar o alvo com a peça | variável | o inimigo — a peça dele gira a 29°/s |
+| 🛞 The carriage runs back to its stop | 0.69 s | **both** — it belongs to the gun, not to whoever serves it |
+| 🫱 Drop the handspike and fetch the ball | 0.11–0.60 s | the enemy (your equivalent is pressing `R`) |
+| 🧨 Ram the charge home | 1.5 s | both |
+| 🎯 Find the target again with the gun | variable | the enemy — its gun traverses at 29°/s |
 
-A terceira linha é a que mudou o duelo. **O inimigo não aponta enquanto soca a bala**:
-quando o serviço acaba, você já andou, e a peça tem de reencontrar você. Manobrar
-durante a recarga dele passou a custar caro **para ele**.
+The third row is the one that changed the duel. **The enemy does not aim while it
+rams the ball home**: by the time the service is over, you have moved, and the gun has
+to find you again. Maneuvering during its reload started costing **it** dearly.
 
-Medido depois: o intervalo mediano subiu para 2,37 s e o *mínimo* para 2,22 s — que é,
-cravado, o mesmo ciclo que você consegue no canhão apertando `R` no estrondo do próprio
-tiro. E o máximo deixou de ser igual ao mínimo: agora há tiros que demoram cinco, oito,
-dez segundos, porque o alvo saiu do setor no meio do serviço. O ritmo virou irregular
-por construção, que é o que esta seção sempre prometeu.
+Measured afterwards: the median interval went up to 2.37 s and the *minimum* to
+2.22 s — which is, to the tick, the same cycle you get on your gun by pressing `R` in
+the bang of your own shot. And the maximum stopped equalling the minimum: now there
+are shots that take five, eight, ten seconds, because the target left the arc in the
+middle of the service. The rhythm became irregular by construction, which is what this
+section always promised.
 
-> 🎮 Apertar `R` no instante do tiro **não** é desperdiçado: o comando entra em fila e o
-> trabalho começa sozinho quando a carreta assenta. Você não é punido por ser rápido.
+> 🎮 Pressing `R` at the instant of the shot is **not** wasted: the command queues and
+> the work starts by itself when the carriage settles. You are not punished for being
+> quick.
 
-### A tática nasce do batente da carreta
+### Tactics come from the carriage stop
 
-O canhão só gira **±26°** em torno do través. O setor de tiro de cada bordo é a faixa
-de 64° a 116° de marcação — ou seja, **manter você sob fogo é trabalho do timão dele**,
-não da pontaria. A conta que faz isso é uma linha:
+The gun only traverses **±26°** around the beam. Each side's firing arc is the band
+from 64° to 116° of bearing — which means **keeping you under fire is its helm's job**,
+not its gunner's. The arithmetic that does it is one line:
 
 ```
-β = 90° − k · (distância − distância_de_combate)
+β = 90° − k · (distance − combat_distance)
 ```
 
-Longe, `β` cai e a proa dele vira para você: fecha distância. Perto, `β` passa de 90°
-e ele abre. No ponto certo, `β` = 90° e ele fica de través com as duas peças em
-batalha. Um controlador proporcional disfarçado de manobra naval — e o que se vê na
-tela é um capitão circulando você.
+Far away, `β` drops and its bow turns toward you: it closes. Close in, `β` goes past
+90° and it opens out. At the right spot, `β` = 90° and it sits beam-on with both guns
+bearing. A proportional controller disguised as a naval maneuvere — and what you see
+on screen is a captain circling you.
 
-### O artilheiro espera o balanço
+### The gunner waits for the roll
 
-A conversão "onde acertar → que ângulos da carreta" é refeita **a cada passo de
-física**, com a atitude do casco daquele instante. Enquanto o navio caturra, os
-ângulos que acertam passeiam; a peça, presa ao convés, não acompanha. O tiro só sai
-quando os dois coincidem.
+The "where to hit → which carriage angles" conversion is redone **every physics step**,
+with the hull's attitude at that instant. While the ship pitches, the angles that hit
+wander; the gun, fixed to the deck, does not follow. The shot only goes off when the
+two coincide.
 
-O resultado emergente é o que a artilharia naval sempre fez: **atira-se no alto do
-balanço**. Ninguém programou essa regra — ela cai da geometria. E é ela que dá ritmo
-ao duelo: o inimigo não cospe fogo, ele espera a onda.
+The emergent result is what naval gunnery always did: **you shoot at the top of the
+roll**. Nobody programmed that rule — it falls out of the geometry. And it is what
+gives the duel its rhythm: the enemy does not spit fire, it waits for the wave.
 
-### 🕳️ Ele não conserta tudo — e é por isso que dá para afundá-lo
+### 🕳️ It does not fix everything — and that is why it can be sunk
 
-O outro lado da mesma medição. O marujo inimigo escolhia o rombo de maior vazão e **já
-começava a pregar**: sem caminhar até ele, sem buscar a tábua, sem procurar no escuro.
-Oito rombos abertos na linha d'água viravam casco estanque em **25 segundos**, em
-qualquer dificuldade. Você não estava enfrentando um adversário com um par de mãos.
-Estava enfrentando um estaleiro.
+The other side of the same measurement. The enemy deckhand picked the breach with the
+highest inflow and **started nailing right away**: no walking to it, no fetching a
+plank, no searching in the dark. Eight breaches open at the waterline became a
+watertight hull in **25 seconds**, at any difficulty. You were not up against an
+opponent with one pair of hands. You were up against a shipyard.
 
-Quatro coisas mudaram, e nenhuma delas é o bot ficar burro:
+Four things changed, and none of them is the bot getting dumber:
 
-- 🚶 **O porão tem dezesseis metros, e ele os anda.** Cada tábua vem da pilha ao pé do
-  lance, e de lá até o buraco. A 1,15 m/s — o passo curto de quem anda curvado num
-  pé-direito de 1,85 m com água pela canela — um rombo na proa custa perto de nove
-  segundos antes da primeira martelada.
-- 🎲 **Ele erra o buraco.** Ninguém tem relatório de vazão por furo: o que ele tem é um
-  porão escuro com vários esguichando ao mesmo tempo, e ele vai no que chama mais a
-  atenção. O sorteio é ponderado pela vazão, e a perícia é o expoente — o Legend acha o
-  pior furo quase sempre, o Deckhand gasta tábua em rombo de amurada com frequência.
-- ⏱️ **O turno acaba e ele sobe.** Ele entrega 8 a 14 segundos de porão e volta para a
-  peça **com o casco no estado em que estiver**, porque a briga está lá em cima. Não é
-  desatenção: é a aposta de afundar você primeiro — a mesma que você faz toda vez que
-  decide dar mais um tiro em vez de descer.
-- 🪣 **E ele não seca o porão.** A bomba é a mesma dos dois lados e tira os mesmos
-  750 L/s — o que mudou é quanto tempo alguém fica nela. Cada capitão tem um nível de
-  água que aceita levar de volta para o combate (24% / 15% / 8%), larga a alavanca ali
-  e sobe. **É isso que faz o estrago acumular:** antes, o casco dele voltava a ser novo
-  entre uma salva e outra, e a água que você tinha posto lá dentro sumia sozinha. Hoje
-  a sua próxima salva começa de onde a anterior parou.
+- 🚶 **The hold is sixteen meters long, and it walks them.** Every plank comes from
+  the pile at the foot of the stair, and from there to the hole. At 1.15 m/s — the
+  short stride of someone stooped under a 1.85 m headroom with water up to their
+  shins — a breach in the bow costs close to nine seconds before the first hammer
+  blow.
+- 🎲 **It picks the wrong hole.** Nobody gets a per-hole inflow report: what it has is
+  a dark hold with several of them spouting at once, and it goes for whatever draws
+  the most attention. The draw is weighted by inflow, and skill is the exponent — the
+  Legend finds the worst hole almost always, the Deckhand regularly spends a plank on
+  a bulwark breach.
+- ⏱️ **The shift ends and up it goes.** It gives 8 to 14 seconds of hold work and goes
+  back to the gun **with the hull in whatever state it is in**, because the fight is
+  up there. That is not carelessness: it is the bet on sinking you first — the same
+  one you make every time you decide to take one more shot instead of going below.
+- 🪣 **And it does not dry the hold.** The pump is the same on both sides and moves the
+  same 750 L/s — what changed is how long somebody stays on it. Each captain has a
+  water level it accepts taking back into the fight (24% / 15% / 8%), lets go of the
+  handle there and goes up. **That is what makes damage accumulate:** before, its hull
+  went back to being new between one salvo and the next, and the water you had put in
+  there vanished on its own. Today your next salvo starts where the previous one left
+  off.
 
-A exceção é o que mantém o bot esperto: com o porão passando de 50% o capitão já rompeu
-contato, e aí não há turno que valha — o marujo fica embaixo até o casco fechar. Um
-inimigo que subisse para a peça com o porão pela metade não seria mais difícil, seria
-só suicida.
+The exception is what keeps the bot sharp: with the hold past 50% the captain has
+already broken contact, and then no shift is worth it — the deckhand stays below until
+the hull is closed. An enemy that went up to the gun with the hold half full would not
+be harder, it would just be suicidal.
 
-> 🧮 O nível que ele aceita é **o mesmo número** que o traz de volta ao combate, e não
-> dois. Houve dois — um piso de bomba e um limiar de "voltar a brigar" — e eles brigaram
-> exatamente como se esperaria: com o piso acima do limiar, o marujo largava a alavanca
-> num porão que o capitão ainda considerava crítico, e o navio fugia para sempre
-> bombeando nada e atirando nada. Uma pergunta, um número.
+> 🧮 The level it accepts is **the same number** that brings it back to the fight, and
+> not two. There were two — a pump floor and a "back to fighting" threshold — and they
+> fought exactly as you would expect: with the floor above the threshold, the deckhand
+> let go of the handle in a hold the captain still considered critical, and the ship
+> fled forever, pumping nothing and shooting nothing. One question, one number.
 
-**O que isso vale na prática**, medindo contra um jogador sintético que varre o costado
-a uma taxa constante — três duelos por célula, com o estado do mar deslocado entre eles:
+**What that is worth in practice**, measured against a synthetic player who sweeps the
+hull side at a constant rate — three duels per cell, with the sea state offset between
+them:
 
-| Rombos que você abre | 🪣 Deckhand | ⚔️ Corsair | 💀 Legend |
+| Breaches you open | 🪣 Deckhand | ⚔️ Corsair | 💀 Legend |
 |---|---|---|---|
-| 2 / min | afunda em 1 de 3 (4:31) | aguenta (pico 74–79%) | **ela te afunda** em 2 de 3 |
-| 3 / min | **afunda** 3:49 | **afunda** 4:07 | **afunda** em 2 de 3 (4:21) |
-| 4 / min | **afunda** 3:21 | **afunda** 3:23 | **afunda** 3:43 |
+| 2 / min | sinks in 1 of 3 (4:31) | holds out (peak 74–79%) | **it sinks you** in 2 of 3 |
+| 3 / min | **sinks** 3:49 | **sinks** 4:07 | **sinks** in 2 of 3 (4:21) |
+| 4 / min | **sinks** 3:21 | **sinks** 3:23 | **sinks** 3:43 |
 
-A fronteira fica em **três rombos por minuto**. Abaixo dela você não faz dano suficiente
-e a Legend te leva ao fundo primeiro; nela você ganha na maioria dos duelos; acima,
-ganha sempre. É a forma que se quer de uma curva de dificuldade — e note que ela existe
-por causa da bomba: com o inimigo secando o porão entre as salvas, nenhuma dessas linhas
-terminava.
+The boundary sits at **three breaches per minute**. Below it you do not do enough
+damage and the Legend takes you down first; at it you win most duels; above it, you
+always win. That is the shape you want from a difficulty curve — and note that it
+exists because of the pump: with the enemy drying its hold between salvos, none of
+those rows ended.
 
-E ela depende de *como* você atira: os números acima são de fogo varrido pelo costado.
-Martelando sempre o meio-navio, a Legend aguenta uma taxa a mais — não porque o dano
-seja menor (não é mais, ver acima), mas porque o marujo dela **caminha menos**: com
-todos os buracos no mesmo pedaço de porão, ele fecha um atrás do outro sem atravessar o
-casco. Varrer o costado obriga o inimigo a correr o porão inteiro, e é assim que a
-doutrina de artilharia naval passa a valer alguma coisa neste jogo — por logística, e
-não por contabilidade de rombos.
+And it depends on *how* you shoot: the numbers above are for fire swept along the hull
+side. Hammering amidships every time, the Legend withstands one rate step more — not
+because the damage is smaller (it is not, see above), but because its deckhand **walks
+less**: with all the holes in the same stretch of hold, it closes them one after
+another without crossing the ship. Sweeping the hull side forces the enemy to run the
+whole hold, and that is how naval gunnery doctrine comes to be worth something in this
+game — through logistics, and not through breach bookkeeping.
 
-E o casco dele passa o combate com **2 a 5 rombos abertos** e o porão nunca abaixo do
-piso dele — você *vê* que está ganhando, na água que fica e no fogo que para.
+And its hull spends the fight with **2 to 5 open breaches** and the hold never below
+its floor — you *see* that you are winning, in the water that stays and the fire that
+stops.
 
-> ⚠️ As células com "2 de 3" não são ruído a arredondar: são o formato certo de uma
-> fronteira. Uma linha em que o resultado depende da onda que passou é exatamente onde a
-> habilidade do jogador começa a pesar mais que a tabela.
+> ⚠️ The cells reading "2 of 3" are not noise to be rounded away: they are the right
+> shape for a boundary. A row where the outcome depends on the wave that just passed is
+> exactly where the player's skill starts to weigh more than the table.
 
-### Os três capitães
+### The three captains
 
-A dificuldade mexe em **perícia, nunca em física ou tripulação**. Os três têm o mesmo
-casco, o mesmo pano, os mesmos dois canhões e os mesmos dois homens.
+Difficulty changes **skill, never physics or crew**. All three have the same hull, the
+same canvas, the same two guns and the same two men.
 
 | | 🪣 Deckhand | ⚔️ Corsair | 💀 Legend |
 |---|---|---|---|
-| Erro de pontaria (a 80 m) | ±4,0 m | ±1,4 m | ±0,56 m |
-| Liderança do alvo | 55% | 90% | 100% |
-| Reação a mudança de situação | 1,2 s | 0,55 s | 0,22 s |
-| Abre fogo a até | 75 m | 115 m | 155 m |
-| Larga o canhão com o porão em | 30% | 18% | 12% |
-| **Água que aceita deixar no porão** | 24% | 15% | 8% |
-| Turno de porão por descida | 8 s | 11 s | 14 s |
-| Deve à peça antes de descer | 30 s | 22 s | 18 s |
-| Acerta o rombo certo | raramente | quase sempre | sempre |
-| **Tiros que acertam o seu casco** | 10% | 12% | 32% |
-| Balas gastas para afundar um alvo fundeado | ~91 | ~80 | ~84 |
-| **Afunda um alvo fundeado em** | 6,2 min | 4,5 min | 4,3 min |
+| Aiming error (at 80 m) | ±4.0 m | ±1.4 m | ±0.56 m |
+| Target lead | 55% | 90% | 100% |
+| Reaction to a change of situation | 1.2 s | 0.55 s | 0.22 s |
+| Opens fire out to | 75 m | 115 m | 155 m |
+| Leaves the gun with the hold at | 30% | 18% | 12% |
+| **Water it accepts leaving in the hold** | 24% | 15% | 8% |
+| Hold shift per trip below | 8 s | 11 s | 14 s |
+| Owes the gun before going below | 30 s | 22 s | 18 s |
+| Picks the right breach | rarely | almost always | always |
+| **Shots that hit your hull** | 10% | 12% | 32% |
+| Balls spent to sink an anchored target | ~91 | ~80 | ~84 |
+| **Sinks an anchored target in** | 6.2 min | 4.5 min | 4.3 min |
 
-As três últimas linhas são **medidas**, não estimadas: mediana de quatro duelos contra
-um alvo fundeado que não conserta nada, com o estado do mar deslocado entre eles — sem
-esse deslocamento as quatro medições são a mesma, e a dispersão entre repetições chega a
-25%. Precisa ser fundeado: duas chalupas idênticas numa caça de popa empatam por física,
-e um alvo à deriva mediria perseguição em vez de pontaria. Nenhum dos três chega perto de
-esvaziar o paiol de 160 fazendo isso, que é o ponto da afinação daquele número.
+The last three rows are **measured**, not estimated: the median of four duels against
+an anchored target that repairs nothing, with the sea state offset between them —
+without that offset the four measurements are the same one, and the spread between
+repeats reaches 25%. It has to be anchored: two identical sloops in a stern chase draw
+by physics, and a drifting target would measure pursuit instead of gunnery. None of
+the three comes close to emptying the 160-ball magazine doing this, which is the point
+of that number's tuning.
 
-> 🎯 **A taxa de acerto é a única coisa que separa os três em dano.** Cada acerto abre um
-> rombo, e é o mesmo rombo nos três níveis — não há multiplicador de dano escondido na
-> dificuldade, e nunca houve. O Legend machuca mais porque acerta três vezes mais, e não
-> porque a bala dele fura mais fundo.
+> 🎯 **Hit rate is the only thing that separates the three in damage.** Every hit opens
+> a breach, and it is the same breach at all three levels — there is no hidden damage
+> multiplier in the difficulty, and there never was. The Legend hurts more because it
+> hits three times as often, not because its ball bores deeper.
 
-> 🧠 O Deckhand não erra por sorteio: ele erra **atrasado e curto**, que é como gente
-> nova erra de verdade num canhão.
+> 🧠 The Deckhand does not miss by dice roll: it misses **late and short**, which is how
+> a new hand really misses on a gun.
 
 ---
 
-## 🏴‍☠️ O corpo a bordo
+## 🏴‍☠️ The body aboard
 
-O jogador tem corpo, e **enxerga o próprio corpo**: olhar para baixo mostra os
-ombros, o casaco e os pés se revezando no convés; a escada mostra as mãos caindo
-nas barras. E é o mesmo corpo que o adversário veste do outro lado do fio — ver
-[O adversário tem corpo](#-o-adversário-tem-corpo), onde o defeito clássico
-aparece: o pé patinando no convés.
+The player has a body, and **sees their own body**: looking down shows the shoulders,
+the coat and the feet taking turns on the deck; the ladder shows the hands landing on
+the rungs. And it is the same body the opponent wears on the other side of the wire —
+see [the opponent has a body](#-the-opponent-has-a-body), where the classic defect
+shows up: the foot skating on the deck.
 
-Dez clipes, todos gerados por script no Blender e medidos, não afinados no olho:
+Ten clips, all generated by script in Blender and measured, not eyeballed:
 
-| Clipe | Indexado por | Detalhe |
+| Clip | Indexed by | Detail |
 |---|---|---|
-| `Idle` | tempo | 9,6 s: três respirações contra dois balanços de peso, primos entre si |
-| `Walk` | distância (1,65 m/s nativos) | apoio em 58% do ciclo, sempre um pé no chão |
-| `Run` | distância (3,67 m/s nativos) | apoio em 31%, com **fase aérea** de 6 quadros |
-| `JumpAir` | **velocidade vertical** | 24 quadros: pernas recolhem na subida, estendem na descida |
-| `JumpLand` | tempo (0,47 s) | 14 quadros de amortecimento, com a força vinda do impacto |
-| `ClimbUp` | **altura vencida** | um ciclo = dois enfrechates; descer é o mesmo clipe ao contrário |
-| `Helm` | **ângulo da roda** | um ciclo = um punho (45°); bombordo é o mesmo clipe ao contrário |
-| `Carry` | tempo (2,4 s) | a tábua atravessada no corpo, uma mão em cada ponta |
-| `Float` | tempo (7,0 s) | boiando: eggbeater nas pernas, sculling nos braços, sem contato nenhum |
-| `Swim` | **distância** (1,32 m/s nativos) | crawl de cabeça erguida — o rosto não entra na água |
+| `Idle` | time | 9.6 s: three breaths against two weight shifts, coprime with each other |
+| `Walk` | distance (1.65 m/s native) | stance over 58% of the cycle, always one foot down |
+| `Run` | distance (3.67 m/s native) | stance over 31%, with a **flight phase** of 6 frames |
+| `JumpAir` | **vertical velocity** | 24 frames: legs tuck on the way up, extend on the way down |
+| `JumpLand` | time (0.47 s) | 14 frames of absorption, with the force coming from the impact |
+| `ClimbUp` | **height gained** | one cycle = two ratlines; going down is the same clip in reverse |
+| `Helm` | **wheel angle** | one cycle = one spoke handle (45°); to port is the same clip in reverse |
+| `Carry` | time (2.4 s) | the plank held across the body, one hand at each end |
+| `Float` | time (7.0 s) | treading water: eggbeater with the legs, sculling with the arms, no contact at all |
+| `Swim` | **distance** (1.32 m/s native) | head-up crawl — the face does not go into the water |
 
-### Um relógio só: o passo que se vê e o que se sente
+### One clock: the stride you see and the one you feel
 
-Corpo e câmera saem da **mesma fase de passada** (`GaitClock`, em
-`player/Locomotion.ts`). Ela não avança pelo tempo, avança pela distância:
+Body and camera come out of the **same stride phase** (`GaitClock`, in
+`player/Locomotion.ts`). It does not advance with time, it advances with distance:
 
 ```
-fase += (velocidade × dt) / distância_do_ciclo
+phase += (speed × dt) / cycle_distance
 ```
 
-Disso cai a propriedade que sustenta tudo: **uma passada cobre exatamente a
-distância do ciclo**, em qualquer velocidade e com qualquer mistura — que é o
-mesmo que dizer que o pé fica parado no convés durante o apoio. É o que
-`tests/locomotion.ts` mede, e o erro dá **zero**.
+Out of that falls the property that holds everything up: **one stride covers exactly
+the cycle distance**, at any speed and with any blend — which is the same as saying
+that the foot stays planted on the deck through the stance. That is what
+`tests/locomotion.ts` measures, and the error comes out **zero**.
 
-Os dois clipes são postos no mesmo ponto da passada quadro a quadro; não há
-`timeScale`. Dois clipes de durações diferentes rodando por conta própria se
-afastam alguns milissegundos por ciclo, e em um minuto o contato de um cai no
-meio do apoio do outro. Na velocidade de caminhada do jogo (2,8 m/s) a mistura
-fica em **57% corrida**, medido em execução.
+The two clips are put at the same point of the stride frame by frame; there is no
+`timeScale`. Two clips of different durations running on their own drift a few
+milliseconds apart per cycle, and within a minute one's contact lands in the middle of
+the other's stance. At the game's walking speed (2.8 m/s) the blend sits at **57%
+run**, measured at runtime.
 
-> [!note] O balanço da câmera tinha um relógio próprio
-> Era `3.4 + velocidade × 1.15`, inventado quando o jogo era só primeira pessoa e
-> não havia corpo para discordar. Com o corpo em cena, o pé tocava o convés num
-> instante e o solavanco acontecia noutro. Agora o balanço lê a mesma curva
-> vertical que levanta o quadril do personagem — inclusive a inversão de fase
-> entre andar e correr.
+> [!note] The camera's bob had a clock of its own
+> It was `3.4 + speed × 1.15`, invented when the game was first-person only and there
+> was no body to disagree with it. With the body in the scene, the foot touched the deck
+> at one instant and the jolt happened at another. Now the bob reads the same vertical
+> curve that lifts the character's hips — including the phase inversion between walking
+> and running.
 
-E depois tinha uma **amplitude** própria, que durou até o corpo virar coisa de se
-vestir. Eram 4,2 cm afinados no olho contra os 2,1 cm que o clipe de caminhada
-levanta de verdade, mais 50° de atraso que o amortecedor introduzia — de fora,
-tempero; de dentro, o tronco afundando e emergindo 4 cm a cada passo, a um palmo
-do olho. Hoje a câmera pede a altura em metros ao próprio clipe.
+And then it had an **amplitude** of its own, which lasted until the body became
+something you wear. It was 4.2 cm eyeballed against the 2.1 cm the walk clip actually
+lifts, plus 50° of lag introduced by the damper — from outside, seasoning; from inside,
+the torso sinking and surfacing 4 cm every step, a hand's width from the eye. Today the
+camera asks the clip itself for the height in meters.
 
-### 🙋 Ver o corpo por dentro
+### 🙋 Seeing the body from inside
 
-Três coisas separam "ter corpo" de "vestir corpo", e nenhuma é a óbvia:
+Three things separate "having a body" from "wearing a body", and none of them is the
+obvious one:
 
-| Problema | O que se fez |
+| Problem | What was done |
 |---|---|
-| A câmera nasce dentro do crânio, e o material é `DoubleSide` | `discard` no fragmento pelo **peso de skinning** nos ossos da cabeça (`shaders/headClip.ts`). Encolher o osso não serve: pescoço e gola têm peso misto e seriam *arrastados* para dentro. Um plano de recorte também não: é infinito, e amputaria as mãos na escada. |
-| O olho fica no eixo da coluna, e o de gente fica à frente dele | O **corpo** recua 11 cm, não a câmera. O olho é origem de alcance de interação, do ouvido e da mira do canhão — mexer nele para acertar um enquadramento mudaria distâncias de jogo. |
-| O corpo aponta para onde anda, e a câmera para onde se olha | Em primeira pessoa os dois se separam: pernas no movimento, tronco no olhar, e a torção repartida por `spine_01/02/03` nos mesmos pesos que o Blender usa. Andar de ré dobra as pernas e toca a passada **ao contrário** — com histerese, senão o strafe de 90° faz o corpo girar a cada quadro. |
+| The camera is born inside the skull, and the material is `DoubleSide` | `discard` in the fragment shader by **skinning weight** on the head bones (`shaders/headClip.ts`). Shrinking the bone does not do it: neck and collar have mixed weights and would be *dragged* inward. Neither does a clipping plane: it is infinite, and would amputate the hands on the ladder. |
+| The eye sits on the spine's axis, and a person's sits ahead of it | The **body** moves back 11 cm, not the camera. The eye is the origin for interaction reach, for hearing and for the gun's aim — moving it to fix a framing problem would change gameplay distances. |
+| The body points where it walks, and the camera where you look | In first person the two separate: legs on the movement, torso on the gaze, and the twist shared across `spine_01/02/03` at the same weights Blender uses. Walking backwards bends the legs and plays the stride **in reverse** — with hysteresis, because otherwise a 90° strafe spins the body every frame. |
 
-Um efeito colateral virou ganho: o mapa de sombras não herda o recorte, então o
-pirata projeta a silhueta **inteira, com chapéu**, enquanto a tela mostra o corpo
-sem cabeça. Antes o jogador em primeira pessoa não tinha sombra nenhuma.
+One side effect turned into a gain: the shadow map does not inherit the clipping, so
+the pirate casts the **whole** silhouette, hat included, while the screen shows a body
+with no head. Before, a first-person player had no shadow at all.
 
-Visto de fora — a câmera livre, o multiplayer que vem —, nada disso vale: ali o
-corpo aponta para **onde anda**, porque sem clipes de andar de lado e de ré um
-corpo preso ao olhar desliza de costas, o *moonwalk*.
+Seen from outside — the free camera, the multiplayer that came later — none of that
+applies: there the body points **where it walks**, because without side-step and
+backward clips a body tied to the gaze slides backwards, the *moonwalk*.
 
-> [!warning] O canhão é o único lugar onde o corpo some
-> `applyCannonView` manda a câmera para 1,35 m atrás da culatra e os pés ficam
-> onde estavam ao apertar o botão. A regra que resolve isso em uma linha é *o
-> corpo aparece quando a câmera está nos olhos dele* — e o preço é a sombra
-> desaparecer do convés enquanto se está no canhão.
+> [!warning] The gun is the only place where the body disappears
+> `applyCannonView` sends the camera 1.35 m behind the breech and the feet stay where
+> they were when the button was pressed. The rule that settles this in one line is *the
+> body shows up when the camera is at its eyes* — and the price is the shadow vanishing
+> from the deck while you are on the gun.
 
-### O pulo não é um filme, é uma leitura da física
+### The jump is not a film, it is a reading of the physics
 
-O pulo do jogo é **instantâneo**: no mesmo quadro em que o `Espaço` desce, a
-velocidade vertical já vale 3,3 m/s e os pés já saíram do convés. Não existe
-quadro nenhum entre a intenção e a decolagem — e é por isso que **não há clipe de
-preparo**. Antecipação é um empréstimo de tempo que este motor não faz; o impulso
-que não cabe antes aparece depois, na perna que termina de estender.
+The game's jump is **instantaneous**: on the same frame `Space` goes down, the vertical
+velocity is already 3.3 m/s and the feet have already left the deck. There is no frame
+at all between the intent and the take-off — and that is why there is **no wind-up
+clip**. Anticipation is a loan of time this engine does not take out; the impulse that
+does not fit before shows up afterwards, in the leg that finishes extending.
 
-O clipe de ar não é *tocado*, é **lido**:
+The air clip is not *played*, it is **read**:
 
 ```
-faseAr = clamp(0.5 × (1 − vy / 3.3), 0, 1)
+airPhase = clamp(0.5 × (1 − vy / 3.3), 0, 1)
 ```
 
-Fase 0 é a decolagem, 0,5 o ápice, 1 a queda na mesma velocidade com que se
-subiu. A pose sai da velocidade vertical, então ela **não tem como discordar da
-física**. E o caso difícil cai de graça: um clipe de duração fixa aterrissaria no
-meio do ápice num pulinho e daria três voltas numa queda do mastro. Este satura
-sozinho e passa a queda inteira no quadro final, pernas já estendidas para
-receber o chão.
+Phase 0 is the take-off, 0.5 the apex, 1 the fall at the same speed you went up with.
+The pose comes out of the vertical velocity, so it **has no way of disagreeing with the
+physics**. And the hard case falls out for free: a clip of fixed duration would land in
+the middle of the apex on a little hop and go round three times on a fall from the mast.
+This one saturates on its own and spends the whole fall on the final frame, legs already
+extended to take the ground.
 
-O pouso é o contrário — roda no tempo, porque não tem grandeza física de onde ser
-lido —, mas a **força** dele vem da velocidade de impacto: 3,3 m/s (o pulo cheio)
-dão peso 1, e abaixo de 1,0 m/s o pé só encostou e não vale mostrar pouso nenhum.
-Tropeçar num degrau de 4 cm não dobra os joelhos do personagem.
+The landing is the opposite — it runs on time, because it has no physical quantity to be
+read from — but its **force** comes from the impact speed: 3.3 m/s (the full jump) gives
+weight 1, and below 1.0 m/s the foot merely touched and no landing is worth showing.
+Tripping over a 4 cm step does not buckle the character's knees.
 
-| Medido no jogo | Valor |
+| Measured in game | Value |
 |---|---|
-| Tempo de voo | 0,66 s (0,673 s na teoria) |
-| Altura do ápice | 0,545 m |
-| Fase do clipe no ápice | 0,494 |
-| Força do pouso, pulo cheio | 0,86 |
-| Soma dos pesos, em todo quadro | **1,0000** |
+| Time of flight | 0.66 s (0.673 s in theory) |
+| Apex height | 0.545 m |
+| Clip phase at the apex | 0.494 |
+| Landing force, full jump | 0.86 |
+| Sum of the weights, every frame | **1.0000** |
 
-Essa última linha é a que mais importa: os pesos dos cinco clipes têm de somar 1
-em todo quadro, senão o Three preenche o que falta com a pose de repouso do rig —
-a T-pose, de braços abertos. Ar e pouso nunca se sobrepõem (pular de novo cancela
-o pouso), e o que eles não ocupam é exatamente o que sobra para a locomoção.
+That last row is the one that matters most: the five clips' weights have to sum to 1 on
+every frame, or Three fills the gap with the rig's rest pose — the T-pose, arms out. Air
+and landing never overlap (jumping again cancels the landing), and what they do not take
+up is exactly what is left for locomotion.
 
-> [!note] No ar ninguém torce o corpo
-> O rumo do corpo congela na decolagem. Sem isso a locomoção se apaga durante o
-> voo, o alvo do rumo cai de volta para a direção do olhar, e quem pula de lado vê
-> o personagem girar no meio do salto.
+> [!note] Nobody twists their body in mid-air
+> The body's heading freezes at take-off. Without that, locomotion fades out during the
+> flight, the heading target falls back to the gaze direction, and anyone jumping
+> sideways sees the character spin mid-leap.
 
-Sair do chão por outro motivo que não a física — agarrar a escada do mastro,
-assumir o timão — usa um caminho separado que apaga o pulo **sem** disparar
-pouso. Do contrário o personagem aterrissaria no ar, agarrado a uma escada a nove
-metros do convés.
+Leaving the ground for a reason other than physics — grabbing the mast ladder, taking the
+helm — uses a separate path that clears the jump **without** triggering a landing.
+Otherwise the character would land in mid-air, hanging off a ladder nine meters above the
+deck.
 
-### 🪜 A escada: a mão cai na barra que está desenhada
+### 🪜 The ladder: the hand lands on the rung that is drawn
 
-A escalada é a passada de pé. A fase avança pela **altura vencida**, e enquanto a
-mão segura o degrau ele está parado no mundo — no referencial do corpo, desce numa
-reta na velocidade exata da subida. Quatro contatos em vez de um, e desta vez com
-a régua na tela: o degrau.
+Climbing is the stride, standing up. The phase advances with **height gained**, and while
+the hand holds a rung it is stationary in the world — in the body's frame it comes down
+in a straight line at exactly the speed of the climb. Four contacts instead of one, and
+this time with the ruler right there on screen: the rung.
 
-O que a torna diferente dos outros clipes é o casamento com a **geometria do
-navio**. A escada do mastro tem 30,33 cm entre enfrechates (o `round` do
-`ShipParts` arredonda o número de vãos, não o espaçamento), e o ciclo sobe
-exatamente dois deles. Como a subida por ciclo é múltiplo inteiro do espaçamento,
-alinhar a fase **uma vez**, no instante de agarrar, alinha para sempre:
+What makes it different from the other clips is how it marries the **ship's geometry**.
+The mast ladder has 30.33 cm between ratlines (the `round` in `ShipParts` rounds the
+number of gaps, not the spacing), and the cycle climbs exactly two of them. Since the
+rise per cycle is an integer multiple of the spacing, aligning the phase **once**, at the
+moment of grabbing, aligns it forever:
 
 ```
-fase = frac((pé + 0,33 − fundoDaEscada) / espaçamento) / 2
+phase = frac((foot + 0.33 − ladderBottom) / spacing) / 2
 ```
 
-Daí em diante fase e altura sobem juntas, e a mão continua caindo em cima da
-madeira pelos nove metros. Medido em execução, subindo do convés ao cesto: a sola
-fica a **0,0 cm** da grade de degraus e a palma a 1,4 cm da barra.
+From there on phase and height rise together, and the hand keeps landing on the wood for
+all nine meters. Measured at runtime, climbing from deck to crow's nest: the sole stays
+**0.0 cm** off the grid of rungs and the palm 1.4 cm off the rung.
 
-Descer é **o mesmo clipe com a fase andando para trás**. Não é economia: os
-contatos da descida têm de cair na mesma grade da subida, e um segundo clipe
-teria de reproduzir essa grade — qualquer divergência apareceria como mão
-atravessando barra.
+Going down is **the same clip with the phase running backwards**. That is not thrift: the
+contacts on the way down have to land on the same grid as the way up, and a second clip
+would have to reproduce that grid — any divergence would show up as a hand going through
+a rung.
 
-| Medido no jogo | Subida | Descida |
+| Measured in game | Up | Down |
 |---|---|---|
-| Percurso | convés → cesto (8,95 m) | cesto → convés |
-| Tempo a 1,2 m/s | 7,1 s | 6,9 s |
-| Sola fora da grade de degraus | **0,0 cm** | 0,0 cm |
-| Saída | de pé na gávea | de pé no convés |
+| Route | deck → crow's nest (8.95 m) | crow's nest → deck |
+| Time at 1.2 m/s | 7.1 s | 6.9 s |
+| Sole off the grid of rungs | **0.0 cm** | 0.0 cm |
+| Exit | standing on the platform | standing on the deck |
 
-> [!warning] `CLIMB_SPEED` era 2,1 m/s
-> Sete degraus por segundo. Sem corpo isso não incomodava ninguém; com o clipe
-> tocando, o pirata virava desenho animado. Agora são 1,2 m/s — quatro degraus por
-> segundo, ainda ágil. O clipe funciona em qualquer velocidade (a fase é dirigida
-> pela altura), então é só um número.
+> [!warning] `CLIMB_SPEED` was 2.1 m/s
+> Seven rungs a second. With no body that bothered nobody; with the clip playing, the
+> pirate turned into a cartoon. Now it is 1.2 m/s — four rungs a second, still nimble.
+> The clip works at any speed (the phase is driven by height), so it is just a number.
 
-![o pirata no convés](PirateCharacter/preview/in_game.png)
-![na escada do mastro](PirateCharacter/preview/climb_in_game.png)
+![on the mast ladder](PirateCharacter/preview/climb_in_game.png)
 
-### 🌊 Homem ao mar
+### 🌊 Man overboard
 
-O portaló é o único vão do falcaseio, e agora ele é uma **porta de verdade**. Até
-esta versão, sair do navio era geometricamente impossível: o resolvedor de casco
-grampeava o jogador dentro do costado em todo quadro, e o piso valia para qualquer
-posição. Abrir o vão exigiu as duas metades — o grampo deixa de valer na faixa de
-84 cm do portaló, e o chão passa a **acabar** na borda do convés. Quem passa por
-ali fez força para isso; quem raspa na amurada meio metro ao lado continua batendo
-em madeira.
+The gangway is the only gap in the bulwark, and now it is a **real door**. Up to
+this version, leaving the ship was geometrically impossible: the hull solver
+clamped the player inside the planking every frame, and the floor was valid at any
+position. Opening the gap took both halves — the clamp stops applying across the
+84 cm of the gangway, and the floor now **ends** at the edge of the deck. Anyone
+who goes through there meant to; anyone brushing the bulwark half a meter to the
+side still hits wood.
 
-Cair no mar **não tem punição nenhuma**: sem afogamento, sem morte, sem contagem
-regressiva. O navio segue navegando sozinho — e é justamente aí que dói, porque a
-chalupa em popa faz 2,6 m/s e ninguém nada a 1,4. Perder o convés é perder tempo e
-posição no duelo, que é a moeda cara desta briga. Não dá para mergulhar: o corpo
-fica amarrado à altura da onda por um amortecedor, e amortecedor não ultrapassa o
-alvo — **não afundar não é um grampo, é uma equação que não tem como afundar**.
+Falling into the sea carries **no punishment at all**: no drowning, no death, no
+countdown. The ship keeps sailing on its own — and that is exactly where it hurts,
+because a sloop running before the wind does 2.6 m/s and nobody swims at 1.4.
+Losing the deck means losing time and position in the duel, which is the expensive
+currency in this fight. There is no diving: the body is tied to the wave height by
+a damper, and a damper never overshoots its target — **not sinking is not a clamp,
+it is an equation with no way to sink**.
 
-Voltar a bordo tem dois caminhos. O primeiro é a **escada de embarque** (abaixo). O
-segundo abre cinco segundos depois do tombo: um prompt pede um cabo, a tela corta
-para o preto por dois segundos e o marujo reaparece a bordo. Cinco segundos é o que
-separa "escorreguei do portaló" de "perdi o navio" — e é o que impede a escada de
-virar enfeite.
+Getting back aboard has two routes. The first is the **boarding ladder** (below).
+The second opens five seconds after the fall: a prompt asks for a rope, the screen
+cuts to black for two seconds and the sailor reappears aboard. Five seconds is what
+separates "I slipped off the gangway" from "I lost the ship" — and it is what keeps
+the ladder from being decoration.
 
-| O que | Quanto | De onde sai o número |
+| What | How much | Where the number comes from |
 |---|---|---|
-| Velocidade de nado | 1,40 m/s | metade exata do passo (2,8 m/s) — e o crawl de cruzeiro de gente vestida em mar aberto |
-| Correr na água | não existe | sem fôlego no jogo, uma segunda velocidade de graça é uma tecla que ninguém solta |
-| Olho acima da linha d'água | 0,22 m | é dele que sai a profundidade dos pés (1,44 m), e não o contrário |
-| Queda do tombadilho ao mar | 0,60 s | os 1,74 m do tombadilho, pela gravidade |
-| Resgate liberado em | 5 s | 7 m de nado: dá para alcançar a escada quem caiu perto dela |
-| Tela preta | ~2 s | corte imediato, espera, e volta lenta — a volta é a única parte que se assiste |
-| Alcance da escada, da água | 1,50 m | um corpo de distância; mais apertado e a onda faria o prompt piscar |
-| Alcance do corpo em rede | ±128 m do navio | teto da quantização de posição local |
+| Swimming speed | 1.40 m/s | exactly half the stride (2.8 m/s) — and the cruising crawl of a clothed person in open water |
+| Running in water | does not exist | with no stamina in the game, a second speed for free is a key nobody ever lets go of |
+| Eye above the waterline | 0.22 m | it is what the feet's depth (1.44 m) comes from, not the other way round |
+| Fall from the quarterdeck to the sea | 0.60 s | the quarterdeck's 1.74 m, under gravity |
+| Rescue unlocked at | 5 s | 7 m of swimming: enough to reach the ladder if you fell near it |
+| Black screen | ~2 s | immediate cut, hold, then a slow return — the return is the only part you watch |
+| Ladder reach, from the water | 1.50 m | one body's distance; any tighter and the wave would make the prompt flicker |
+| Body reach over the network | ±128 m from the ship | ceiling of the local position quantization |
 
-> [!note] Os clipes de água têm o zero na linha d'água, não no chão
-> `Float` e `Swim` são os únicos cuja origem **não** fica sob os pés — o corpo é
-> repartido pela superfície, e é isso que faz o `verify()` de cada um poder garantir
-> que a cabeça está fora d'água. O runtime assenta essa origem 1,44 m acima dos pés
-> simulados, que é onde a linha d'água está no corpo: **não** os 1,32 m em que o
-> animador pôs os pés, porque os dois números medem coisas diferentes — 1,32 é onde
-> o queixo sobra 11,8 cm de água, e 1,44 é onde a **câmera** está, a 22 cm da
-> superfície por decisão de enquadramento. O deslocamento é linear no peso da
-> mistura, então a entrada e a saída da água interpolam em linha reta em vez de
-> saltar. Os pés desenhados param 12 cm acima dos simulados, a um metro e meio de
-> profundidade, num corpo reclinado: ninguém os vê.
+> [!note] The water clips have their zero at the waterline, not on the floor
+> `Float` and `Swim` are the only ones whose origin is **not** under the feet — the
+> body is split by the surface, and that is what lets each one's `verify()`
+> guarantee that the head is out of the water. The runtime seats that origin 1.44 m
+> above the simulated feet, which is where the waterline sits on the body: **not**
+> the 1.32 m where the animator put the feet, because the two numbers measure
+> different things — 1.32 is where the chin has 11.8 cm of water to spare, and 1.44
+> is where the **camera** is, 22 cm from the surface by a framing decision. The
+> offset is linear in the blend weight, so entering and leaving the water
+> interpolate in a straight line instead of jumping. The drawn feet stop 12 cm above
+> the simulated ones, a meter and a half down, on a reclining body: nobody sees them.
 
-### 🪜 A escada de embarque: subir é dela, descer é do portaló
+### 🪜 The boarding ladder: climbing is its job, going down is the gangway's
 
-Uma por bordo, na popa, no plano do timão — quem volta a bordo já chega ao posto. A
-divisão de trabalho é assimétrica de propósito: a escada só serve para **subir**;
-para descer, pula-se pelo portaló. Ela nasce 69 cm submersa (fundo o bastante para a
-cava de uma onda grande não deixar o nadador sem pegada) e morre no piso do
-tombadilho, sem nada acima da amurada.
+One per side, aft, in the plane of the helm — whoever comes back aboard arrives at
+the station already. The division of labor is asymmetric on purpose: the ladder is
+only for **climbing**; to get down, you jump through the gangway. It is born 69 cm
+submerged (deep enough that the trough of a big wave does not leave the swimmer
+without a grip) and dies at the quarterdeck floor, with nothing above the bulwark.
 
-Os oito vãos não são um número redondo: são `CLIMB_CLIP.rise / 2`, **exatos**, o que
-dá **4,0 ciclos** do `ClimbUp` de ponta a ponta — é isso que faz a mão cair na barra
-que está desenhada, e não ao lado dela. É a mesma amarra da escada do mastro, por um
-caminho diferente: lá o espaçamento saiu de arredondar o número de vãos numa altura
-fixa; aqui a profundidade era livre, então usa-se o espaçamento exato e a base cai
-onde cair.
+The eight gaps are not a round number: they are `CLIMB_CLIP.rise / 2`, **exactly**,
+which gives **4.0 cycles** of `ClimbUp` end to end — that is what makes the hand
+land on the rung that is drawn, and not beside it. It is the same tie as the mast
+ladder, reached by a different road: there the spacing came from rounding the
+number of gaps over a fixed height; here the depth was free, so the exact spacing
+is used and the foot of the ladder falls where it falls.
 
-| Medida | Valor | De onde sai |
+| Measurement | Value | Where it comes from |
 |---|---|---|
-| Estação | `t` = 0,106 (z = +6,30) | o plano do timão; vão livre nos dois bordos |
-| Barras | 9, a cada 30,33 cm | `CLIMB_CLIP.rise / 2`, exato |
-| Altura vencida | 2,43 m (−0,69 → +1,74) | 4,0 ciclos do clipe |
-| Inclinação | 14,11° (0,61 m de recuo) | aperto entre o bojo e a pose do clipe |
-| Folga ao costado | 4,00 cm no pior ponto | **resolvida**, não escolhida |
-| Vão do portaló | 84 × 65 cm | cabe o jogador (30 cm de raio) sem virar saída acidental |
-| Erro da mão na subida inteira | **0,0000 m** | medido ao longo de 2000 passos |
+| Station | `t` = 0.106 (z = +6.30) | the plane of the helm; clear passage on both sides |
+| Rungs | 9, every 30.33 cm | `CLIMB_CLIP.rise / 2`, exact |
+| Height gained | 2.43 m (−0.69 → +1.74) | 4.0 cycles of the clip |
+| Rake | 14.11° (0.61 m of standoff) | squeezed between the bilge and the clip's pose |
+| Clearance to the planking | 4.00 cm at the worst point | **solved for**, not chosen |
+| Gangway gap | 84 × 65 cm | fits the player (30 cm radius) without becoming an accidental exit |
+| Hand error over the whole climb | **0.0000 m** | measured over 2000 steps |
 
-> [!warning] A folga ao casco não se mede onde a escada está, e sim onde ela é mais larga
-> O primeiro número foi escolhido a mão — 8 cm, medidos no perfil do plano dos
-> degraus — e estava errado por um motivo que só aparece quando se trata a escada
-> como um objeto de 48 cm de largura em vez de um perfil: **a popa afina 26 cm por
-> metro de comprimento** nessa faixa, então entre os dois montantes o costado muda
-> 12,6 cm de meia boca. O montante de vante ficava **5,7 cm dentro do casco**, e com
-> ele a ponta de vante de três barras. O perfil anunciava 4,5 cm de folga enquanto a
-> peça inteira atravessava o costado.
+> [!warning] Clearance to the hull is not measured where the ladder is, but where it is widest
+> The first number was picked by hand — 8 cm, measured on the profile through the
+> plane of the rungs — and it was wrong for a reason that only shows up when you
+> treat the ladder as a 48 cm wide object instead of a profile: **the stern narrows
+> 26 cm per meter of length** in that stretch, so between the two stiles the
+> planking moves 12.6 cm of half-breadth. The forward stile ended up **5.7 cm inside
+> the hull**, and with it the forward end of three rungs. The profile announced
+> 4.5 cm of clearance while the whole piece went through the planking.
 >
-> Por isso o recuo deixou de ser escolhido: uma varredura resolve o menor valor que
-> mantém 4 cm de folga em **toda** a largura. Dá 17,7 cm — e daí a soleira, porque
-> senão sobrava um vão de 18 cm entre o último degrau e o convés.
+> That is why the standoff stopped being chosen: a sweep solves for the smallest
+> value that keeps 4 cm of clearance across the **whole** width. It comes out at
+> 17.7 cm — and hence the sill, because otherwise an 18 cm gap was left between the
+> last rung and the deck.
 
-> [!note] O corpo se inclina junto com a escada
-> O `ClimbUp` é um clipe de escada **a prumo**. Numa escada inclinada 14°, a barra
-> de cima deixa de estar exatamente acima da de baixo, e a mão do clipe erra a
-> madeira — com o erro **crescendo com a altura do alcance**, porque é um ângulo,
-> não um deslocamento. Inclinar o corpo o mesmo tanto devolve a geometria ao
-> referencial em que o clipe foi construído: relativo ao corpo, a barra volta a
-> ficar acima. É o mesmo tipo de acerto que o `align` faz na fase, um eixo adiante.
+> [!note] The body leans with the ladder
+> `ClimbUp` is a clip for a **vertical** ladder. On a ladder raked 14°, the rung
+> above stops being exactly above the one below, and the clip's hand misses the wood
+> — with the error **growing with the height of the reach**, because it is an angle,
+> not an offset. Leaning the body by the same amount gives the geometry back the
+> frame the clip was built in: relative to the body, the rung is above again. It is
+> the same kind of correction `align` makes to the phase, one axis over.
 
-A subida termina de pé na **soleira** do portaló, com o corpo a cavalo da junta
-entre a plataforma e o tombadilho. Não é desleixo: a soleira avança 28 cm além da
-borda do convés e o cilindro do jogador tem 30 cm de raio, então "inteiro em cima da
-tábua" não existe — e é exatamente assim que se transpõe a soleira de um portaló de
-verdade.
+The climb ends standing on the gangway's **sill**, with the body straddling the
+joint between the platform and the quarterdeck. That is not sloppiness: the sill
+sticks out 28 cm past the edge of the deck and the player's cylinder has a 30 cm
+radius, so "entirely on the plank" does not exist — and that is exactly how you
+step over the sill of a real gangway.
 
-### 🎡 O timão: o posto era enquadramento e virou anatomia
+### 🎡 The helm: the station was framing and became anatomy
 
-A roda é a régua mais limpa do projeto. Ela tem **oito punhos**, o curso vai de
-`MAX_WHEEL` para cada lado, e disso cai que a roda dá exatamente uma volta de
-batente a batente — oito punhos, uma vez cada. Um ciclo do clipe cobre um punho:
+The wheel is the cleanest ruler in the project. It has **eight spoke handles**, the
+travel runs `MAX_WHEEL` each way, and out of that falls the fact that the wheel
+turns exactly once from stop to stop — eight handles, once each. One cycle of the
+clip covers one handle:
 
 ```
-fase = frac(ânguloDaRoda / (π/4))
+phase = frac(wheelAngle / (π/4))
 ```
 
-E aqui não há nem o alinhamento que a escada precisa. A grade de barras da escada
-existe no navio e tem de ser encontrada uma vez (`ClimbClock.align`); a grade da
-roda **é** o próprio ângulo, periódica de nascença, então a fase cai certa com o
-leme a meio, todo carregado ou em qualquer lugar entre os dois. Girar para
-bombordo é o mesmo clipe com a fase recuando, pela mesma razão que descer é subir
-ao contrário: os contatos das duas guinadas têm de cair nos mesmos oito punhos.
+And here there is not even the alignment the ladder needs. The ladder's grid of
+rungs exists on the ship and has to be found once (`ClimbClock.align`); the wheel's
+grid **is** the angle itself, periodic from birth, so the phase falls right with the
+helm amidships, hard over, or anywhere in between. Turning to port is the same clip
+with the phase running backwards, for the same reason going down is climbing in
+reverse: the contacts of both turns have to land on the same eight handles.
 
-> [!warning] O posto do timoneiro estava 23 cm longe demais — e ninguém sabia
-> `HELM_STAND` ficava 85 cm a ré do plano da roda, e esses 85 cm foram escolhidos
-> por **enquadramento**, numa época em que o jogador não tinha corpo: o que se
-> julgava ali era quanto do navio cabia na tela. No dia em que o corpo chegou, a
-> mesma distância virou uma medida **anatômica** — e não fecha. O braço deste rig
-> mede 0,678 m do ombro à palma, e o vão era de 0,850 m: **faltavam 17 cm**, mais
-> os 11 cm de recuo que a primeira pessoa ainda soma.
+> [!warning] The helmsman's station was 23 cm too far away — and nobody knew
+> `HELM_STAND` sat 85 cm abaft the plane of the wheel, and those 85 cm were chosen
+> for **framing**, back when the player had no body: what was being judged there was
+> how much of the ship fit on screen. The day the body arrived, that same distance
+> became an **anatomical** measurement — and it does not add up. This rig's arm is
+> 0.678 m from shoulder to palm, and the gap was 0.850 m: **17 cm short**, plus the
+> 11 cm of setback that first person still adds on top.
 
-Havia duas saídas, e a diferença entre elas é o que se vê. Pagar os 17 cm com
-postura funciona — 15 cm de quadril avançado, 18° de tronco, 12° de clavícula —,
-e o resultado é honesto no pior sentido: um homem esticado sobre uma roda longe
-demais, com o braço a **91%** da extensão. Aproximar o posto para 62 cm sai mais
-barato e devolve um timoneiro **em pé**, cotovelo dobrado, braço a **86%** no pior
-quadro do ciclo. A variante esticada continua reconstruível no Blender
-(`_HelmIntact`), que é como se volta atrás.
+There were two ways out, and the difference between them is what you see. Paying
+the 17 cm with posture works — 15 cm of hip forward, 18° of torso, 12° of clavicle
+— and the result is honest in the worst sense: a man stretched over a wheel too far
+away, with the arm at **91%** of full extension. Bringing the station in to 62 cm is
+cheaper and gives back a helmsman **standing up**, elbow bent, arm at **86%** on the
+worst frame of the cycle. The stretched variant is still reproducible in Blender
+(`_HelmIntact`), which is how you back out of this.
 
-Os 0,62 são apertados dos dois lados: é o maior valor que segura os 86% e está a
-10 cm do menor que cabe — a face de ré do tambor do leme fica a 0,22 m do plano da
-roda, e o cilindro de colisão do jogador tem 0,30 m de raio. Foi esse cilindro que
-cobrou a segunda linha: com o obstáculo do timão em 0,5 de raio, **o posto passa a
-ficar dentro do próprio obstáculo**, e quem chegasse a pé era expelido do leme
-antes de conseguir assumi-lo. O raio virou `0,62 − 0,30 = 0,32`.
+The 0.62 is tight from both sides: it is the largest value that holds the 86% and it
+is 10 cm from the smallest one that fits — the after face of the rudder drum is
+0.22 m from the plane of the wheel, and the player's collision cylinder has a 0.30 m
+radius. It was that cylinder that charged the second line: with the helm's obstacle
+at a radius of 0.5, **the station ends up inside the obstacle itself**, and anyone
+walking up was pushed off the helm before they could take it. The radius became
+`0.62 − 0.30 = 0.32`.
 
-E duas coisas no corpo, sem as quais o clipe não vale nada:
+And two things in the body, without which the clip is worth nothing:
 
-| Sintoma | Causa | O que se fez |
+| Symptom | Cause | What was done |
 |---|---|---|
-| As mãos saem da roda quando o jogador olha para o lado | Os braços herdam `spine_03`, e em primeira pessoa o tronco vai para o olhar | O corpo trava de frente para a proa no timão, como já fazia na escada. O custo é o mesmo: ele deixa de acompanhar o olhar — troca barata onde as mãos estão ocupadas |
-| As mãos caem 11 cm aquém dos punhos | `FIRST_PERSON_SETBACK` recua o corpo no eixo do tronco, e ali o tronco aponta para a proa: o recuo **soma** ao vão | Recuo zerado no timão. Compensar no clipe não serve — é o mesmo clipe que o outro jogador vê de fora, onde não há recuo |
+| The hands leave the wheel when the player looks aside | The arms inherit `spine_03`, and in first person the torso goes with the gaze | The body locks facing the bow at the helm, as it already did on the ladder. The cost is the same: it stops following the gaze — a cheap trade where the hands are busy |
+| The hands land 11 cm short of the handles | `FIRST_PERSON_SETBACK` moves the body back along the torso's axis, and there the torso points at the bow: the setback **adds** to the gap | Setback zeroed at the helm. Compensating in the clip is no good — it is the same clip the other player sees from outside, where there is no setback |
 
-| Medido no jogo | Valor |
+| Measured in game | Value |
 |---|---|
-| Ciclo do clipe | 45° de roda (25 quadros a 30 fps) |
-| Curso completo da roda | 8 punhos, **8 ciclos exatos** |
-| Deriva da mão ao longo dos 360° | 0,27 mm |
-| Extensão de braço, pior quadro | 86% |
-| Soma dos pesos, com o timoneiro no leme | **1,0000** |
+| Clip cycle | 45° of wheel (25 frames at 30 fps) |
+| Full travel of the wheel | 8 handles, **8 exact cycles** |
+| Hand drift over the full 360° | 0.27 mm |
+| Arm extension, worst frame | 86% |
+| Sum of the weights, with the helmsman at the wheel | **1.0000** |
 
-![o timoneiro no jogo](PirateCharacter/preview/helm_in_game.png)
+![the helmsman in game](PirateCharacter/preview/helm_in_game.png)
 
-#### 🖐️ Três defeitos que só apareceram puxando o fio de um deles
+#### 🖐️ Three defects that only showed up by pulling on one of them
 
-Uma mão de cabeça para baixo, um corpo que andava aos trancos e um erro de meio
-grau que estava escondido atrás dos outros dois. Os três são o mesmo tipo de
-falha: **coisas que nenhuma medida do arquivo tinha como reclamar**, porque todas
-elas mediam *onde* as peças estavam e nenhuma media para onde estavam viradas.
+An upside-down hand, a body that moved in jerks, and a half-degree error that was
+hiding behind the other two. All three are the same kind of failure: **things no
+measurement in the file had any way to complain about**, because every one of them
+measured *where* the pieces were and none measured which way they were facing.
 
-**1. A mão direita saía invertida.** Uma mão não é um plano, é um objeto
-*quiral*: fixados a direção dos dedos e a normal da palma, o polegar não é mais
-escolha — ele cai em `dedos × palma` de um lado e no oposto do outro. O arquivo
-usava a mesma tangente da roda para as duas mãos, então uma ficava com o polegar
-para cima e a outra para baixo. E o contato continuava perfeito: a palma encostava
-na madeira com a mesma precisão de sempre, só que pelo lado errado.
+**1. The right hand came out inverted.** A hand is not a plane, it is a *chiral*
+object: fix the direction of the fingers and the normal of the palm, and the thumb
+is no longer a choice — it falls on `fingers × palm` on one side and on the opposite
+on the other. The file used the same wheel tangent for both hands, so one ended up
+thumb-up and the other thumb-down. And the contact stayed perfect: the palm touched
+the wood with the same precision as ever, just from the wrong side.
 
-Agora cada mão pousa do **seu** lado do punho e olha para o meio do corpo, que é o
-que um par de mãos faz ao segurar duas barras verticais. `verify()` passou a cobrar
-dois números que teriam pegado isso no primeiro dia: o polegar contra o eixo do
-punho (`+0,55`, tinha de ser positivo nas duas mãos, e era **−0,67** na direita) e a
-torção do antebraço a partir do neutro anatômico (**78°**, contra os 162° de antes —
-um antebraço humano gira uns 90°).
+Now each hand lands on **its own** side of the handle and looks toward the middle of
+the body, which is what a pair of hands does holding two vertical bars. `verify()`
+started charging two numbers that would have caught this on day one: the thumb
+against the handle's axis (`+0.55`, which had to be positive on both hands, and was
+**−0.67** on the right) and the forearm's twist from anatomical neutral (**78°**,
+against the previous 162° — a human forearm rotates about 90°).
 
-**2. O corpo dava quatro trancos por ciclo.** Tudo o que o tronco fazia era lido
-de "a mão está na madeira ou não está", que é uma pergunta de sim ou não: na
-troca de punho o quadril atravessava a excursão inteira em 1/25 de segundo. Agora
-o corpo lê **quanto peso cada mão sustenta**, que é uma rampa — cada mão carrega o
-máximo no meio do trecho em que é a única na roda e entrega devagar quando a outra
-chega. De quebra o clipe ganhou o que nunca teve: 4 cm de sobe-e-desce, lidos da
-altura das próprias mãos. O timoneiro agora **assenta nos joelhos** enquanto
-empurra o punho para baixo.
+**2. The body gave four jerks per cycle.** Everything the torso did was read off
+"the hand is on the wood or it is not", which is a yes-or-no question: at the change
+of handle the hip crossed the entire excursion in 1/25 of a second. Now the body
+reads **how much weight each hand carries**, which is a ramp — each hand bears the
+maximum in the middle of the stretch where it is the only one on the wheel and hands
+over gradually as the other arrives. As a bonus the clip gained what it never had:
+4 cm of rise and fall, read off the height of its own hands. The helmsman now
+**settles into his knees** as he pushes the handle down.
 
-| Antes | Depois | |
+| Before | After | |
 |---|---|---|
-| **1,000** | **0,225** | maior salto do corpo entre dois quadros, em fração da excursão (`1,0` é degrau; `0,126` é o piso de 25 quadros) |
-| 0 mm | **39 mm** | quanto o corpo sobe e desce no ciclo |
-| 10° | 12° | torção do tronco |
+| **1.000** | **0.225** | largest jump of the body between two frames, as a fraction of the excursion (`1.0` is a step; `0.126` is the floor for 25 frames) |
+| 0 mm | **39 mm** | how far the body rises and falls over the cycle |
+| 10° | 12° | torso twist |
 
-**3. E as duas mãos pegavam 2,7° fora da grade dos punhos.** Este só apareceu
-porque o primeiro foi consertado. A fase zero do clipe é `ângulo da roda ≡ 0`, e
-nesse instante os oito punhos estão em ângulos conhecidos — mas o arquivo escolhia
-onde pegar pelo **alcance do ombro**, e caía 2,7° (3,1 cm de arco) ao lado da
-madeira. Ninguém via porque `verify()` media a mão contra um punho desenhado *no
-ângulo da mão*: um punho fantasma acompanha qualquer erro. O que acontecia de
-verdade era a palma afundar 2 cm na peça, escondida pelo tanto que a concha da mão
-já sobrepõe a madeira de propósito.
+**3. And both hands grabbed 2.7° off the grid of handles.** This one only showed up
+because the first was fixed. The clip's phase zero is `wheel angle ≡ 0`, and at that
+instant the eight handles are at known angles — but the file chose where to grab by
+**shoulder reach**, and landed 2.7° (3.1 cm of arc) beside the wood. Nobody saw it
+because `verify()` measured the hand against a handle drawn *at the hand's angle*: a
+phantom handle follows any error. What was really happening was the palm sinking
+2 cm into the piece, hidden by how much the cup of the hand already overlaps the
+wood on purpose.
 
-Com a palma da direita do outro lado do punho, os 2,7° deixaram de ser compensados
-e viraram **1 cm de mão no ar** — que o `sweep_check` acusou na hora. Os arcos agora
-são travados na grade (`off_grid_deg` dá zero nas duas mãos), e o preço é uma
-assimetria de 5,4° entre eles que o vão entre as mãos torna inevitável: 3,0° de
-desvio na direita, 8,4° na esquerda, 1,2 cm de alcance a menos no braço esquerdo.
-O `sweep_check` passou a medir contato na **geometria** e não no centroide do punho
-fechado, e as duas medições independentes agora fecham no mesmo número: −2,2 cm de
-mão dentro da madeira, em qualquer ângulo de leme do curso inteiro.
+With the right palm on the other side of the handle, the 2.7° stopped being
+compensated and became **1 cm of hand in mid-air** — which `sweep_check` flagged
+immediately. The arcs are now locked to the grid (`off_grid_deg` comes out zero on
+both hands), and the price is a 5.4° asymmetry between them that the gap between the
+hands makes inevitable: 3.0° of offset on the right, 8.4° on the left, 1.2 cm less
+reach on the left arm. `sweep_check` now measures contact against the **geometry**
+and not against the centroid of the closed fist, and the two independent
+measurements now agree on the same number: −2.2 cm of hand inside the wood, at any
+helm angle over the whole travel.
 
-> [!note] O que continua em aberto: parado no leme, ele é uma estátua
-> A fase do clipe **é** o ângulo da roda — essa é a graça dele —, e navio em rumo
-> reto tem roda parada. O corpo então congela no quadro em que estava. Consertar
-> isso é um segundo clipe (`HelmIdle`, com as mãos nos mesmos punhos e a respiração
-> rodando no tempo) misturado pela *taxa* de giro, e não pelo ângulo. Não está feito.
+> [!note] What is still open: standing at the helm, he is a statue
+> The clip's phase **is** the wheel angle — that is the whole point of it — and a
+> ship on a straight course has a still wheel. The body then freezes on whatever
+> frame it was on. Fixing that means a second clip (`HelmIdle`, with the hands on the
+> same handles and the breathing running on time) blended by the *rate* of turn, not
+> by the angle. It is not done.
 
-### 🪚 A tábua: o primeiro clipe que não lê grandeza nenhuma
+### 🪚 The plank: the first clip that reads no quantity at all
 
-Os três clipes indexados acima leem alguma coisa do mundo — a passada lê distância, a
-escada lê altura vencida, o timão lê o ângulo da roda —, e é disso que vem a
-propriedade de nunca discordarem da física. Segurar uma tábua **não tem período
-natural nenhum**, e amarrar a fase ao progresso do reparo daria um homem que respira
-mais rápido quanto mais perto de terminar. Então este é o único posto que roda no
-tempo, como o `Idle`.
+The three indexed clips above read something from the world — the stride reads
+distance, the ladder reads height gained, the helm reads the wheel's angle — and
+that is where the property of never disagreeing with the physics comes from. Holding
+a plank **has no natural period at all**, and tying the phase to the repair's
+progress would give you a man who breathes faster the closer he gets to finishing.
+So this is the only station that runs on time, like `Idle`.
 
-O que ele tem de próprio é o resto:
+What it does have of its own is everything else:
 
-| Problema | O que se fez |
+| Problem | What was done |
 |---|---|
-| A referência pedia 58 cm entre as mãos, e este braço não dá | Com as mãos a 29 cm do centro a mão de baixo fica a 99% de extensão — o braço reto, travado no batente da IK. Fechando a pegada para **50 cm** ela cai para 85%, a mesma folga do timão. Perdem-se 4 cm de sobra em cada ponta, e sobram 32 cm de madeira para fora de cada mão |
-| A mão espalmada na face da tábua saía torta | 82° de desvio de palma, e a causa não era o código: era o gesto. Ninguém carrega oito quilos espalmando a mão na face; a peça **repousa** na mão, e os dedos sobem pela outra face só para segurá-la ali. Com a palma na aresta, o desvio cai para 27° |
-| O pulso saía com 110° de dobra | O timão trava a mão numa direção fixa porque lá a palma precisa ficar tangente ao punho ou escorrega. Aqui a tábua é presa **às mãos**, então não há superfície sobre a qual escorregar: a mão volta a continuar o antebraço, como na escada, e a dobra vira zero |
+| The reference asked for 58 cm between the hands, and this arm does not have it | With the hands 29 cm off center the lower hand sits at 99% extension — the arm straight, locked against the IK stop. Closing the grip to **50 cm** brings it down to 85%, the same margin as the helm. You lose 4 cm of overhang at each end, and 32 cm of wood is left outside each hand |
+| The hand flat on the face of the plank came out crooked | 82° of palm deviation, and the cause was not the code: it was the gesture. Nobody carries eight kilos with the palm flat on the face; the piece **rests** in the hand, and the fingers come up the other face only to hold it there. With the palm on the edge, the deviation drops to 27° |
+| The wrist came out with 110° of bend | The helm locks the hand in a fixed direction because there the palm has to stay tangent to the handle or it slips. Here the plank is fixed **to the hands**, so there is no surface to slip on: the hand goes back to continuing the forearm, as on the ladder, and the bend goes to zero |
 
-| Medido no clipe | Valor |
+| Measured in the clip | Value |
 |---|---|
-| Erro de mão, pose gravada | **0,000 mm** |
-| Variação da distância entre as palmas ao longo do ciclo | **0,000 mm** |
-| Extensão de braço, pior quadro | 82% |
-| Desvio de palma, pior quadro | 27° |
-| Penetração da tábua no corpo (55 128 vértices testados) | **0 mm**, com 1,1 cm de folga no ponto mais próximo |
+| Hand error, recorded pose | **0.000 mm** |
+| Variation in the distance between the palms over the cycle | **0.000 mm** |
+| Arm extension, worst frame | 82% |
+| Palm deviation, worst frame | 27° |
+| Plank penetration into the body (55,128 vertices tested) | **0 mm**, with 1.1 cm of clearance at the closest point |
 
-> [!note] A tábua não é filha de um osso
-> O caminho óbvio seria pendurá-la em `hand.R` com um offset fixo, e ele funciona —
-> desde que o offset esteja escrito no mesmo referencial em que o osso vive depois de
-> atravessar a conversão Z-up → Y-up do exportador glTF e a convenção de eixo de osso
-> do Blender. São duas passagens em que um sinal trocado não dá erro nenhum: dá uma
-> tábua flutuando ao lado da mão. Então a peça é montada **a partir das duas mãos**,
-> todo quadro — o comprimento é a reta que liga um punho ao outro, e o giro sai da
-> orientação da direita. Assim ela não é posicionada perto de onde as mãos deveriam
-> estar; ela é posicionada onde as mãos **estão**.
+> [!note] The plank is not a child of a bone
+> The obvious route would be to hang it off `hand.R` with a fixed offset, and that
+> works — as long as the offset is written in the same frame the bone lives in after
+> going through the glTF exporter's Z-up → Y-up conversion and Blender's bone axis
+> convention. Those are two passes where a flipped sign raises no error at all: it
+> gives you a plank floating beside the hand. So the piece is assembled **from the
+> two hands**, every frame — the length is the straight line joining one wrist to the
+> other, and the roll comes from the right hand's orientation. That way it is not
+> placed near where the hands ought to be; it is placed where the hands **are**.
 
-> [!warning] O `GLTFLoader` apaga o ponto dos nomes
-> O rig chama os ossos lateralizados de `hand.L` e `hand.R`, e é assim que eles saem
-> do exportador. O carregador do Three troca o ponto por nada — o `PropertyBinding`
-> usa ponto como separador de caminho — e o que chega na cena é `handL`. Isso não
-> apareceu em nenhum outro lugar do projeto porque os seis ossos que o
-> `FirstPersonBody` procura (`root`, `pelvis`, `spine_0N`) são justamente os que não
-> têm lado. O sintoma foi um aviso no console e um reparo sem madeira, com todo o
-> resto funcionando.
+> [!warning] `GLTFLoader` erases the dot from names
+> The rig calls the sided bones `hand.L` and `hand.R`, and that is how they come out
+> of the exporter. Three's loader replaces the dot with nothing — `PropertyBinding`
+> uses the dot as a path separator — and what arrives in the scene is `handL`. This
+> never showed up anywhere else in the project because the six bones `FirstPersonBody`
+> looks for (`root`, `pelvis`, `spine_0N`) are exactly the ones with no side. The
+> symptom was a console warning and a repair with no wood in it, with everything else
+> working.
 
-### 👥 O adversário tem corpo
+### 👥 The opponent has a body
 
-Até agora o outro jogador era um casco. As duas chalupas trocavam tiro, o rombo
-aparecia no costado dele, a tábua nascia pregada sozinha — e o convés do outro
-lado estava sempre vazio. Isso custava mais do que parece, porque **metade da
-leitura de um duelo é ver o que o outro está fazendo**: quem desceu ao porão
-parou de atirar, quem assumiu o timão vai virar, e quem está com a madeira na mão
-está tapando um rombo — é agora que se atira nele.
+Until now the other player was a hull. The two sloops traded fire, the breach
+appeared in their planking, the plank was born already nailed — and the deck on the
+other side was always empty. That cost more than it seems, because **half of reading
+a duel is seeing what the other one is doing**: whoever went below has stopped
+firing, whoever took the helm is about to turn, and whoever has wood in their hands
+is patching a breach — that is when you shoot at them.
 
-Agora ele está lá, com os mesmos oito clipes, o mesmo esqueleto e as mesmas
-regras. É a **mesma classe**, instanciada duas vezes; o que muda é só de onde vem
-o controlador que a alimenta:
+Now they are there, with the same eight clips, the same skeleton and the same rules.
+It is the **same class**, instantiated twice; all that changes is where the
+controller feeding it comes from:
 
-| Papel | Como o corpo do adversário se move |
+| Role | How the opponent's body moves |
 |---|---|
-| **Host** | É simulado aqui, com a entrada que chega pela rede — `Crewman.fixedUpdate` é o mesmo código dos dois lados, então não houve nada a escrever |
-| **Convidado** | A pose chega pronta no instantâneo, e `PlayerController.applyRemoteStep` a converte nos relógios de animação |
-| **Contra a máquina** | Escondido. O `ShipAI` comanda o casco sem mover marujo nenhum, e um pirata plantado no convés sem nunca dar um passo é pior que nenhum pirata |
+| **Host** | Simulated here, with the input arriving over the network — `Crewman.fixedUpdate` is the same code on both sides, so there was nothing to write |
+| **Guest** | The pose arrives ready in the snapshot, and `PlayerController.applyRemoteStep` converts it into the animation clocks |
+| **Against the machine** | Hidden. `ShipAI` commands the hull without moving any sailor, and a pirate planted on the deck without ever taking a step is worse than no pirate at all |
 
-**O caso difícil é o do convidado**, e o que falta ali não é a posição — é a
-**velocidade**. Um personagem só anda direito se a fase da passada avançar pela
-distância percorrida (o teorema do começo desta seção), e o instantâneo não
-carrega velocidade nenhuma: ele carrega onde o marujo *está*. Então ela é
-**derivada** da diferença entre dois passos — e derivar é melhor que transmitir,
-porque a posição já chega interpolada entre dois instantâneos: a diferença é
-exatamente o quanto o corpo andou **na tela**. O pé fica parado na madeira mesmo
-quando a rede engasga.
+**The hard case is the guest's**, and what is missing there is not the position — it
+is the **velocity**. A character only walks properly if the stride's phase advances
+with the distance covered (the theorem at the start of this section), and the
+snapshot carries no velocity at all: it carries where the sailor *is*. So it is
+**derived** from the difference between two steps — and deriving beats transmitting,
+because the position already arrives interpolated between two snapshots: the
+difference is exactly how far the body moved **on screen**. The foot stays planted
+on the wood even when the network stutters.
 
-Três coisas que essa dedução erraria sozinha, e as três sem nenhum erro no
-console:
+Three things this deduction would get wrong on its own, and all three with no error
+in the console:
 
-| Caso | O que aconteceria | O que se faz |
+| Case | What would happen | What is done |
 |---|---|---|
-| Ele assume o timão | `takeHelm` teleporta os pés dois metros num passo — 120 m/s de velocidade deduzida, o pirata em disparada e um pouso disparado quando o "voo" terminasse | Teleporte zera a velocidade e **assenta** o relógio do pulo em vez de alimentá-lo |
-| A pose chega a 15 Hz | O corpo andando aos trancos em cima de um convés que anda a 144 | Interpolado com o **mesmo** relógio do casco: corpo e piso desenhados no mesmo instante, ou o marujo desliza sobre o próprio chão |
-| Ele prega uma tábua | Reparo não é predição de ninguém — o outro lado não tem como deduzir que a mão está ocupada | Um bit no instantâneo (protocolo **6**), e é ele que põe a madeira nas mãos dele |
-| Ele cai no mar | Um marujo boiando tem, **em relação ao navio**, a velocidade do próprio navio — o adversário sairia disparado pelo mar tocando o clipe de corrida a 2,6 m/s | Um bit no instantâneo (protocolo **7**, e o byte de corpo fechou), e a velocidade dele passa a somar a do casco de volta |
-| Ele sobe pelo costado | Saber que ele está numa escada não basta: são duas, uma por bordo, com grades e inclinações espelhadas | **Nada** viaja. As duas ficam a 7,16 m uma da outra em Z, e a mesma função que desenha o portaló responde qual é, a partir da posição que já viajava |
+| They take the helm | `takeHelm` teleports the feet two meters in one step — 120 m/s of deduced velocity, the pirate at a sprint and a landing fired off when the "flight" ended | A teleport zeroes the velocity and **seats** the jump's clock instead of feeding it |
+| The pose arrives at 15 Hz | The body moving in jerks on top of a deck moving at 144 | Interpolated with the **same** clock as the hull: body and floor drawn at the same instant, or the sailor slides over his own floor |
+| They nail a plank | Repair is nobody's prediction — the other side has no way to deduce that the hand is busy | One bit in the snapshot (protocol **6**), and it is what puts the wood in their hands |
+| They fall into the sea | A sailor afloat has, **relative to the ship**, the ship's own velocity — the opponent would go tearing off across the sea playing the run clip at 2.6 m/s | One bit in the snapshot (protocol **7**, and the body byte filled up), and their velocity starts adding the hull's back in |
+| They climb the ship's side | Knowing they are on a ladder is not enough: there are two, one per side, with mirrored grids and rakes | **Nothing** travels. The two sit 7.16 m apart in Z, and the same function that draws the gangway answers which one it is, from the position that was already traveling |
 
-E um detalhe barato que paga caro: **a cabeça segue o olhar dele**. O `pitch`
-viaja no fio desde a segunda versão do protocolo — é ele que decide o foco de
-interação do outro lado — e ninguém o desenhava. Agora o pescoço e o crânio o
-dividem, com a rotação conjugada para o espaço do osso: um `rotateX` cru
-inclinaria a cabeça em torno de um eixo torto, porque o rig nasceu Z-up e a
-conversão do glTF já girou os eixos de repouso.
+And one cheap detail that pays off dearly: **the head follows their gaze**. `pitch`
+has traveled on the wire since the second version of the protocol — it is what
+decides the interaction focus on the other side — and nobody was drawing it. Now the
+neck and the skull share it, with the rotation conjugated into bone space: a raw
+`rotateX` would tilt the head about a crooked axis, because the rig was born Z-up and
+the glTF conversion has already turned the rest axes.
 
-> [!note] Um download, dois corpos
-> O GLB tem 2,4 MB e cinco texturas dentro. Carregá-lo duas vezes seria pagar
-> tudo duas vezes — e clonar com `Object3D.clone()` daria dois piratas lendo o
-> **mesmo** esqueleto, um deles vestindo a pose do outro. O arquivo é baixado uma
-> vez e clonado com `SkeletonUtils`: malha e textura compartilhadas, esqueleto e
-> material privados. O material precisa ser privado porque é nele que mora o
-> recorte de cabeça da primeira pessoa; compartilhado, você decapitaria o
-> adversário toda vez que olhasse pelos próprios olhos.
-
-## 🌊 O que é simulado de verdade
-
-| Sistema | O que tem dentro |
-|---|---|
-| **Casco** | Uma *função*, não uma malha. `ShipDimensions` sabe a meia-boca em qualquer (estação, altura) — e é a mesma descrição que gera a geometria, detecta os tiros, mede o porão, resolve o abalroamento e decide onde o pé pisa. |
-| **Flutuação** | Empuxo por colunas integradas contra a onda. Centro de massa e raios de giração **medidos**, não escolhidos: GM ≈ 0,89 m dá o balanço curto de 4,2 s de um barco de 16 m. |
-| **Corpo rígido** | 6 graus de liberdade, com massa adicionada anisotrópica (deriva e arfagem quase dobram a massa efetiva; avanço mal chega a 5%). |
-| **Leme** | Placa num escoamento, com o ângulo de ataque real (leme menos ângulo de chegada da água). Daí saem de graça: **navio parado não esterça** e **navio de ré esterça ao contrário**. |
-| **Vela** | Tecido de Verlet 13×11 para o visual, força analítica para a física — os dois leem o mesmo vetor de vento, **e a mesma eficiência**: o pano infla na proporção do empuxo, sempre para vante. É o que faz a barriga da lona valer como medidor de rumo, e o que impede a vela de achatar contra o mastro quando o vento vem pela proa. |
-| **Bandeira** | Um segundo tecido de Verlet, de 55 nós, preso na cabeça do mastro e lendo o mesmo vento. Não faz força nenhuma: serve de instrumento. Ela aponta a sotavento, então diz de onde vem o vento antes de o jogador procurar o HUD. |
-| **Balística** | Arrasto quadrático. A 95 m/s a bala perde 5,4 m/s² só de arrasto, contra 9,81 de gravidade — não é detalhe que dê para ignorar. Alcance máximo cai 29% em relação ao vácuo. |
-| **Alagamento** | Volume com superfície livre horizontal **no mundo**: ao adernar, a água escorre para o bordo baixo e o peso vai junto, o que aderna mais. |
-| **Âncora** | Amarra elástica com amortecimento, mais o atrito do ferro no fundo. Largar a 10 nós freia o navio em 2,5 s, com um caldo depois — e a amarra tesa no escovém faz o navio pivotar em torno da proa (o *anchor turn*). O ferro é desenhado subindo pela amarra conforme se recolhe, e volta ao fundo se a passada no cabrestante parar. |
-| **Abalroamento** | Mola-amortecedor de 6 MN/m entre os dois cascos, aplicada no ponto de contato — encostar de proa faz o navio pivotar. Três coroas de sondagens por casco (bojo, linha d'água e costado seco), de ponta a ponta. A força é dividida pelos contatos que **de fato** tocaram, e a direção da expulsão é decidida uma vez por par: o casco empurra na direção de onde o outro vem. Ver as duas notas abaixo. |
-| **Esteira** | Mapa de espuma em render target com ping-pong, reprojetado no mundo a cada quadro para a espuma **ficar na água** em vez de andar com o navio. |
-| **Chuva** | Riscos numa caixa fixa em volta da câmera, com a posição de cada gota sendo função só do tempo. Zero estado na CPU, zero alocação: o que se anima é um uniform. |
-| **Áudio** | Web Audio puro. Distância não baixa só o volume: **fecha o filtro**, porque é o agudo que o ar come primeiro. A reverberação é uma convolução com resposta ao impulso gerada em código. |
-
-### 🚢 "Um barco entra dentro do outro" — três causas somadas
-
-O passo de contato existia desde o começo, rodava sessenta vezes por segundo e
-**achava** contato. Ainda assim os cascos se atravessavam, e não havia erro nenhum
-para encontrar: um contato fraco, um contato ausente e um contato que se cancela
-produzem exatamente a mesma imagem na tela. Eram os três ao mesmo tempo.
-
-- 🔟 **A força era dividida por dez, e não pelos contatos que tocaram.** A intenção
-  estava certa — dez sondagens encostadas têm de empurrar como um contato, não como
-  dez —, mas o divisor era o número de sondagens de *um bordo*, fixo. Um encontro de
-  proa põe uma ou duas sondagens dentro do outro casco, e recebia **um décimo** da
-  força projetada: 1,9 m/s² para desfazer uma aproximação de vários metros por
-  segundo. Agora junta-se tudo numa passada e aplica-se na outra, dividindo pela
-  contagem real.
-- 🎯 **As sondagens paravam a 1,23 m da roda de proa.** Elas cobriam os 94% centrais
-  do casco, amostrados pelo meio de cada faixa. Uma proa só encontrava o outro navio
-  depois de entrar nele **dois metros e meio** — o momento em que a sondagem finalmente
-  alcança uma seção do outro casco mais cheia que a dela. Não era falta de força: era
-  falta do que medir. Hoje elas vão de ponta a ponta e o contato de proa começa com
-  16 cm de sobreposição.
-- ➕➖ **E duas proas de frente cancelavam a força inteira.** Cada sondagem escolhia
-  sair pela face mais próxima dela, o que é o certo para um ponto isolado e
-  catastrófico para um casco: a roda de proa é simétrica, então as sondagens de
-  bombordo e de boreste entram em espelho e empurram em sentidos opostos com o mesmo
-  módulo. **Oito contatos, 36 cm de penetração e 0,0 m/s² de empurrão** — medido pelo
-  teste, não visto na tela. A saída deixou de ser geometria de ponto e passou a ser
-  geometria de par: a marcação relativa dos dois centros diz por onde o outro vem, é a
-  mesma para todas as sondagens (nada cancela) e muda devagar (nada oscila).
-
-O resultado, com os três consertados e a rigidez em 6 MN/m: costado a costado com
-40 cm de sobreposição dá 94 m/s² de separação; uma proa no costado dá 168; duas proas
-de frente, 282. Antes, o primeiro dava décimos e os outros dois davam zero.
-
-> 🧪 Os quatro encontros que existem — costado a costado, proa no costado, proa contra
-> proa e mar aberto — estão em `tests/contact.ts`, junto da terceira lei (a reação tem
-> de fechar) e da escada de rombos do abalroamento. Foi ele que achou o
-> cancelamento, num conserto que já estava escrito e parecia pronto.
+> [!note] One download, two bodies
+> The GLB is 2.4 MB with five textures inside. Loading it twice would mean paying for
+> everything twice — and cloning with `Object3D.clone()` would give two pirates
+> reading the **same** skeleton, one of them wearing the other's pose. The file is
+> downloaded once and cloned with `SkeletonUtils`: mesh and texture shared, skeleton
+> and material private. The material has to be private because it is where first
+> person's head clipping lives; shared, you would decapitate your opponent every time
+> you looked through your own eyes.
 
 ---
 
-## 🪵 Três peças do navio que são jogabilidade
+## 🌊 What is actually simulated
 
-O casco inteiro sai de números (ver acima). Estas três, porém, não estão lá por
-fidelidade — cada uma resolve um problema de quem joga.
+| System | What is inside it |
+|---|---|
+| **Hull** | A *function*, not a mesh. `ShipDimensions` knows the half-breadth at any (station, height) — and it is the same description that generates the geometry, detects hits, measures the hold, resolves ramming and decides where the foot lands. |
+| **Flotation** | Buoyancy from columns integrated against the wave. Center of mass and radii of gyration are **measured**, not chosen: GM ≈ 0.89 m gives the short 4.2 s roll of a 16 m boat. |
+| **Rigid body** | 6 degrees of freedom, with anisotropic added mass (sway and heave nearly double the effective mass; surge barely reaches 5%). |
+| **Rudder** | A plate in a flow, with the real angle of attack (rudder minus the water's angle of arrival). Two things fall out of that for free: **a stopped ship does not steer** and **a ship going astern steers backwards**. |
+| **Sail** | A 13×11 Verlet cloth for the visuals, an analytic force for the physics — both read the same wind vector, **and the same efficiency**: the canvas fills in proportion to the thrust, always forward. That is what makes the belly of the sail worth reading as a heading gauge, and what keeps the sail from flattening against the mast when the wind comes over the bow. |
+| **Ensign** | A second Verlet cloth, 55 nodes, fixed at the masthead and reading the same wind. It applies no force: it is an instrument. It points to leeward, so it tells you where the wind is coming from before the player goes looking for the HUD. |
+| **Ballistics** | Quadratic drag. At 95 m/s the ball loses 5.4 m/s² to drag alone, against 9.81 to gravity — not a detail you can ignore. Maximum range drops 29% compared to vacuum. |
+| **Flooding** | Volume with a free surface horizontal **in the world**: as the ship heels, the water runs to the low side and the weight goes with it, which heels it further. |
+| **Anchor** | An elastic rode with damping, plus the friction of the iron on the bottom. Dropping it at 10 knots stops the ship in 2.5 s, with a snub afterwards — and the rode taut in the hawse makes the ship pivot around the bow (the *anchor turn*). The iron is drawn coming up the rode as it is hauled in, and goes back to the bottom if the stride on the capstan stops. |
+| **Ramming** | A 6 MN/m spring-damper between the two hulls, applied at the contact point — touching bow-on makes the ship pivot. Three rings of probes per hull (bilge, waterline and dry topsides), end to end. The force is divided by the contacts that **actually** touched, and the direction of the push is decided once per pair: the hull pushes away from where the other one is coming from. See the two notes below. |
+| **Wake** | A foam map in a ping-pong render target, reprojected into the world every frame so the foam **stays on the water** instead of traveling with the ship. |
+| **Rain** | Streaks in a box fixed around the camera, with each drop's position being a function of time alone. Zero state on the CPU, zero allocation: what animates is a uniform. |
+| **Audio** | Pure Web Audio. Distance does not just lower the volume: it **closes the filter**, because the treble is what the air eats first. The reverb is a convolution with an impulse response generated in code. |
 
-- 🟡 **O punho de latão do timão.** Os oito punhos da roda eram idênticos, e a
-  roda dá mais de uma volta de batente a batente: não havia como saber, olhando
-  para ela, se o leme estava no meio ou uma volta fora dele. Um punho de latão
-  que só fica **em pé quando o leme está a meio** transforma a roda num
-  instrumento — é a mesma marca que o Sea of Thieves usa, e pelo mesmo motivo.
-- ⛺ **O toldo do tombadilho.** Popa descoberta lê como balsa. As quatro colunas
-  e o telhado dão massa à silhueta contra o horizonte (que é como o inimigo vê
-  este navio), e põem o timoneiro *dentro* de alguma coisa. As alturas saem do
-  olho do jogador, não de proporção: a cumeeira fica 42 cm acima do ponto mais
-  alto que a cabeça alcança num pulo.
-- 🧺 **A gávea, agora com espessura.** Ela era feita de superfícies de face
-  única, e superfície de face única **não existe** vista do outro lado: do
-  convés, olhando para cima, o cesto sumia e sobravam as escoras boiando em
-  volta do mastro. Piso, parede e cinta ganharam as duas faces — o mesmo
-  conserto que o convés já tinha recebido, pelo mesmo motivo.
+### 🚢 "One boat goes inside the other" — three causes stacked up
 
-## 🎨 A interface
+The contact step had existed from the start, ran sixty times a second and **did
+find** contact. The hulls went through each other anyway, and there was no error to
+find: a weak contact, a missing contact and a contact that cancels itself out
+produce exactly the same picture on screen. It was all three at once.
 
-A direção de arte segue uma regra: **tudo é um objeto que existiria a bordo.** Não há
-painéis — há tábuas, chapas de latão e folhas de pergaminho pregadas nelas.
+- 🔟 **The force was divided by ten, not by the contacts that touched.** The intent
+  was right — ten probes in contact have to push like one contact, not like ten —
+  but the divisor was the number of probes on *one side*, fixed. A bow-on encounter
+  puts one or two probes inside the other hull, and got **one tenth** of the
+  projected force: 1.9 m/s² to undo an approach of several meters per second. Now
+  everything is gathered in one pass and applied in the other, dividing by the real
+  count.
+- 🎯 **The probes stopped 1.23 m short of the stem.** They covered the central 94% of
+  the hull, sampled at the middle of each band. A bow only found the other ship after
+  going **two and a half meters** into it — the moment the probe finally reaches a
+  section of the other hull fuller than its own. It was not a lack of force: it was a
+  lack of anything to measure. Today they run end to end and bow contact starts at
+  16 cm of overlap.
+- ➕➖ **And two bows head-on canceled the entire force.** Each probe chose to exit
+  through the face closest to it, which is right for an isolated point and
+  catastrophic for a hull: the stem is symmetric, so the port and starboard probes go
+  in mirrored and push in opposite directions with the same magnitude. **Eight
+  contacts, 36 cm of penetration and 0.0 m/s² of push** — measured by the test, not
+  seen on screen. The exit stopped being point geometry and became pair geometry: the
+  relative bearing of the two centers says where the other one is coming from, it is
+  the same for every probe (nothing cancels) and it changes slowly (nothing
+  oscillates).
 
-- O menu é um **pergaminho pregado numa tábua**, com borda cortada à mão, manchas de
-  água e quatro pregos de latão nos cantos.
-- Os botões são **placas de latão parafusadas**, com texto gravado. Apertar afunda a
-  placa e apaga o brilho de cima.
-- Cada capitão é uma **carta de bordo**, e a escolhida leva um carimbo de lacre.
-- No HUD, o poço de porão é uma **sonda de vidro** com marcas gravadas, e o estado de
-  cada peça é a própria bala: contorno vazio, meia carga, bala dentro.
+The result, with all three fixed and the stiffness at 6 MN/m: side to side with
+40 cm of overlap gives 94 m/s² of separation; a bow into the side gives 168; two bows
+head-on, 282. Before, the first gave tenths and the other two gave zero.
 
-Tipografia: Cinzel só no logotipo (capital romana lapidar, feita para ser gravada) e
-IM Fell English em todo o resto — a digitalização dos tipos da Oxford University Press
-do século XVII, com a irregularidade de tinta de quem imprimiu em prensa. Números em
-monoespaçada, porque mudam a cada quadro e fonte proporcional os faz dançar.
-
-Nenhuma imagem. Madeira, latão e pergaminho são gradientes repetidos; as bordas
-irregulares são `clip-path`.
+> 🧪 The four encounters that exist — side to side, bow into the side, bow against bow
+> and open sea — are in `tests/contact.ts`, along with the third law (the reaction has
+> to balance) and the ramming breach ladder. It is what found the cancellation, in a
+> fix that was already written and looked finished.
 
 ---
 
-## 🗂️ Organização
+## 🪵 Three parts of the ship that are gameplay
+
+The whole hull comes out of numbers (see above). These three, though, are not there
+for fidelity — each one solves a problem for whoever is playing.
+
+- 🟡 **The brass handle on the wheel.** The wheel's eight handles were identical, and
+  the wheel turns more than once from stop to stop: there was no way to tell, looking
+  at it, whether the rudder was amidships or a full turn away from it. A brass handle
+  that only stands **upright when the rudder is amidships** turns the wheel into an
+  instrument — it is the same mark Sea of Thieves uses, and for the same reason.
+- ⛺ **The quarterdeck awning.** An uncovered stern reads as a raft. The four columns
+  and the roof give mass to the silhouette against the horizon (which is how the enemy
+  sees this ship), and they put the helmsman *inside* something. The heights come from
+  the player's eye, not from proportion: the ridge sits 42 cm above the highest point
+  the head reaches in a jump.
+- 🧺 **The crow's nest, now with thickness.** It was made of single-sided surfaces, and
+  a single-sided surface **does not exist** seen from the other side: from the deck,
+  looking up, the basket vanished and left the braces floating around the mast. Floor,
+  wall and band gained both faces — the same fix the deck had already received, for the
+  same reason.
+
+## 🎨 The interface
+
+The art direction follows one rule: **everything is an object that would exist
+aboard.** There are no panels — there are planks, brass plates and sheets of parchment
+nailed to them.
+
+- The menu is a **sheet of parchment nailed to a plank**, with a hand-torn edge, water
+  stains and four brass nails at the corners.
+- The buttons are **bolted brass plates**, with engraved text. Pressing sinks the plate
+  and kills the highlight along the top.
+- Each captain is a **chart card**, and the chosen one gets a wax seal stamp.
+- On the HUD, the bilge level is a **glass sounding tube** with engraved marks, and each
+  gun's state is the ball itself: empty outline, half charge, ball inside.
+
+Typography: Cinzel only in the logo (Roman capitals cut for stone, made to be engraved)
+and IM Fell English everywhere else — the digitization of the seventeenth-century
+Oxford University Press types, with the ink irregularity of a press-printed page.
+Numbers in monospace, because they change every frame and a proportional font makes
+them dance.
+
+No images at all. Wood, brass and parchment are repeated gradients; the irregular edges
+are `clip-path`.
+
+---
+
+## 🗂️ Layout
 
 ```
-PirateCharacter/  o personagem: malha, rig e animações, tudo por script
-Props/Plank/      a tábua de reparo, também por script (headless)
-public/models/    os dois binários — o personagem e a tábua, exportados para a web
+PirateCharacter/  the character: mesh, rig and animations, all by script
+Props/Plank/      the repair plank, also by script (headless)
+public/models/    the two binaries — the character and the plank, exported for the web
 src/
-├── core/       motor, entrada, matemática, preferências
-├── world/      oceano, ondas, céu, clima, chuva, ciclo dia-noite, esteira
-├── ship/       casco, flutuação, leme, vela, âncora, canhão, avaria
-├── combat/     balística, projéteis, detecção de acerto, contato, efeitos
-├── ai/         dificuldade, timoneiro, artilheiro, tripulação, capitão
-├── player/     controlador a bordo, câmera, interação, corpo (o seu e o do rival)
-├── game/       máquina de estados de partida
-├── ui/         menu, HUD, prompts contextuais
-├── audio/      síntese de todo o som
-├── shaders/    GLSL compartilhado (ruído, atmosfera, recorte de casco e de cabeça)
-├── textures/   geração procedural de mapas
-├── net/        sessão de sala, relógios, codec binário e estado interpolado
-└── styles/     tokens de design e folhas por módulo
-server/         o Worker da sala: rotas, pareamento e o Durable Object do duelo
-shared/         o contrato entre os dois — tipos e funções puras, sem DOM nem Three
-tests/          balística, IA, avaria, locomoção, relógio de rede e determinismo
+├── core/       engine, input, math, preferences
+├── world/      ocean, waves, sky, weather, rain, day-night cycle, wake
+├── ship/       hull, flotation, rudder, sail, anchor, cannon, damage
+├── combat/     ballistics, projectiles, hit detection, contact, effects
+├── ai/         difficulty, helmsman, gunner, crew, captain
+├── player/     onboard controller, camera, interaction, body (yours and your rival's)
+├── game/       match state machine
+├── ui/         menu, HUD, contextual prompts
+├── audio/      synthesis of every sound
+├── shaders/    shared GLSL (noise, atmosphere, hull and head clipping)
+├── textures/   procedural map generation
+├── net/        room session, clocks, binary codec and interpolated state
+└── styles/     design tokens and per-module stylesheets
+server/         the room Worker: routes, matchmaking and the duel Durable Object
+shared/         the contract between the two — types and pure functions, no DOM, no Three
+tests/          ballistics, AI, damage, locomotion, net clock and determinism
 ```
 
 ---
 
-## ⚙️ Desempenho
+## ⚙️ Performance
 
-Há quatro presets no menu (Baixo, Médio, Alto, Ultra) e um palpite inicial pelo nome
-da GPU. Por cima deles, duas coisas acontecem sozinhas:
+There are four presets in the menu (Low, Medium, High, Ultra) and an initial guess
+from the GPU's name. On top of them, two things happen on their own:
 
-- 🖥️ **Teto de resolução.** O custo de tudo que o renderizador faz cresce com o
-  **quadrado** da densidade de pixels, e a tela de notebook é justamente onde ela é
-  maior: 1440×900 com razão 2 são 5,2 milhões de pixels por quadro, contra 2,1
-  milhões de um monitor 1080p de mesa — a máquina mais fraca das duas recebendo duas
-  vezes e meia o trabalho. O teto é o de uma tela 1440p, e só morde em telas HiDPI e
-  4K, que é onde a densidade sobrando é a que menos se enxerga.
-- 📉 **O preset desce sozinho** se a taxa de quadros ficar seis segundos seguidos
-  abaixo de 40, e a escolha fica gravada. Só desce, nunca sobe: um preset que
-  oscilasse voltaria a subir no primeiro trecho calmo e cairia de novo no combate,
-  que é o pior momento possível para uma queda de quadros. O motivo de existir é
-  que hospedar um duelo põe a física de **dois** cascos na mesma máquina, e o
-  palpite pelo nome da GPU não sabe nada disso.
+- 🖥️ **Resolution ceiling.** The cost of everything the renderer does grows with the
+  **square** of the pixel density, and a laptop screen is exactly where that density
+  is highest: 1440×900 at a ratio of 2 is 5.2 million pixels per frame, against the
+  2.1 million of a 1080p desktop monitor — the weaker of the two machines taking two
+  and a half times the work. The ceiling is that of a 1440p screen, and it only bites
+  on HiDPI and 4K displays, which is where the surplus density is the least visible.
+- 📉 **The preset steps down on its own** if the frame rate stays six seconds straight
+  below 40, and the choice is saved. It only goes down, never up: a preset that
+  oscillated would climb back at the first quiet stretch and drop again in combat,
+  which is the worst possible moment for a frame drop. The reason it exists is that
+  hosting a duel puts the physics of **two** hulls on the same machine, and the guess
+  from the GPU's name knows nothing about that.
 
-Quem quiser mandar na própria máquina continua mandando: escolher um preset no menu
-manda no teto de detalhe, e a queda automática só age a partir do que estiver
-escolhido.
+Anyone who wants to run their own machine still runs it: choosing a preset in the menu
+sets the detail ceiling, and the automatic step-down only acts from whatever is chosen.
 
 ---
 
-## 🧪 Testes
+## 🧪 Tests
 
-Não há executor de testes instalado — seriam dependências novas para oito arquivos.
-Eles rodam **no navegador**, com o servidor de desenvolvimento no ar:
+There is no test runner installed — that would be new dependencies for eight files.
+They run **in the browser**, with the dev server up:
 
 ```js
-// no console do navegador
+// in the browser console
 const b = await import('/tests/ballistics.ts');
 console.table(b.runBallisticsTests().cases);
 
@@ -1239,622 +1291,658 @@ const s = await import('/tests/determinism.ts');
 console.table(s.runDeterminismTests().cases);
 ```
 
-**Instantâneo** é o que fecha a classe de defeito que nenhum outro teste pega e
-nenhum jogador consegue descrever: um campo que o escritor manda e o leitor não
-lê. Não há erro, não há exceção — o que acontece é que todos os campos dali para
-a frente saem deslocados, e o outro lado passa a mostrar valores que pertencem a
-outra coisa. Ele monta um mundo falso com **um valor distinto em cada campo**,
-codifica, decodifica e compara um por um. Na primeira vez que rodou, achou um
-defeito que estava no ar: a escala da área do rombo saturava em 0,1 m² e o modelo
-produz até 0,176 — 43% da faixa não cabia no fio, e um rombo bem alargado chegava
-do outro lado com pouco mais da metade do tamanho.
+**Snapshot** is what closes the class of defect no other test catches and no player
+can describe: a field the writer sends and the reader does not read. There is no
+error, there is no exception — what happens is that every field from there on comes
+out shifted, and the other side starts showing values that belong to something else.
+It builds a fake world with **a distinct value in every field**, encodes, decodes and
+compares them one by one. The first time it ran, it found a defect that was live: the
+breach area scale saturated at 0.1 m² and the model produces up to 0.176 — 43% of the
+range did not fit on the wire, and a well-widened breach arrived on the other side at
+a little over half its size.
 
-O oitavo é a exceção, e ele **não** roda no navegador: o que ele exercita é o
-servidor de sala, e o servidor não está no bundle do jogo. Ele abre WebSockets de
-verdade contra um `wrangler dev` vivo e conversa o mesmo lobby que o jogo
-conversa — dois capitães, fila, código, recusa, resultado.
+The eighth is the exception, and it does **not** run in the browser: what it exercises
+is the room server, and the server is not in the game's bundle. It opens real
+WebSockets against a live `wrangler dev` and speaks the same lobby the game speaks —
+two captains, queue, code, refusal, result.
 
 ```sh
-npm run dev:server      # num terminal
-npm run test:server     # no outro
+npm run dev:server      # in one terminal
+npm run test:server     # in the other
 
-# e contra o servidor publicado, que é o que o jogo usa de verdade:
+# and against the published server, which is what the game actually uses:
 ROOM_SERVER="wss://sea-of-opus-rooms.nickdev.workers.dev" npm run test:server
 ```
 
-Ele existe porque a sala é a única parte do duelo que **não dá para testar
-jogando**. Um defeito de física aparece na tela; um defeito de pareamento
-aparece como duas pessoas em telas de espera diferentes, cada uma achando que o
-problema é a internet da outra.
+It exists because the room is the only part of the duel that **cannot be tested by
+playing**. A physics defect shows up on screen; a matchmaking defect shows up as two
+people on different waiting screens, each one thinking the problem is the other's
+internet connection.
 
-> [!note] Os sete de navegador também rodam no Node, sem navegador
-> Nada no repositório precisa disso, e por isso não há script — mas um runner de
-> vinte linhas que sobe o Vite em `middlewareMode` e chama `ssrLoadModule` importa
-> os `.ts` do jogo direto no Node, e a suíte inteira roda no terminal. Serve para
-> rodar tudo de uma vez a cada conserto, sem trocar de janela. A única exceção é
-> `determinism.ts`, que precisa de `window`.
+> [!note] The seven browser suites also run in Node, with no browser
+> Nothing in the repository needs this, which is why there is no script — but a
+> twenty-line runner that brings Vite up in `middlewareMode` and calls `ssrLoadModule`
+> imports the game's `.ts` straight into Node, and the whole suite runs in the
+> terminal. It is useful for running everything at once after each fix, without
+> switching windows. The only exception is `determinism.ts`, which needs `window`.
 
-> ⚠️ **Contra o publicado, a fila tem gente de verdade dentro** — e isso já reprovou
-> um caso que estava certo. Se alguém estiver esperando na fila, o primeiro socket do
-> teste é mandado para a sala **dele** e pareado com ele, que é o comportamento certo
-> do servidor e a ruína da asserção. Pior: o `peer` chega com o apelido `Sailor`, que
-> é a assinatura exata do defeito de pareamento que aquele caso procura — ali era só
-> o nome padrão de um capitão que não digitou o dele. Os casos de fila agora esvaziam
-> a vaga com uma isca antes de começar (`drainQueue`).
+> ⚠️ **Against the published server, the queue has real people in it** — and that has
+> already failed a case that was correct. If somebody is waiting in the queue, the
+> test's first socket is sent to **their** room and paired with them, which is the
+> server's correct behavior and the ruin of the assertion. Worse: the `peer` arrives
+> with the nickname `Sailor`, which is the exact signature of the matchmaking defect
+> that case is looking for — there it was just the default name of a captain who did
+> not type their own. The queue cases now empty the slot with a decoy before starting
+> (`drainQueue`).
 
-**Balística** prova o caso limite: com arrasto zero a integração *tem* que reproduzir
-a parábola de livro, ida e volta. Provado o integrador, os outros casos verificam que
-o solucionador e o projétil que voa de verdade concordam — a propriedade de que a mira
-da IA depende.
+**Ballistics** proves the limiting case: with zero drag the integration *has* to
+reproduce the textbook parabola, out and back. With the integrator proven, the other
+cases verify that the solver and the projectile that actually flies agree — the
+property the AI's aim depends on.
 
-**IA** prova as duas conversões geométricas onde um sinal trocado passaria
-despercebido para sempre: que decompor a direção do cano é o inverso exato de compô-la,
-e que o sinal do timoneiro fecha a malha em vez de abri-la. Prende também a **ordem da
-tabela de dificuldade**: os onze eixos de perícia têm de andar no mesmo sentido do
-Deckhand para o Legend, e um número fora de ordem ali produz um "Legend" mais fácil que
-um "Deckhand" sem quebrar nada, sem aparecer no `tsc` e sem se revelar em menos de três
-partidas inteiras. E prende as duas relações **entre** eixos que travariam o bot: o
-turno de porão tem de caber uma tábua inteira, e o nível de água que o capitão aceita
-tem de ficar abaixo do alarme que manda o marujo descer — invertidos, ele passa a
-partida na escada.
+**AI** proves the two geometric conversions where a flipped sign would go unnoticed
+forever: that decomposing the barrel's direction is the exact inverse of composing it,
+and that the helmsman's sign closes the loop instead of opening it. It also pins down
+the **order of the difficulty table**: the eleven skill axes have to move in the same
+direction from Deckhand to Legend, and one number out of order there produces a
+"Legend" easier than a "Deckhand" without breaking anything, without showing up in
+`tsc` and without revealing itself in under three full matches. And it pins the two
+relationships **between** axes that would lock the bot up: the hold shift has to fit a
+whole plank, and the water level the captain accepts has to sit below the alarm that
+sends the deckhand below — inverted, it spends the match on the stairs.
 
-**Avaria** prova a propriedade estrutural que o modelo de alagamento violava em
-silêncio: **um acerto vale um acerto, caia onde cair.** Não há resposta certa para
-comparar — vazão de rombo em casco de madeira é número afinado, não teorema —, mas há
-uma forma que a curva precisa ter, e ela estava invertida: quem mirava melhor causava
-dez vezes menos dano. Os casos prendem os dois lados do conserto (a fusão sai do vão
-real do rombo, a vazão é linear na área inclusive saturada) e medem a razão entre fogo
-agrupado e fogo varrido contra um piso. Hoje ela dá 84%; com o modelo antigo, 24%.
+**Damage** proves the structural property the flooding model was violating in silence:
+**one hit is worth one hit, wherever it lands.** There is no right answer to compare
+against — inflow through a breach in a wooden hull is a tuned number, not a theorem —
+but there is a shape the curve has to have, and it was inverted: whoever aimed better
+did ten times less damage. The cases pin both sides of the fix (merging comes out of
+the breach's real span, inflow is linear in the area including when saturated) and
+measure the ratio between grouped fire and swept fire against a floor. Today it comes
+out at 84%; with the old model, 24%.
 
-**Locomoção** prova a igualdade de que o corpo inteiro depende: uma passada cobre
-exatamente a distância do ciclo, em qualquer velocidade e em qualquer ponto da
-mistura entre andar e correr. Se isso deixar de valer, o pé patina — e patinar é
-a primeira coisa que o outro jogador nota. Os outros casos prendem a fase da
-curva vertical, que é onde um cosseno com o sinal trocado faria a câmera **subir**
-quando o pé bate.
+**Locomotion** proves the equality the whole body depends on: one stride covers exactly
+the cycle distance, at any speed and at any point of the blend between walking and
+running. If that stops holding, the foot skates — and skating is the first thing the
+other player notices. The other cases pin the phase of the vertical curve, which is
+where a cosine with a flipped sign would make the camera go **up** when the foot lands.
 
-Os do **corpo do adversário** medem a mesma igualdade pelo caminho oposto: lá a
-velocidade é conhecida e a distância sai dela; aqui só chegam posições, e é a
-velocidade que é deduzida delas. Um fator errado na dedução não dá erro nenhum —
-dá um pé deslizando pelo convés do outro navio, que é o defeito clássico de
-personagem em rede. Junto vão os dois casos que a dedução sozinha erraria:
-assumir o leme não pode virar disparada (nem pouso atrás da roda), e o salto dele
-tem de estar na metade do clipe de ar exatamente no ápice.
+The **opponent's body** cases measure the same equality from the opposite direction:
+there the velocity is known and the distance comes out of it; here only positions
+arrive, and it is the velocity that is deduced from them. A wrong factor in the
+deduction raises no error at all — it gives you a foot sliding across the other ship's
+deck, which is the classic networked-character defect. Along with them go the two cases
+the deduction alone would get wrong: taking the helm must not turn into a sprint (nor a
+landing behind the wheel), and their jump has to be halfway through the air clip
+exactly at the apex.
 
-Os casos do **pulo** simulam a queda inteira com a mesma ordem de operações do
-`PlayerController` (gravidade → integração → chão → relógio) e conferem o clipe
-contra a parábola: fase 0,5 no ápice e ~1 no contato, com a tolerância derivada de
-um quadro de gravidade a 60 fps em vez de chutada. Também prendem o que não se vê
-num teste de olho — que ar e pouso nunca se sobrepõem, que uma queda do mastro
-satura em vez de dar voltas, e que soltar os pés na escada **não** dispara pouso.
+The **jump** cases simulate the whole fall with the same order of operations as
+`PlayerController` (gravity → integration → ground → clock) and check the clip against
+the parabola: phase 0.5 at the apex and ~1 at contact, with the tolerance derived from
+one frame of gravity at 60 fps instead of guessed. They also pin what an eyeball test
+cannot see — that air and landing never overlap, that a fall from the mast saturates
+instead of looping, and that letting go of the ladder does **not** trigger a landing.
 
-Os da **escada** amarram a animação à geometria do navio: um deles sobe os nove
-metros inteiros conferindo, quadro a quadro, se a barra que o clipe manda a mão
-agarrar coincide com um enfrechate desenhado — o erro máximo dá menos de 1 mm.
-Se alguém mexer no espaçamento da escada ou na altura do cesto sem regerar o
-clipe, é aqui que estoura.
+The **ladder** cases tie the animation to the ship's geometry: one of them climbs the
+whole nine meters checking, frame by frame, whether the rung the clip sends the hand to
+grab coincides with a ratline that is drawn — the maximum error comes out under 1 mm.
+If anyone changes the ladder's spacing or the crow's nest height without regenerating
+the clip, this is where it blows up.
 
-Os do **corpo vestido** cobrem o que só passou a poder estar errado depois que o
-jogador enxerga a si mesmo: que a câmera sobe exatamente o que o clipe sobe (e
-não um exagero afinado no olho), e que a dobra das pernas para andar de ré não
-oscila no strafe puro — ali o desvio fica cravado nos 90°, e sem histerese o
-corpo daria meia-volta a cada quadro.
+The **worn body** cases cover what only became possible to get wrong once the player
+can see themselves: that the camera rises exactly what the clip rises (and not an
+exaggeration tuned by eye), and that the leg bend for walking backwards does not
+oscillate on a pure strafe — there the offset is pinned at 90°, and without hysteresis
+the body would turn around every frame.
 
-**Relógio de rede** é o único que roda **fora** do navegador também — ele não toca em
-Three.js. São dois relógios diferentes, e cada um já quebrou de um jeito próprio:
+**Net clock** is the only one that also runs **outside** the browser — it does not
+touch Three.js. There are two different clocks, and each one has already broken in its
+own way:
 
-- O de **comando**, que carimba a entrada. Ele tem de andar sozinho e ser apenas
-  corrigido pelo instantâneo; derivado dele, o carimbo ficava parado três passos e
-  pulava quatro, e três de cada quatro comandos morriam como duplicata.
-- O de **desenho**, que decide a pose mostrada entre dois instantâneos. Ele tem de
-  ficar **exatamente um intervalo** atrás do mais novo: mais que isso e o alvo cai
-  antes do mais velho dos dois que se tem em mão, a interpolação vive grampeada no
-  começo e o mundo inteiro do cliente passa a andar a 15 quadros por segundo,
-  independentemente de a que taxa ele desenhe.
+- The **command** clock, which stamps the input. It has to run on its own and only be
+  corrected by the snapshot; derived from it, the stamp sat still for three steps and
+  jumped four, and three out of every four commands died as duplicates.
+- The **render** clock, which decides the pose shown between two snapshots. It has to
+  stay **exactly one interval** behind the newest one: any more than that and the
+  target falls before the older of the two you have in hand, the interpolation lives
+  clamped at the start, and the client's whole world starts moving at 15 frames per
+  second, no matter what rate it draws at.
 
-Cada um tem, ao lado do caso que prova o conserto, um caso que **reproduz o defeito**
-— o relógio velho continua no arquivo só para falhar. Se ele parar de falhar, o teste
-deixou de testar o que existe para testar, e é isso que o caso denuncia.
+Each one has, beside the case that proves the fix, a case that **reproduces the
+defect** — the old clock is still in the file only in order to fail. If it stops
+failing, the test has stopped testing what there is to test, and that is what the case
+denounces.
 
-### Bancada de inspeção
+### Inspection bench
 
-Em desenvolvimento, `window.__game` expõe o jogo inteiro. O bloco é removido do build
-de produção por eliminação de código morto.
+In development, `window.__game` exposes the whole game. The block is removed from the
+production build by dead-code elimination.
 
 ```js
-__game.match.start('legend');          // começa um duelo
-__game.menu.show('none');              // fecha o menu por cima dele
-__game.environment.weather.set('storm'); // força um temporal
-__game.stepPhysics(30);                // adianta 30 s de física sem desenhar
-__game.setDuelView();                  // enquadra os dois navios
-__game.setAvatarView({ azimuth: 1.7 }); // enquadra o corpo do jogador
-__game.match.player.gait;              // fase da passada, mistura e cadência
-__game.match.avatar.debug;             // pesos dos clipes, torção e corte da cabeça
+__game.match.start('legend');          // start a duel
+__game.menu.show('none');              // close the menu over it
+__game.environment.weather.set('storm'); // force a storm
+__game.stepPhysics(30);                // advance 30 s of physics without drawing
+__game.setDuelView();                  // frame both ships
+__game.setAvatarView({ azimuth: 1.7 }); // frame the player's body
+__game.match.player.gait;              // stride phase, blend and cadence
+__game.match.avatar.debug;             // clip weights, twist and head clipping
 __game.match.avatar.calibrate({ setback: 0.11, threshold: 0.5, neckShare: 0 });
-__game.probeSail(90);                  // velocidade de regime a 90° do vento
+__game.probeSail(90);                  // steady-state speed at 90° off the wind
 ```
 
-> [!note] Por que existe um `setAvatarView`
-> A câmera livre reconstrói a orientação a partir do estado dela a cada quadro,
-> então escrever `camera.lookAt` de fora é desfeito no frame seguinte — e a
-> captura sai no lugar certo olhando para o lado errado. Custou uns quinze
-> minutos de "por que o personagem não aparece".
+> [!note] Why a `setAvatarView` exists
+> The free camera rebuilds its orientation from its own state every frame, so writing
+> `camera.lookAt` from outside is undone on the next frame — and the capture comes out
+> in the right place looking the wrong way. It cost about fifteen minutes of "why is
+> the character not showing up".
 
 ---
 
-## 🧭 Estado e próximos passos
+## 🧭 Status and what comes next
 
-**Pronto:** navegação em primeira pessoa a bordo · timão com marca de leme a meio ·
-âncora com cabrestante que se empurra andando (e corre de volta se largado) · gávea
-acessível pela escada de mão, subindo e descendo · dois canhões com recarga e mira ·
-balística com arrasto · rombos, alagamento, reparo e bomba · naufrágio · navio inimigo
-com IA de três níveis · abalroamento · clima dinâmico com chuva e relâmpago · ciclo
-dia-noite · menu, HUD, ajustes e tela de controles · áudio completo · **corpo do
-jogador com parado, caminhada, corrida e pulo misturados pela própria física, e
-visível em primeira pessoa — pés, ombros, mãos na escada e mãos nos punhos da
-roda** · vela e bandeira simuladas lendo o mesmo vento · **marca de tiro no costado
-com furo, lascas e fuligem, e a tábua do reparo saindo das mãos para ficar pregada
-onde estava o buraco** · **duelo 1v1 em rede, com sala por código, fila de
-pareamento e servidor próprio na Cloudflare** · **o adversário com corpo no convés
-dele, animado pelos mesmos clipes — andando, correndo, pulando, subindo a escada,
-de mãos na roda, tapando rombo, e com a cabeça acompanhando para onde ele
-olha** · **homem ao mar: portaló nos dois bordos, nado na superfície com clipe
-próprio, boia com outro, escada de embarque de volta e resgate por cabo, tudo
-valendo em rede**.
+**Done:** first-person movement aboard · wheel with an amidships mark · anchor with a
+capstan you push by walking (and that runs back out if let go) · crow's nest reachable
+by the rigging ladder, up and down · two cannons with reloading and aiming · ballistics
+with drag · breaches, flooding, repair and pump · sinking · enemy ship with three-level
+AI · ramming · dynamic weather with rain and lightning · day-night cycle · menu, HUD,
+settings and controls screen · complete audio · **player body with idle, walk, run and
+jump blended by the physics itself, and visible in first person — feet, shoulders, hands
+on the ladder and hands on the wheel's handles** · sail and ensign simulated off the
+same wind · **shot mark on the planking with hole, splinters and soot, and the repair
+plank leaving the hands to end up nailed where the hole was** · **1v1 duel over the
+network, with rooms by code, a matchmaking queue and our own server on Cloudflare** ·
+**the opponent with a body on their deck, animated by the same clips — walking, running,
+jumping, climbing the ladder, hands on the wheel, patching a breach, and with the head
+following where they look** · **man overboard: gangway on both sides, surface swimming
+with its own clip, floating with another, boarding ladder back up and rope rescue, all
+of it valid over the network**.
 
-**O que falta, em ordem de impacto:**
+**What is missing, in order of impact:**
 
-1. 🎚️ **Vela ajustável.** É a lacuna que mais se sente. Hoje o pano está sempre cheio,
-   e duas chalupas idênticas numa caça de popa **empatam por física** — a que foge não
-   é alcançável. Poder ferrar a vela é o que devolve a decisão de parar e brigar, e é
-   exatamente por isso que o Sea of Thieves tem esse controle.
-2. 🪣 **Balde.** Tirar água com balde exige item na mão, e não há inventário ainda.
-3. 🎯 **Dano por região.** Hoje o mastro para a bala mas não cai.
-4. 🔊 **Sons de manobra.** Passos, roda do timão, corrente da âncora, cabrestante e
-   bomba não têm som próprio — faltam ganchos de evento para eles, não síntese.
-5. ⚡ **Trovão.** O relâmpago acende o céu, mas não faz barulho.
-6. 🧍 **Poses de trabalho: falta o canhão e a bomba.** Saíram o timão (mãos nos
-   punhos, indexadas pelo ângulo da roda) e a tábua de reparo (a peça atravessada
-   no corpo, lida das duas mãos), mas no canhão e na bomba o corpo continua parado
-   respirando enquanto as mãos deveriam estar ocupadas. Nas duas o problema é mais
-   difícil que no timão, porque nenhuma tem uma grandeza tão limpa para indexar a
-   fase: a bomba é cadência escolhida, e o canhão é uma sequência de gestos, não um
-   ciclo.
-7. 🕳️ **A marca do tiro não se vê por dentro.** A tábua do reparo sim — ela é
-   pregada no forro —, mas o furo e as lascas são desenhados na superfície
-   **externa**, e do porão o que se enxerga é o forro, a 13 cm dela. Quem desce
-   para tapar localiza o buraco pelo esguicho e pelo prompt, que é como já era
-   antes de a marca existir; um furo que atravessasse o costado nos dois sentidos
-   seria melhor do que isso.
-8. 🎞️ **Clipes de andar de lado e de ré.** A torção de quadril e a passada lida
-   ao contrário resolvem o essencial sem tocar no GLB, mas continuam sendo
-   disfarce: um `anim_strafe.py` entregaria o contato de pé certo no strafe.
-9. ⚖️ **Calibrar o ritmo do naufrágio.** Medido jogando: **leva rajada demais de
-   bala de canhão para um casco querer afundar**. Adiado de propósito, e não
-   esquecido — o abalroamento acabou de entrar como segunda via de estrago, e mexer
-   nos dois números no mesmo dia deixaria sem saber qual deles mudou o duelo. O que
-   se calibra quando chegar a vez: `BREACH_AREA`, `MAX_JET_SPEED` e `PUMP_RATE`, os
-   três em `ShipDamage`, e todos com o teste de avaria por cima.
+1. 🎚️ **Adjustable sail.** It is the gap you feel most. Today the canvas is always full,
+   and two identical sloops in a stern chase **draw by physics** — the one running away
+   cannot be caught. Being able to furl the sail is what gives back the decision to stop
+   and fight, and that is exactly why Sea of Thieves has that control.
+2. 🪣 **Bucket.** Bailing with a bucket needs an item in hand, and there is no inventory
+   yet.
+3. 🎯 **Damage by region.** Today the mast stops the ball but does not come down.
+4. 🔊 **Maneuvering sounds.** Footsteps, the wheel, the anchor chain, the capstan and the
+   pump have no sound of their own — what is missing is event hooks for them, not
+   synthesis.
+5. ⚡ **Thunder.** The lightning lights up the sky, but makes no noise.
+6. 🧍 **Working poses: the cannon and the pump are missing.** The helm (hands on the
+   handles, indexed by the wheel's angle) and the repair plank (the piece held across the
+   body, read off both hands) are done, but at the cannon and the pump the body is still
+   standing there breathing while the hands should be busy. In both, the problem is
+   harder than at the helm, because neither has a quantity clean enough to index the
+   phase: the pump is a chosen cadence, and the cannon is a sequence of gestures, not a
+   cycle.
+7. 🕳️ **The shot mark is not visible from inside.** The repair plank is — it is nailed to
+   the ceiling planking — but the hole and the splinters are drawn on the **outer**
+   surface, and from the hold what you see is the planking, 13 cm away from it. Whoever
+   goes below to patch finds the hole by the jet and the prompt, which is how it already
+   was before the mark existed; a hole that went through the planking in both directions
+   would be better than that.
+8. 🎞️ **Side-step and backward walk clips.** The hip twist and the stride read in reverse
+   solve the essentials without touching the GLB, but they are still a disguise: an
+   `anim_strafe.py` would deliver the right foot contact on a strafe.
+9. ⚖️ **Calibrating the pace of a sinking.** Measured by playing: **it takes too much of a
+   barrage of cannonballs for a hull to want to sink**. Deliberately postponed, not
+   forgotten — ramming has just come in as a second route to damage, and touching both
+   numbers on the same day would leave nobody knowing which of them changed the duel.
+   What gets calibrated when its turn comes: `BREACH_AREA`, `MAX_JET_SPEED` and
+   `PUMP_RATE`, all three in `ShipDamage`, and all with the damage test over them.
 
 ---
 
-## 🌐 O duelo em rede
+## 🌐 The networked duel
 
-Dois capitães, um contra um. Três formas de se encontrar: **fila** (pega quem
-estiver esperando), **abrir uma sala** (você recebe um código de quatro letras) ou
-**entrar numa sala** (você digita o código de alguém).
+Two captains, one against one. Three ways to find each other: **the queue** (takes
+whoever is waiting), **opening a room** (you get a four-letter code) or **joining a
+room** (you type somebody's code).
 
-### Como ele funciona, em um parágrafo
+### How it works, in one paragraph
 
-Quem simula é **um dos dois jogadores**, não o servidor. O servidor de sala — um
-Worker com Durable Objects na Cloudflare — apresenta os dois e retransmite bytes,
-sem nunca abrir um quadro de simulação. O motivo é a conta do plano gratuito: um
-laço de 60 Hz dentro de um Durable Object custaria ~36.000 requests por partida
-(três duelos por dia); retransmitindo, o mesmo duelo custa ~685 — **cerca de 145
-duelos por dia, de graça**.
+The one simulating is **one of the two players**, not the server. The room server —
+a Worker with Durable Objects on Cloudflare — introduces the two and relays bytes,
+without ever opening a simulation frame. The reason is the free plan's arithmetic: a
+60 Hz loop inside a Durable Object would cost ~36,000 requests per match (three duels
+a day); relaying, the same duel costs ~685 — **about 145 duels a day, for free**.
 
-> [!tip] E o adversário tem corpo
-> O convés do outro navio não está mais vazio: o marujo de lá anda, corre, pula,
-> sobe a escada, governa e prega tábua com os mesmos clipes do seu. Como isso
-> funciona em cada papel — e por que o problema difícil é a **velocidade**, e não
-> a posição — está em [O adversário tem corpo](#-o-adversário-tem-corpo).
+> [!tip] And the opponent has a body
+> The other ship's deck is not empty anymore: the sailor over there walks, runs,
+> jumps, climbs the ladder, steers and nails planks with the same clips as yours. How
+> that works in each role — and why the hard problem is **velocity**, not position —
+> is in [The opponent has a body](#-the-opponent-has-a-body).
 
-### Quem hospeda não é quem clicou primeiro
+### The host is not whoever clicked first
 
-É quem tem a **máquina melhor**. Cada cliente manda uma nota de desempenho no
-`hello`, e a sala dá o comando ao mais capaz — porque quem hospeda carrega a
-física dos dois cascos, e uma máquina fraca no comando engasga os dois jogadores.
-Quem abriu a sala tem preferência e só perde o posto para uma diferença clara.
+It is whoever has the **better machine**. Each client sends a performance score in its
+`hello`, and the room gives command to the more capable one — because the host carries
+the physics of both hulls, and a weak machine in command stutters for both players.
+Whoever opened the room has preference and only loses the post to a clear difference.
 
-> ⚠️ E "quem abriu" é lido de um **carimbo de chegada**, não da ordem em que a
-> plataforma devolve os sockets — ela não promete ordem nenhuma. Enquanto a regra
-> se apoiava nessa ordem, a preferência era sorteio: um jogador abriu a sala com
-> nota máxima e recebeu o papel de convidado, que é exatamente o que a regra
-> existe para impedir.
+> ⚠️ And "whoever opened it" is read off an **arrival stamp**, not the order the
+> platform hands back the sockets — it promises no order at all. While the rule leaned
+> on that order, preference was a coin toss: one player opened the room with a top
+> score and got the guest role, which is exactly what the rule exists to prevent.
 
-### O que o cliente prevê, e o que ele espera
+### What the client predicts, and what it waits for
 
-| Prevê localmente | Espera do host |
+| Predicts locally | Waits for the host |
 |---|---|
-| O corpo no convés | Pose e rumo dos cascos |
-| A câmera (nunca corrigida) | Dano, rombos, alagamento |
-| **O ângulo da roda do leme** | O que cada bala acerta |
-| A mira e a barra de recarga | O tempo, o vento e a hora do dia |
-| **Assumir e largar um posto** | — |
+| The body on the deck | Pose and heading of the hulls |
+| The camera (never corrected) | Damage, breaches, flooding |
+| **The wheel's angle** | What each ball hits |
+| Aim and the reload bar | The weather, the wind and the time of day |
+| **Taking and leaving a station** | — |
 
-A última linha mudou depois do primeiro teste com gente de verdade. Ela **sempre**
-esteve prevista na prática — `Interaction.press` chama `takeHelm()` nos dois lados,
-porque é o mesmo código —, só que sem reconciliação: o instantâneo seguinte, que
-descreve um instante anterior ao aperto, devolvia o jogador ao convés, e ele
-piscava entre a roda e o chão até o host confirmar. Hoje a predição fica de pé até
-o **recibo** (o `ackTick`) mostrar que o host já viu o comando que a causou. É a
-diferença entre um timão que responde na hora e um que responde em 400 ms — ou
-que parece não responder.
+The last row changed after the first test with real people. It **always** was
+predicted in practice — `Interaction.press` calls `takeHelm()` on both sides, because
+it is the same code — but with no reconciliation: the next snapshot, which describes
+an instant before the press, put the player back on the deck, and they flickered
+between the wheel and the floor until the host confirmed. Today the prediction stands
+until the **receipt** (the `ackTick`) shows the host has seen the command that caused
+it. It is the difference between a helm that answers immediately and one that answers
+in 400 ms — or that seems not to answer at all.
 
-A lista da esquerda tem uma coisa em comum: são todas **integração pura do próprio
-comando**, então os dois lados chegam ao mesmo número sem precisar conversar. É o
-que faz a roda do leme girar na hora — o navio responder dois segundos depois não
-é latência, é massa, e é assim que se lê.
+The list on the left has one thing in common: they are all **pure integration of your
+own command**, so both sides reach the same number without having to talk. That is
+what makes the wheel turn immediately — the ship responding two seconds later is not
+latency, it is mass, and that is how it reads.
 
-E nada disso precisa de rollback, por uma razão que já estava no projeto muito
-antes de existir rede: **o jogador vive em coordenadas locais do navio**. O convés
-é um chão parado, e andar nele não depende de onda, vela nem leme.
+And none of this needs rollback, for a reason that was in the design long before there
+was any network: **the player lives in the ship's local coordinates**. The deck is a
+floor that does not move, and walking on it does not depend on the wave, the sail or
+the rudder.
 
-### O primeiro teste com gente de verdade, e os quatro defeitos que ele revelou
+### The first test with real people, and the four defects it revealed
 
-Tudo acima já estava escrito e passando nos testes quando o duelo foi ao ar pela
-primeira vez com duas pessoas. Ele estava injogável, e por quatro motivos que só
-aparecem quando existe uma segunda máquina do outro lado do mundo:
+Everything above was already written and passing its tests when the duel went live for
+the first time with two people. It was unplayable, for four reasons that only show up
+when there is a second machine on the other side of the world:
 
-| O que se via | O que era |
+| What you saw | What it was |
 |---|---|
-| O mundo do convidado andando **aos trancos**, a ~15 Hz | O atraso de desenho era de seis passos, e os instantâneos vêm de quatro em quatro: o alvo caía **antes** do mais velho dos dois instantâneos em mão, e a interpolação vivia grampeada no começo. A pose só mudava quando chegava pacote |
-| O adversário **atirando sem bala**, sem estrondo e sem fumaça | A lista de eventos é esvaziada pelo desenho a cada quadro, e o instantâneo sai a cada quatro passos — três de cada quatro tiros, respingos e impactos nunca chegavam ao outro lado. E é do evento de tiro que nasce a bala do convidado |
-| O marujo **andando mas não obedecendo**, e puxado de volta a cada segundo | O avanço do relógio de comando era calculado com **metade** da ida e volta, quando a conta pede ela inteira: o `hostTick` que se lê já vem meia volta atrasado, e o comando ainda leva a outra meia para chegar. Ele nascia atrasado, era descartado, e a posição prevista se afastava até estourar o limite de correção |
-| Tudo isso **pior nos primeiros segundos** | A primeira medição de latência só saía dois segundos depois de conectar, então o duelo começava com ida e volta valendo zero — e um avanço calculado sobre zero é avanço nenhum |
+| The guest's world moving in **jerks**, at ~15 Hz | The render delay was six steps, and snapshots come every four: the target fell **before** the older of the two snapshots in hand, and the interpolation lived clamped at the start. The pose only changed when a packet arrived |
+| The opponent **firing with no ball**, no bang and no smoke | The event list is emptied by the render every frame, and the snapshot goes out every four steps — three out of every four shots, splashes and impacts never reached the other side. And it is the fire event that the guest's ball is born from |
+| The sailor **walking but not obeying**, and yanked back every second | The command clock's lead was computed with **half** the round trip, when the arithmetic asks for the whole of it: the `hostTick` you read already arrives half a trip late, and the command still takes the other half to get there. It was born late, was discarded, and the predicted position drifted until it blew past the correction limit |
+| All of it **worse in the first seconds** | The first latency measurement only came out two seconds after connecting, so the duel started with the round trip worth zero — and a lead computed over zero is no lead at all |
 
-O quinto não chegou a se ver, mas estava lá: o instantâneo era decodificado **por
-cima** da base da interpolação antes de o tick ser conferido, então um pacote fora de
-ordem destruía essa base para depois ser recusado.
+The fifth was never seen, but it was there: the snapshot was decoded **over** the
+interpolation's base before the tick was checked, so an out-of-order packet destroyed
+that base only to be refused afterwards.
 
-### E a segunda rodada, que só apareceu depois da primeira
+### And the second round, which only showed up after the first
 
-Corrigidos os cinco, o duelo voltou ao ar e continuou ruim — **para um dos dois
-lados**. O relato foi "tremendo ao andar, não consigo mexer no timão nem no
-canhão, e os controles parecem se inverter", com o `F3` mostrando `net guest`,
-`starves 0` e `prediction 0.2 cm`. Ou seja: a rede estava saudável e o corpo não
-estava sendo corrigido. O que sobrava eram quatro defeitos que a primeira rodada
-não podia revelar, porque três deles **foram introduzidos ou expostos por ela**:
+With those five fixed, the duel went live again and stayed bad — **for one of the two
+sides**. The report was "shaking when I walk, I can't work the helm or the cannon, and
+the controls seem to invert", with `F3` showing `net guest`, `starves 0` and
+`prediction 0.2 cm`. In other words: the network was healthy and the body was not
+being corrected. What was left were four defects the first round could not reveal,
+because three of them **were introduced or exposed by it**:
 
-| O que se via | O que era |
+| What you saw | What it was |
 |---|---|
-| Tremor ao andar | O relógio de desenho perseguia `hostTick` com ganho proporcional — e `hostTick` é um **degrau** (parado quatro passos, sobe quatro). Perseguir degrau com ganho dá dente de serra: o mundo avançava 1,00 · 0,90 · 0,81 · 0,75 tick por passo e recomeçava. Velocidade oscilando 25% a 15 Hz. A média está certa, e é por isso que nenhum contador de quadros acusa |
-| Toda ação demorando ~370 ms | O avanço do relógio de predição estava em **22 passos** numa conexão que pede 12. `estimateLead` nunca rodava (a guarda era `localTick === 0`, e o relógio já tinha andado dezenas de passos quando o primeiro instantâneo chega), então o valor nascia de fábrica e subia por catraca: subia com fila baixa, só descia com fila alta, e estabilizava numa faixa morta onde nada o trazia de volta |
-| Entrar no timão e voltar sozinho | Predição de posto sem reconciliação. Ver a tabela acima |
-| **Interagir simplesmente não funcionar** | O olhar viajava só como **delta**. Um pacote perdido leva embora aquele pedaço de giro, e o ângulo dos dois lados nunca mais se encontra. O que quebra não é a cabeça do adversário — é o **foco de interação** dele: o jogador aponta para o canhão e aperta o botão, e do lado que decide o marujo está olhando três metros ao lado, sem foco nenhum. Medido em duelo: yaw 1,571 aqui e −0,420 lá, com a posição batendo na segunda casa |
+| Shaking while walking | The render clock chased `hostTick` with proportional gain — and `hostTick` is a **step** (still for four steps, then up by four). Chasing a step with gain gives a sawtooth: the world advanced 1.00 · 0.90 · 0.81 · 0.75 tick per step and started over. Velocity oscillating 25% at 15 Hz. The average is right, which is why no frame counter flags it |
+| Every action taking ~370 ms | The prediction clock's lead sat at **22 steps** on a connection that asks for 12. `estimateLead` never ran (the guard was `localTick === 0`, and the clock had already run dozens of steps by the time the first snapshot arrives), so the value was born at the factory setting and climbed by ratchet: up with a low queue, down only with a high one, and it settled in a dead band where nothing brought it back |
+| Taking the helm and coming back on your own | Station prediction with no reconciliation. See the table above |
+| **Interaction simply not working** | The gaze traveled only as a **delta**. A lost packet takes that piece of rotation away with it, and the two sides' angles never meet again. What breaks is not the opponent's head — it is their **interaction focus**: the player points at the cannon and presses the button, and on the side that decides, the sailor is looking three meters to the side, with no focus at all. Measured in a duel: yaw 1.571 here and −0.420 there, with the position agreeing to the second decimal |
 
-### E a terceira, que não era de rede
+### And the third, which was not about the network
 
-A rodada seguinte trouxe três coisas, e só uma delas era netcode:
+The next round brought three things, and only one of them was netcode:
 
-- 🕳️ **O casco furava e não entrava água.** Um acerto abre rombo em qualquer
-  ponto abaixo do convés (`y = 1,3`), e a linha d'água passa perto de `y = 0,05`:
-  são **1,25 m de costado seco** contra 85 cm de molhado — e o jogador mira no
-  que enxerga, que é justamente a parte seca. Medido nos dois painéis ao mesmo
-  tempo: quatro rombos somados e `inflow 0 L/s` nos dois, com o porão parado em
-  2% depois de um combate inteiro. Como afundar exige encher 92% de 84,7 m³, a
-  partida não terminava nunca. Hoje o rombo acima da linha **embarca o que a
-  crista lhe joga dentro**, numa fração que sai do desvio-padrão do próprio mar —
-  em calmaria ele quase não bebe, em temporal bebe quase como se estivesse
-  submerso. Fugir do mar grosso com o casco furado virou decisão.
-- 🎮 **O convidado não conseguia comandar o navio**, com o painel do host
-  mostrando `queue 21 frames` e `starves 1340` **ao mesmo tempo** — fila cheia e
-  fome, que parece contradição e não é. Um salto no relógio do cliente (a janela
-  de quem simula congelou e voltou) abre um **buraco na numeração**: os ticks
-  pulados nunca foram enviados e nunca serão, o host encontra buraco em todos
-  eles e passa a repetir o último comando conhecido, ignorando tudo que o jogador
-  faz — enquanto a fila engorda com quadros de um futuro distante. Agora, com a
-  fila visivelmente gorda, o host aceita o quadro mais antigo disponível em vez
-  de esperar um que não vem.
-- 🔎 **A partida rápida não pareava.** A vaga na fila valia **sessenta
-  segundos**. Dois amigos combinando por voz não clicam em partida rápida dentro
-  de um minuto um do outro: o primeiro abria a sala `X`, a vaga vencia, e o
-  segundo **abria a sala `Y`** — os dois esperando, em salas diferentes, para
-  sempre. O prazo foi para dez minutos e deixou de ser a defesa principal: hoje a
-  sala devolve a vaga à fila no instante em que esvazia.
+- 🕳️ **The hull was holed and no water came in.** A hit opens a breach at any point
+  below the deck (`y = 1.3`), and the waterline runs near `y = 0.05`: that is **1.25 m
+  of dry topsides** against 85 cm of wet — and the player aims at what they can see,
+  which is exactly the dry part. Measured on both panels at the same time: four
+  breaches added up and `inflow 0 L/s` on both, with the hold sitting at 2% after a
+  whole engagement. Since sinking requires filling 92% of 84.7 m³, the match never
+  ended. Today a breach above the line **takes in what the crest throws into it**, in a
+  fraction derived from the sea's own standard deviation — in a dead calm it barely
+  drinks, in a storm it drinks almost as if it were submerged. Running from heavy seas
+  with a holed hull became a decision.
+- 🎮 **The guest could not command the ship**, with the host's panel showing
+  `queue 21 frames` and `starves 1340` **at the same time** — a full queue and
+  starvation, which looks like a contradiction and is not. A jump in the client's clock
+  (the simulating window froze and came back) opens a **hole in the numbering**: the
+  skipped ticks were never sent and never will be, the host finds a hole at every one
+  of them and starts repeating the last known command, ignoring everything the player
+  does — while the queue fattens with frames from a distant future. Now, with the queue
+  visibly fat, the host accepts the oldest frame available instead of waiting for one
+  that is not coming.
+- 🔎 **Quick match did not pair.** The slot in the queue was worth **sixty seconds**.
+  Two friends arranging it by voice do not click quick match within a minute of each
+  other: the first opened room `X`, the slot expired, and the second **opened room `Y`**
+  — both waiting, in different rooms, forever. The deadline went to ten minutes and
+  stopped being the main defense: today the room returns the slot to the queue the
+  moment it empties.
 
-### E o mais simples de todos, que ficou por último
+### And the simplest of all, which came last
 
-Depois de tudo acima, o convidado ainda não conseguia governar o navio. A causa
-não tinha nada de sutil: **o passo do navio não roda no lado que não simula**, e
-é a primeira linha dele que transforma o comando da roda em ângulo de roda.
+After everything above, the guest still could not steer the ship. The cause was
+nothing subtle: **the ship's step does not run on the side that does not simulate**,
+and its first line is what turns the wheel command into a wheel angle.
 
-O caminho do timão tem três etapas, e só duas rodavam no cliente:
+The helm's path has three stages, and only two ran on the client:
 
-| etapa | rodava? |
+| stage | did it run? |
 |---|---|
-| o marujo assume o posto | ✅ |
-| o marujo escreve `controls.wheel` | ✅ |
-| **alguém integra esse comando** | ❌ — mora em `Ship.fixedUpdate` |
+| the sailor takes the station | ✅ |
+| the sailor writes `controls.wheel` | ✅ |
+| **somebody integrates that command** | ❌ — it lives in `Ship.fixedUpdate` |
 
-O comando era escrito e apagado no passo seguinte sem nunca virar movimento. E
-o efeito era pior que "a roda não anda": o navio **virava**, porque o host
-recebia o comando e girava o leme de lá — mas do lado de cá a roda ficava
-imóvel, as mãos do marujo ficavam imóveis (a pose delas é indexada pelo ângulo
-da roda) e o painel dizia `wheel 0%`. Todo o retorno imediato que existe para o
-jogador acreditar que está no comando estava desligado, e o único sinal que
-sobrava era o casco guinando segundos depois — que é exatamente o que se lê como
-"não respondeu".
+The command was written and erased on the next step without ever becoming movement.
+And the effect was worse than "the wheel does not move": the ship **did turn**, because
+the host received the command and turned the rudder over there — but on this side the
+wheel stood still, the sailor's hands stood still (their pose is indexed by the wheel's
+angle) and the panel said `wheel 0%`. Every bit of immediate feedback that exists for
+the player to believe they are in command was switched off, and the only signal left
+was the hull yawing seconds later — which is exactly what reads as "it did not
+respond".
 
-`Ship.fixedUpdateRemote` roda agora o que o cliente prevê ou anima — leme,
-cabrestante, vela e bandeira — e nada do que chega pronto pelo fio. Os canhões
-ficam de fora de propósito: integrá-los aqui faria a bala sair duas vezes.
+`Ship.fixedUpdateRemote` now runs what the client predicts or animates — rudder,
+capstan, sail and ensign — and none of what arrives ready over the wire. The cannons
+are deliberately left out: integrating them here would fire the ball twice.
 
-O do olhar é o mais instrutivo dos doze. Ele não é um erro de cálculo nem de
-formato: é a diferença entre transmitir **o que mudou** e transmitir **o que é**,
-e ela só cobra quando um pacote se perde. Hoje o olhar vai absoluto ao lado do
-delta — quatro bytes a mais por quadro de entrada, e o ângulo passa a ser o mesmo
-por construção. O delta continua indo porque é dele que a mira do canhão vive.
+The gaze one is the most instructive of the twelve. It is not an arithmetic error nor a
+format error: it is the difference between transmitting **what changed** and
+transmitting **what is**, and it only charges you when a packet is lost. Today the gaze
+goes absolute alongside the delta — four extra bytes per input frame, and the angle
+becomes the same by construction. The delta still goes because it is what the cannon's
+aim lives on.
 
-### E a quarta rodada: o relógio que comia comando
+### And the fourth round: the clock that ate commands
 
-Depois de tudo acima ainda restava o relato mais difícil de ler de todos: *"tem
-hora que tá tudo certo pra mim, tem hora que eu não consigo mexer em nada"*, e
-do outro lado *"ele mexia e tremia tudo, flicava tudo"*. Um dos dois sempre
-estava bem — e quem estava mal era sempre quem tinha calhado de ser o convidado
-naquela partida.
+After all of the above there was still the hardest report of all to read: *"sometimes
+everything is fine for me, sometimes I can't work anything"*, and on the other side
+*"he'd move and everything would shake, everything flickered"*. One of the two was
+always fine — and whoever was doing badly was always whoever happened to be the guest
+in that match.
 
-A causa é uma frase: **o relógio de predição do cliente é corrigido de um em um,
-e cada correção custava um comando.**
+The cause is one sentence: **the client's prediction clock is corrected one step at a
+time, and each correction cost a command.**
 
-O convidado carimba cada comando com o passo em que ele deve valer, e esse
-carimbo persegue o relógio do host. Quando a correção sobe, `predictionTick`
-incrementa por cima dela e o carimbo pula **dois** — o tick do meio nunca foi
-enviado e nunca vai ser. Quando desce, o passo seguinte reproduz o carimbo
-anterior — e o host descarta carimbo repetido em silêncio, por construção, porque
-é assim que a redundância do lote funciona.
+The guest stamps each command with the step it should apply on, and that stamp chases
+the host's clock. When the correction goes up, `predictionTick` increments on top of it
+and the stamp jumps **two** — the middle tick was never sent and never will be. When it
+goes down, the next step reproduces the previous stamp — and the host discards a
+repeated stamp silently, by construction, because that is how the batch's redundancy
+works.
 
-| correção | o que sai no fio | o que o host faz |
+| correction | what goes out on the wire | what the host does |
 |---|---|---|
-| para cima | um **buraco** na numeração | passa fome, repete o comando anterior |
-| para baixo | uma **duplicata** | descarta o segundo, e com ele o comando daquele passo |
+| upward | a **hole** in the numbering | starves, repeats the previous command |
+| downward | a **duplicate** | discards the second, and with it that step's command |
 
-E o buraco não parava no buraco. Fome relatada faz o cliente correr mais à
-frente; correr mais à frente provoca outra correção de relógio; outra correção
-abre outro buraco. Uma catraca, girando sempre para o mesmo lado até o avanço
-bater no teto — que são 400 ms entre a mão e o convés. O que se vê disso é um
-marujo que anda mas não obedece e é puxado de volta a cada instantâneo: *tremia
-tudo*.
+And the hole did not stop at the hole. Reported starvation makes the client run further
+ahead; running further ahead provokes another clock correction; another correction
+opens another hole. A ratchet, always turning the same way until the lead hits the
+ceiling — which is 400 ms between the hand and the deck. What you see of that is a
+sailor who walks but does not obey and is yanked back at every snapshot: *everything
+would shake*.
 
-A saída não é adivinhar melhor, é **não abrir o buraco**. `InputOutbox` costura a
-janela de envio: o tick pulado vai como repetição do anterior (estado repete,
-borda não — a mesma política do `InputBuffer`), e o tick repetido é fundido no que
-já estava lá (bordas por OU, olhar somado). Do lado do host, `InputBuffer` passou a
-aceitar o comando **seguinte** quando o pedido não vem e ele já está em mãos: a
-rede entrega em ordem, então quem passou na frente enterrou o que ficou para trás,
-e repetir o comando velho é jogar fora o comando certo que está a um passo dali.
+The way out is not to guess better, it is to **not open the hole**. `InputOutbox`
+stitches the send window: the skipped tick goes as a repeat of the previous one (state
+repeats, edges do not — the same policy as `InputBuffer`), and the repeated tick is
+merged into whatever was already there (edges by OR, gaze summed). On the host's side,
+`InputBuffer` now accepts the **next** command when the one asked for does not come and
+it already has it in hand: the network delivers in order, so whatever got ahead has
+buried whatever fell behind, and repeating the old command means throwing away the
+right command sitting one step away.
 
-`tests/netclock.ts` mede isso agora contando **apertos**, e não quadros — a
-primeira versão do teste contava ticks entregues e dava zero perdas com o defeito
-ligado, porque o tick chegava com o comando faltando dentro dele.
+`tests/netclock.ts` measures this by counting **presses** now, not frames — the first
+version of the test counted delivered ticks and reported zero losses with the defect
+switched on, because the tick arrived with the command missing inside it.
 
-### As outras cinco da mesma rodada
+### The other five from the same round
 
-- 🌊 **Dois mares.** O rumo da ondulação de fundo (`swellDirection`) nascia do
-  vento **local** de cada cliente — diferente nos dois, porque cada um tinha
-  passado um tempo diferente na tela de título — e depois só andava do lado que
-  simula. As duas ondas longas do espectro são as que levantam um casco de 16 m:
-  os dois jogadores viam o mesmo navio flutuando em ondas diferentes desde o
-  primeiro quadro. Hoje o rumo é semeado com o resto do mundo e viaja no
-  instantâneo.
-- 🕳️ **"Abri rombo e não entra água."** O volume de água chegava certo — o HUD
-  subia, o casco calava mais fundo —, mas quem desenha a lâmina lê `waterPlane`,
-  e `waterPlane` só era resolvido dentro de `ShipDamage.fixedUpdate`, que é o
-  caminho de quem simula. O convidado descia ao porão com o casco furado e
-  encontrava assoalho seco.
-- 🏁 **Três de cada quatro duelos nunca terminavam.** O instantâneo sai de quatro
-  em quatro passos e o naufrágio cai num passo qualquer. Terminando fora da
-  cadência, o resultado nunca subia pelo lobby — e como o relógio da partida para
-  no mesmo instante, ele nunca mais subiria. Os dois ficavam olhando um mar
-  congelado, sem tela de fim e sem erro.
-- 🎯 **A mira que divergia para sempre.** A pontaria da peça é acumular-e-grampear
-  dos mesmos deltas dos dois lados, o que concorda enquanto nenhum comando se
-  perde. Bastava um: daí em diante o cano que o convidado via não era o cano de
-  onde a bala saía. Agora ela é puxada de leve para o ângulo do host uma vez por
-  instantâneo, como a roda do timão já era.
-- 🔢 **Trinta e três rombos quebravam o formato.** A lista viaja atrás de uma
-  contagem de um byte, o escritor mandava quantos houvesse e o leitor parava em
-  32. Passando disso, o instantâneo inteiro saía do lugar a partir dali — o
-  marujo, o adversário e os eventos lidos em cima de bytes de outra coisa. Um
-  teto só, no protocolo, e o tiro que chega com a lista cheia **alarga** o rombo
-  mais próximo em vez de sumir.
+- 🌊 **Two seas.** The background swell's heading (`swellDirection`) was born from each
+  client's **local** wind — different on the two, because each had spent a different
+  amount of time on the title screen — and after that it only advanced on the
+  simulating side. The spectrum's two long waves are the ones that lift a 16 m hull:
+  the two players were watching the same ship float on different waves from the very
+  first frame. Today the heading is seeded with the rest of the world and travels in
+  the snapshot.
+- 🕳️ **"I opened a breach and no water comes in."** The volume of water arrived
+  correctly — the HUD climbed, the hull sat deeper — but whoever draws the sheet reads
+  `waterPlane`, and `waterPlane` was only solved inside `ShipDamage.fixedUpdate`, which
+  is the simulating side's path. The guest went below with a holed hull and found a dry
+  floor.
+- 🏁 **Three out of every four duels never ended.** The snapshot goes out every four
+  steps and the sinking lands on any step at all. Ending off the cadence, the result
+  never went up through the lobby — and since the match clock stops at the same instant,
+  it never would. The two of them sat looking at a frozen sea, with no end screen and no
+  error.
+- 🎯 **The aim that diverged forever.** The gun's laying is accumulate-and-clamp of the
+  same deltas on both sides, which agrees as long as no command is lost. One was enough:
+  from then on the barrel the guest saw was not the barrel the ball came out of. Now it
+  is nudged gently toward the host's angle once per snapshot, as the wheel already was.
+- 🔢 **Thirty-three breaches broke the format.** The list travels behind a one-byte
+  count, the writer sent however many there were and the reader stopped at 32. Past
+  that, the whole snapshot came out shifted from there on — the sailor, the opponent and
+  the events read on top of bytes belonging to something else. One ceiling, in the
+  protocol, and a shot that arrives with the list full **widens** the nearest breach
+  instead of vanishing.
 
-E na sala: um código digitado errado **criava** a sala daquelas letras e sentava
-o jogador nela para sempre (agora ele ouve que não existe sala com esse código);
-quem clicava em "procurar capitão" via a tela de "sua sala está aberta, passe o
-código adiante" (a tela agora sai de *como* se entrou, e não do que a fase era um
-instante atrás); e a fila podia entregar uma vaga que já não servia, deixando
-quem a recebeu sentado sozinho **fora** da fila — hoje ela pede de novo e vira o
-dono de uma vaga nova.
+And in the room: a mistyped code **created** the room of those letters and sat the
+player in it forever (now they hear that no room with that code exists); whoever clicked
+"find a captain" saw the "your room is open, pass the code along" screen (the screen now
+comes from *how* you got in, not from what the phase was an instant ago); and the queue
+could hand out a slot that was no longer good, leaving whoever got it sitting alone
+**outside** the queue — today it asks again and becomes the owner of a fresh slot.
 
-### 👻 E a partida rápida, que pareava com um fantasma
+### 👻 And quick match, which paired with a ghost
 
-A sala por código funcionava; **"procurar capitão" quebrava metade das vezes**, e o
-sintoma era o mais difícil que existe de apurar de fora: um dos dois entrava no duelo
-e o outro ficava no cronômetro de procura para sempre. Qual dos dois era sorteio, e
-cada um tinha motivo para achar que o problema era a internet do outro.
+The room by code worked; **"find a captain" broke half the time**, and the symptom was
+the hardest there is to work out from outside: one of the two got into the duel and the
+other sat on the search timer forever. Which of the two was a coin toss, and each had
+reason to think the problem was the other's internet.
 
-A causa era uma janela de trinta milissegundos que só a fila alcança. Um socket entra
-na lista da sala no instante em que é aceito — muito antes de o `hello` dele chegar —,
-e quando os dois capitães clicam no mesmo instante (que é o caso mais comum que a
-fila tem: dois amigos combinando de jogar) as quatro coisas se intercalam como *aceita
-A, aceita B, hello de A, hello de B*. O pareamento rodava no terceiro passo, com dois
-sockets na sala e **um** nome.
+The cause was a thirty-millisecond window that only the queue reaches. A socket enters
+the room's list the instant it is accepted — long before its `hello` arrives — and when
+both captains click at the same instant (which is the most common case the queue has:
+two friends arranging to play) the four things interleave as *accept A, accept B, hello
+from A, hello from B*. Pairing ran on the third step, with two sockets in the room and
+**one** name.
 
-O estrago era duplo, e nenhuma das duas metades aparecia como erro:
+The damage was twofold, and neither half showed up as an error:
 
-- O desempate de chegada lia zero para quem não tinha falado, então **quem chegou
-  primeiro era tratado como o segundo** e perdia o comando da sala para uma máquina
-  de nota zero.
-- E o `hello` de verdade, ao chegar, encontrava os papéis já decididos e ia embora
-  sem fazer nada — ou seja, o segundo capitão **nunca recebia a mensagem de
-  pareamento**. Ele esperava para sempre; o outro esperava um `ready` que não vinha.
+- The arrival tiebreak read zero for whoever had not spoken, so **whoever arrived first
+  was treated as the second** and lost command of the room to a machine with a score of
+  zero.
+- And the real `hello`, on arriving, found the roles already decided and left without
+  doing anything — meaning the second captain **never received the pairing message**.
+  They waited forever; the other waited for a `ready` that never came.
 
-O conserto é uma linha: a sala não decide quem simula antes de os dois terem se
-apresentado. A assinatura do defeito, para quem já viu acontecer, era o adversário
-aparecer chamado **`Sailor`** — o nome de fábrica de quem ainda não falou.
+The fix is one line: the room does not decide who simulates before both have introduced
+themselves. The defect's signature, for anyone who has seen it happen, was the opponent
+showing up called **`Sailor`** — the factory name of somebody who has not spoken yet.
 
-Da mesma rodada: quem era pareado e ficava sozinho na janela entre o pareamento e o
-começo — meio segundo — não era avisado de nada. A espera já tinha acabado, então não
-havia nem cronômetro andando para sugerir que algo estava errado; ele ficava em
-"adversário a bordo" até fechar a aba. Agora a sala diz o que houve e devolve a vaga
-à fila.
+From the same round: whoever got paired and was left alone in the window between the
+pairing and the start — half a second — was told nothing. The wait was already over, so
+there was not even a timer running to suggest something was wrong; they sat on "opponent
+aboard" until they closed the tab. Now the room says what happened and returns the slot
+to the queue.
 
-> 🧪 Os dois estão em `tests/roomServer.mjs`, e o primeiro só dá para provar abrindo as
-> duas conexões **antes** de qualquer `hello` — que é exatamente a sequência que
-> nenhum teste anterior produzia, porque nenhum jogador conseguiria descrevê-la.
+> 🧪 Both are in `tests/roomServer.mjs`, and the first can only be proven by opening
+> both connections **before** any `hello` — which is exactly the sequence no earlier
+> test produced, because no player could have described it.
 
-### E a quinta rodada, que a água desenterrou — três defeitos que só o comentário sabia
+### And the fifth round, which the water dug up — three defects only the comment knew about
 
-Nenhum dos três foi relatado por quem jogou. Os três já estavam ali, e o que os
-trouxe à tona foi somar um recurso que pisa nos mesmos caminhos. Todos têm a mesma
-assinatura: **código que promete no comentário o que não faz**.
+None of the three was reported by anyone playing. All three were already there, and what
+brought them to the surface was adding a feature that treads the same paths. They all
+have the same signature: **code that promises in the comment what it does not do**.
 
-**O rumo que saturava no fio.** O caminho do *input* (guest → host) normaliza o
-ângulo antes de quantizar, e o comentário ao lado explica o perigo com todas as
-letras: o rumo cresce sem limite enquanto se gira sempre para o mesmo lado, e o
-`i16` desta escala satura em ±3,2767 rad. O caminho do *instantâneo* (host → guest)
-mandava o valor cru. Como o cabrestante **soma uma volta inteira ao rumo a cada
-volta de barra**, quem suspendia o ferro aparecia do outro lado com a cabeça travada
-em 187,7° até o fim da partida. A proteção tinha sido escrita uma vez e aplicada só
-num dos dois lados. Medido com o conserto revertido: 7,5 rad chegam como 3,2767;
-com ele, como 1,2168, erro de 1,5 × 10⁻⁵.
+**The heading that saturated on the wire.** The *input* path (guest → host) normalizes
+the angle before quantizing, and the comment beside it spells the danger out in full:
+the heading grows without limit as long as you keep turning the same way, and the `i16`
+at this scale saturates at ±3.2767 rad. The *snapshot* path (host → guest) sent the raw
+value. Since the capstan **adds a whole turn to the heading with every turn of the
+bars**, whoever weighed anchor showed up on the other side with their head locked at
+187.7° for the rest of the match. The protection had been written once and applied to
+only one of the two sides. Measured with the fix reverted: 7.5 rad arrive as 3.2767;
+with it, as 1.2168, an error of 1.5 × 10⁻⁵.
 
-**A reconciliação comparava no referencial errado.** Ela compara a posição do corpo
-em **coordenadas do navio**, e para quem anda no convés isso é honesto — o `local`
-de um caminhante não lê a pose do casco para nada. O nadador é a primeira coisa
-desta base cuja posição *é* derivada dessa pose, e as duas pontas não têm a mesma: o
-host usa a real, o guest usa a interpolada da rede, **150 a 300 ms atrás** (é
-`lead + INTERP_DELAY`, não só o atraso de interpolação). Duas posições de mundo
-idênticas viravam números diferentes, e o cliente enxergava um erro que não existia:
-**0,56 m só de translação** numa conexão boa, desde o primeiro quadro na água. Com o
-navio guinando o termo cresce com o raio, e a faixa do teleporte seco (1,5 m) era
-cruzada com **6,3 s** de deriva — dentro da janela em que ainda nem se pode pedir
-resgate. Passou a comparar em mundo, reconstruindo a posição do host com a pose do
-casco que veio **no mesmo pacote**: resíduo medido, 0,000 m.
+**Reconciliation was comparing in the wrong frame.** It compares the body's position in
+**ship coordinates**, and for someone walking the deck that is honest — a walker's
+`local` does not read the hull's pose for anything. The swimmer is the first thing in
+this codebase whose position *is* derived from that pose, and the two ends do not have
+the same one: the host uses the real pose, the guest uses the one interpolated from the
+network, **150 to 300 ms behind** (that is `lead + INTERP_DELAY`, not just the
+interpolation delay). Two identical world positions turned into different numbers, and
+the client saw an error that did not exist: **0.56 m of pure translation** on a good
+connection, from the first frame in the water. With the ship yawing the term grows with
+the radius, and the hard-teleport band (1.5 m) was crossed with **6.3 s** of drift —
+inside the window where you cannot even ask for rescue yet. It now compares in world
+space, rebuilding the host's position with the hull pose that came **in the same
+packet**: measured residual, 0.000 m.
 
-**E o desvio visual que nenhum arquivo lia.** A reconciliação calculava um desvio
-para deslizar as correções pequenas em vez de saltar com elas, decaía esse desvio a
-cada quadro, e publicava um getter documentado como *"o desenho soma à posição"* —
-que **nenhum arquivo do projeto lia**. A faixa do meio da correção (de 8 cm a 1,5 m,
-onde mora quase tudo o que acontece de verdade) era escrita crua na posição, quinze
-vezes por segundo, desde sempre. Não dá erro, não fica marcado como código morto, e
-o comentário jura que funciona.
+**And the visual offset no file read.** Reconciliation computed an offset to slide the
+small corrections instead of jumping with them, decayed that offset every frame, and
+published a getter documented as *"the render adds this to the position"* — which **no
+file in the project read**. The middle band of the correction (from 8 cm to 1.5 m, where
+almost everything that really happens lives) was written raw into the position, fifteen
+times a second, from the very beginning. It raises no error, it is not flagged as dead
+code, and the comment swears it works.
 
-Agora ela chega à tela — e com um teto tirado da corrida do próprio personagem:
+Now it reaches the screen — and with a ceiling taken from the character's own run:
 
 ```
-OFFSET_LIMIT = RUN_SPEED / OFFSET_LAMBDA = 0,294 m
+OFFSET_LIMIT = RUN_SPEED / OFFSET_LAMBDA = 0.294 m
 ```
 
-> [!warning] Ligar o desvio sem teto seria pior que o tranco
-> Um decaimento exponencial parte a `λ × |desvio|`. Com o λ de 16 que já estava lá,
-> uma correção de 1,4 m — que **cabe na faixa suavizada** — poria a câmera em
-> primeira pessoa a **22 m/s** por algumas dezenas de milissegundos. Translação de
-> câmera que o jogador não pediu é o gatilho clássico de enjoo, e o remédio seria
-> pior que a doença. Com o teto, a câmera nunca desliza mais rápido do que o
-> personagem corre — e o que passar disso entra seco, pelo mesmo argumento que o
-> amortecimento de degrau já usava: *alisar demais esconderia do jogador que ele caiu
-> de algum lugar*. Trinta centímetros é predição; um metro e meio é discordância, e
-> discordância deve aparecer.
+> [!warning] Switching the offset on with no ceiling would be worse than the jolt
+> An exponential decay starts at `λ × |offset|`. With the λ of 16 that was already
+> there, a correction of 1.4 m — which **fits inside the smoothed band** — would put the
+> first-person camera at **22 m/s** for a few tens of milliseconds. Camera translation
+> the player did not ask for is the classic motion-sickness trigger, and the cure would
+> be worse than the disease. With the ceiling, the camera never slides faster than the
+> character runs — and whatever exceeds that comes in hard, by the same argument the
+> step damping already used: *smoothing too much would hide from the player that they
+> fell off something*. Thirty centimeters is prediction; a meter and a half is
+> disagreement, and disagreement should show.
 
-### Medindo
+### Measuring
 
-`F3` abre um bloco `net` durante um duelo em rede. Os alvos:
+`F3` opens a `net` block during a networked duel. The targets:
 
-| Métrica | Saudável |
+| Metric | Healthy |
 |---|---|
-| `rtt` / `jitter` | < 120 ms / < 30 ms no mesmo país |
-| `queue` | 1 a 3 quadros, estável |
-| `starves` | perto de zero |
-| `lead` | perto de `rtt ÷ 17` **+ 4**, e **não** grudado em 24 |
+| `rtt` / `jitter` | < 120 ms / < 30 ms within the same country |
+| `queue` | 1 to 3 frames, stable |
+| `starves` | near zero |
+| `lead` | near `rtt ÷ 17` **+ 4**, and **not** stuck at 24 |
 | `prediction` | < 5 cm |
 
-O `lead` é o que mais vale olhar quando algo parece lento sem estar travado: ele é
-latência de comando pura, e cada passo dele são 17 ms entre a mão e o convés. Um
-`lead` de 22 com `rtt` de 127 ms — que foi o que apareceu no primeiro duelo de
-verdade — significa 370 ms para o timão responder, e o jogador lê isso como "não
-está funcionando", não como "está devagar".
+`lead` is the one most worth watching when something feels slow without being frozen:
+it is pure command latency, and each step of it is 17 ms between the hand and the deck.
+A `lead` of 22 with an `rtt` of 127 ms — which is what showed up in the first real duel
+— means 370 ms for the helm to answer, and the player reads that as "it is not working",
+not as "it is slow".
 
-E para testar sem sair da própria máquina, a bancada tem rede ruim de mentira:
+And to test without leaving your own machine, the bench has fake bad networking:
 
 ```js
-__game.setSimulatedLag(150, 40, 3)   // 150 ms, 40 de jitter, 3% de perda
+__game.setSimulatedLag(150, 40, 3)   // 150 ms, 40 of jitter, 3% loss
 ```
 
-> ⚠️ **Use isso.** Latência zero esconde tudo que o netcode existe para resolver:
-> o buffer nunca passa fome, a predição nunca erra, a reconciliação nunca roda. Um
-> duelo testado só em `localhost` é um duelo não testado.
+> ⚠️ **Use this.** Zero latency hides everything the netcode exists to solve: the buffer
+> never starves, the prediction never misses, reconciliation never runs. A duel tested
+> only on `localhost` is a duel that has not been tested.
 
-A latência simulada vale **também para as mensagens de lobby**, e isso não é
-detalhe: o `ping` é uma delas, e é dele que sai o `rtt` que decide o avanço
-inicial. Enquanto o lobby ficava de fora, a bancada rodava com 150 ms nos quadros
-e `rtt 0` no medidor — mentindo exatamente sobre o número que ela deveria ajudar
-a testar. A **perda** continua sem se aplicar ao lobby: são seis mensagens por
-sessão, nenhuma com reenvio, e descartar uma só trava a entrada na sala.
+The simulated latency applies **to lobby messages too**, and that is not a detail: the
+`ping` is one of them, and it is what the `rtt` that decides the initial lead comes
+from. While the lobby was left out, the bench ran with 150 ms on the frames and `rtt 0`
+on the gauge — lying about exactly the number it was supposed to help test. **Loss**
+still does not apply to the lobby: there are six messages per session, none of them
+retransmitted, and dropping one just locks up entry into the room.
 
-### Publicar o servidor de sala
+### Publishing the room server
 
 ```bash
-npm run deploy:server        # da raiz, e é o jeito recomendado
+npm run deploy:server        # from the root, and this is the recommended way
 ```
 
-> ⚠️ **`npx wrangler deploy` na raiz não publica nada** — e essa é a pegadinha
-> mais cara deste repositório, porque ela **parece** ter funcionado. A
-> configuração do Worker mora em `server/wrangler.jsonc`, e o wrangler só procura
-> no diretório atual e nos pais, nunca nos filhos. Da raiz, ele para com *"The
-> Cloudflare application detection logic has been run in the root of a workspace
-> instead of targeting a specific project"* e **sai sem subir nada**. Quem rodar
-> isso no meio de uma sessão de correções fica com o cliente novo no ar e o
-> servidor velho embaixo dele — e o sintoma disso não é "o deploy falhou", é o
-> jogo recusando toda conexão com *"This game version cannot duel that one"*,
-> porque as duas pontas passam a discordar do `PROTOCOL_VERSION`.
+> ⚠️ **`npx wrangler deploy` from the root publishes nothing** — and that is the most
+> expensive trap in this repository, because it **looks** like it worked. The Worker's
+> configuration lives in `server/wrangler.jsonc`, and wrangler only looks in the current
+> directory and its parents, never in its children. From the root, it stops with *"The
+> Cloudflare application detection logic has been run in the root of a workspace instead
+> of targeting a specific project"* and **exits without uploading anything**. Anyone who
+> runs that in the middle of a fixing session ends up with the new client live and the
+> old server underneath it — and the symptom of that is not "the deploy failed", it is
+> the game refusing every connection with *"This game version cannot duel that one"*,
+> because the two ends start disagreeing about `PROTOCOL_VERSION`.
 >
-> O script acima existe justamente para tornar o erro impossível: ele entra no
-> workspace certo por conta própria. Se preferir o comando cru, é
-> `cd server && npx wrangler deploy` — o `cd` **não** é opcional.
+> The script above exists precisely to make the mistake impossible: it enters the right
+> workspace on its own. If you prefer the raw command, it is
+> `cd server && npx wrangler deploy` — the `cd` is **not** optional.
 
-A primeira vez pede autenticação: `npx wrangler login` dentro de `server/` (conta
-gratuita, sem cartão). Para conferir o que está de fato no ar a qualquer momento:
+The first time asks for authentication: `npx wrangler login` inside `server/` (free
+account, no card). To check what is actually live at any moment:
 
 ```bash
-cd server && npx wrangler deployments list   # data e versão de cada publicação
-curl https://<seu-worker>.workers.dev/health # deve devolver {"ok":true}
+cd server && npx wrangler deployments list   # date and version of each publish
+curl https://<your-worker>.workers.dev/health # should return {"ok":true}
 ```
 
-Depois, na hospedagem do jogo, defina `VITE_ROOM_SERVER` com o endereço que o
-deploy imprimir (trocando `https://` por `wss://`) e **reconstrua** — o Vite
-embute a variável no build, então republicar o mesmo artefato mantém o valor
-antigo. E ponha o domínio de produção em `ALLOWED_ORIGINS`, no `wrangler.jsonc`:
-sem isso, qualquer página da internet abre salas na sua conta.
+After that, on the game's hosting, set `VITE_ROOM_SERVER` to the address the deploy
+prints (swapping `https://` for `wss://`) and **rebuild** — Vite bakes the variable into
+the build, so republishing the same artifact keeps the old value. And put the production
+domain in `ALLOWED_ORIGINS`, in `wrangler.jsonc`: without that, any page on the internet
+can open rooms on your account.
 
-### Quando não conecta
+### When it does not connect
 
-| Sintoma | O que é | O que fazer |
+| Symptom | What it is | What to do |
 |---|---|---|
-| **"This game version cannot duel that one"** | Cliente e servidor discordam do `PROTOCOL_VERSION`. Quase sempre é o Worker que ficou para trás — ver a pegadinha do `cd server` acima | `npm run deploy:server` e recarregue os dois navegadores sem cache |
-| **"No room server at ws://…"** | Não há nada escutando naquele endereço | O segundo terminal está rodando? `curl http://127.0.0.1:8930/health` devolve `{"ok":true}`? |
-| `/health` devolve **HTML** | Outro processo tomou a porta | `netstat -ano \| findstr :8930`, encerre o intruso — ou troque a porta em `wrangler.jsonc` **e** no `.env.development` |
-| Botão de online apagado | Falta `VITE_ROOM_SERVER` | Local: o `.env.development` existe? Publicado: refaça o build **sem cache** |
-| Preso em "Casting off" | Servidor de sala fora do ar | `npm run dev:server` |
-| "Room is full" | Já há dois na sala | Abra outra |
-| Duelo congela ao trocar de janela | O navegador **congela** a janela de quem hospeda, e com ela a simulação inteira | Deixe as duas visíveis lado a lado. Quem hospeda avisa o outro lado ao sair de foco, e o `F3` do convidado passa a mostrar `HOST IN BACKGROUND` — é a diferença entre "o adversário minimizou" e "a partida quebrou" |
-| Câmera não gira no mouse (mas gira no controle) | O ponteiro não está travado | Clique uma vez na tela. Se o aviso **"Click to look around"** não sumir depois do clique, alguma camada de interface está comendo o clique: toda camada que cobre a tela sem ser clicável precisa de um `#ui-root > .classe { pointer-events: none }`, porque a regra genérica de `base.css` ganha delas por especificidade |
+| **"This game version cannot duel that one"** | Client and server disagree about `PROTOCOL_VERSION`. Almost always it is the Worker that fell behind — see the `cd server` trap above | `npm run deploy:server` and reload both browsers without cache |
+| **"No room server at ws://…"** | There is nothing listening at that address | Is the second terminal running? Does `curl http://127.0.0.1:8930/health` return `{"ok":true}`? |
+| `/health` returns **HTML** | Another process took the port | `netstat -ano \| findstr :8930`, kill the intruder — or change the port in `wrangler.jsonc` **and** in `.env.development` |
+| Online button greyed out | `VITE_ROOM_SERVER` is missing | Locally: does `.env.development` exist? Published: rebuild **without cache** |
+| Stuck on "Casting off" | Room server is down | `npm run dev:server` |
+| "Room is full" | There are already two in the room | Open another |
+| The duel freezes when you switch windows | The browser **freezes** the host's window, and the whole simulation with it | Leave both visible side by side. The host warns the other side when it loses focus, and the guest's `F3` starts showing `HOST IN BACKGROUND` — that is the difference between "my opponent minimized" and "the match broke" |
+| The camera does not turn with the mouse (but does with the pad) | The pointer is not locked | Click the screen once. If the **"Click to look around"** notice does not go away after the click, some UI layer is eating the click: every layer that covers the screen without being clickable needs a `#ui-root > .class { pointer-events: none }`, because the generic rule in `base.css` beats them on specificity |
 
 ---
 
 ## 📦 Stack
 
-TypeScript · Three.js · postprocessing · Vite, e Cloudflare Workers com Durable
-Objects no servidor de sala. Nenhuma dependência de física, de áudio, de UI ou de
-rede: tudo aqui é do projeto.
+TypeScript · Three.js · postprocessing · Vite, and Cloudflare Workers with Durable
+Objects on the room server. No physics, audio, UI or networking dependency: everything
+here belongs to the project.
+
+---
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. A few things worth knowing before you open one:
+
+- 🧪 **Run the tests.** The eight suites are described in [Tests](#-tests). Seven run in
+  the browser console with the dev server up; the eighth needs `npm run dev:server` in
+  another terminal.
+- 🧮 **`npm run check:all` has to be green.** It type-checks the game and the room server
+  — they are separate `tsconfig`s, and a change to `shared/` can break the one you are
+  not looking at.
+- 📏 **Numbers come with their derivation.** Almost every constant in this codebase has a
+  comment saying where it came from — a measurement, a piece of geometry, a limit of the
+  rig. If you change one, change the reasoning with it; if you add one, say where it came
+  from.
+- 🔌 **Touching the wire means bumping the protocol.** `PROTOCOL_VERSION` lives in
+  `shared/protocol.ts`, and client and server refuse each other when they disagree. Any
+  change to the snapshot or input format needs the bump, plus a case in
+  `tests/snapshot.ts`.
+- 🎨 **No new dependencies without a conversation.** The whole point of the project is
+  that the physics, the audio, the UI and the netcode are its own. A PR that brings in a
+  library to solve something already solved here will be asked why.
+
+## 📄 License
+
+**No license has been chosen yet.** Until a `LICENSE` file exists in this repository,
+the code is under default copyright: it is public to read, but nobody has permission to
+use, copy, modify or redistribute it. If you want to do any of that, open an issue and
+ask.

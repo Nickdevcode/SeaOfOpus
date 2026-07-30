@@ -1,15 +1,15 @@
 /**
- * Ponto de entrada: monta o mundo, entrega o jogo ao `Match` e roda o laço.
+ * Entry point: builds the world, hands the game to `Match` and runs the loop.
  *
- * O que mora aqui é a **apresentação** — renderizador, cena, câmera, ambiente,
- * esteira, motor e entrada. O que é *jogo* é do `Match`: os dois navios, o capitão
- * inimigo, as balas, o jogador a bordo. A divisa vale um parágrafo porque ela é o
- * que permite reiniciar um duelo sem reconstruir o oceano nem regerar as texturas
- * do casco, que juntos custam décimos de segundo.
+ * What lives here is the **presentation** — renderer, scene, camera, environment,
+ * wake, engine and input. What is *game* belongs to `Match`: the two ships, the
+ * enemy captain, the cannonballs, the player aboard. The boundary is worth a
+ * paragraph because it's what allows restarting a duel without rebuilding the ocean
+ * or regenerating the hull textures, which together cost tenths of a second.
  *
- * A ordem dentro do laço é a que os comentários de cada bloco justificam. Nenhuma
- * delas é gosto: passo fixo antes do quadro, pose interpolada antes da câmera,
- * passes fora de tela antes do render.
+ * The order inside the loop is the one each block's comments justify. None of it is
+ * taste: fixed step before the frame, interpolated pose before the camera,
+ * offscreen passes before the render.
  */
 
 import * as THREE from 'three';
@@ -55,8 +55,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
   62,
   window.innerWidth / window.innerHeight,
-  // O near fica em 15 cm: perto o suficiente para a primeira pessoa a bordo e
-  // longe o suficiente para o depth buffer de 24 bits aguentar os 12 km de far.
+  // Near sits at 15 cm: close enough for first person aboard and far enough for
+  // the 24-bit depth buffer to survive the 12 km far plane.
   0.15,
   12000,
 );
@@ -66,13 +66,14 @@ const environment = new Environment(scene, settings.quality, {
 });
 
 /**
- * Hora em que o jogo abre: meio da tarde (≈16h20).
+ * The time the game opens on: mid-afternoon (≈16:20).
  *
- * `timeOfDay` é a fração do dia, então 0,68 × 24 h. É direção de arte, não física: o
- * sol baixo dá luz rasante no costado, sombra comprida no convés e um mar dourado
- * atrás do título, que é a primeira coisa que alguém vê do jogo. Ao meio-dia a luz
- * vem de cima, achata o casco e apaga o relevo das tábuas. O ciclo segue correndo
- * daqui normalmente — isto escolhe só onde ele começa.
+ * `timeOfDay` is the fraction of the day, so 0.68 × 24 h. This is art direction, not
+ * physics: the low sun gives raking light on the hull side, a long shadow on the
+ * deck and a golden sea behind the title, which is the first thing anyone sees of
+ * the game. At noon the light comes from overhead, flattens the hull and kills the
+ * relief of the planks. The cycle keeps running from here as usual — this only
+ * picks where it starts.
  */
 environment.dayNight.timeOfDay = 0.68;
 
@@ -83,18 +84,18 @@ input.attach(renderer.canvas);
 
 renderer.compose(scene, camera, environment.sky.sunMesh);
 
-// --- áudio -------------------------------------------------------------------
-// O contexto de áudio só pode abrir dentro de um gesto do jogador — é regra de
-// todo navegador atual. Qualquer clique ou tecla serve, e depois do primeiro a
-// chamada é barata (só confere se o contexto foi suspenso ao trocar de aba).
+// --- audio -------------------------------------------------------------------
+// The audio context can only open inside a player gesture — that's the rule in
+// every current browser. Any click or key will do, and after the first one the
+// call is cheap (it only checks whether the context got suspended on a tab switch).
 const audio = new GameAudio();
 const unlockAudio = (): void => audio.unlock();
 window.addEventListener('pointerdown', unlockAudio);
 window.addEventListener('keydown', unlockAudio);
 
-// --- jogo --------------------------------------------------------------------
-// `match` é preenchido logo abaixo, mas o menu precisa referenciá-lo nos callbacks
-// dele — que só disparam por clique, muito depois das duas linhas rodarem.
+// --- game --------------------------------------------------------------------
+// `match` is filled in just below, but the menu needs to reference it in its
+// callbacks — which only fire on a click, long after both lines have run.
 let match!: Match;
 
 const rig = new CameraRig(camera);
@@ -103,17 +104,18 @@ const hud = new CombatHud(uiRoot);
 const blackout = new Blackout(uiRoot);
 
 /**
- * Quantos resgates o marujo local já pediu, na última vez que se olhou.
+ * How many rescues the local deckhand has asked for, as of the last look.
  *
- * O corte para o preto é disparado por **borda**, e não por estado, porque o
- * resgate acontece dentro de um passo fixo e o quadro que o descobre pode ser o
- * seguinte — ou o terceiro, numa tela de 30 Hz. Um contador não tem como ser
- * perdido; uma bandeira de um passo tem. Ver `PlayerController.rescueCount`.
+ * The cut to black fires on an **edge**, not on state, because the rescue happens
+ * inside a fixed step and the frame that notices it may be the next one — or the
+ * third, on a 30 Hz display. A counter cannot be missed; a one-step flag can. See
+ * `PlayerController.rescueCount`.
  */
 let lastRescueCount = 0;
 
-// A conversa com o servidor de sala. Nasce sabendo se há servidor: sem a variável
-// de ambiente, o modo online é apagado na tela de título em vez de falhar depois.
+// The conversation with the room server. It's born knowing whether a server exists:
+// with no environment variable, online mode is grayed out on the title screen
+// instead of failing later.
 let online!: OnlineSession;
 
 const menu = new Menu(uiRoot, {
@@ -140,18 +142,18 @@ match = new Match(scene, environment, {
   onCollision: (position, speed) => audio.collision(position, speed),
   onStateChange: (state) => {
     if (state !== 'won' && state !== 'lost') return;
-    // Em rede, quem anuncia o fim é a sala: só o host simula, e o guest chega a
-    // este estado por instantâneo, meio segundo depois. Deixar os dois caminhos
-    // abrirem a tela daria dois resultados sobrepostos no lado do host.
+    // Online, the room is what announces the end: only the host simulates, and the
+    // guest reaches this state through a snapshot, half a second later. Letting both
+    // paths open the screen would give two overlapping outcomes on the host's side.
     if (match.role !== 'solo') return;
     audio.outcome(state === 'won');
     menu.showOutcome(state === 'won', match.stats);
   },
 });
 
-// Depois do `match`, e não antes: a sessão guarda a referência para simular e
-// serializar. Criada acima, ela guardaria `undefined` — e o erro só apareceria no
-// primeiro instantâneo de um duelo em rede, muito longe daqui.
+// After `match`, not before: the session keeps the reference to simulate and
+// serialize. Created above, it would keep `undefined` — and the error would only
+// show up in the first snapshot of an online duel, a long way from here.
 online = new OnlineSession(import.meta.env.VITE_ROOM_SERVER, match);
 
 menu.setOnlineAvailable(
@@ -161,19 +163,20 @@ menu.setOnlineAvailable(
 online.onChange((state) => menu.setOnlineState(state));
 
 online.onStart((config) => {
-  // O mundo vem da sala, e não das preferências locais: o mar dos dois lados tem
-  // de ser o mesmo mar. Ver a nota sobre o modo de tempo em `DuelRoom.onReady`.
+  // The world comes from the room, not from local preferences: the sea on both sides
+  // has to be the same sea. See the note on weather mode in `DuelRoom.onReady`.
   //
-  // As três linhas são o mundo inteiro: a semente dita as ondas e a sequência de
-  // viradas de tempo, o modo dita o tempo, e a hora dita a luz. Faltando as duas
-  // últimas — como faltavam —, dois capitães entravam no mesmo mar sob céus
-  // diferentes, cada um com o relógio que a tela de título dele tinha alcançado.
+  // The three lines are the whole world: the seed dictates the waves and the
+  // sequence of weather turns, the mode dictates the weather, and the hour dictates
+  // the light. With the last two missing — as they were — two captains entered the
+  // same sea under different skies, each with whatever clock his title screen had
+  // reached.
   environment.reseed(config.seed);
   environment.setWeatherMode(config.weather);
   environment.dayNight.timeOfDay = config.timeOfDay;
-  // A preferência local de tempo fica de fora enquanto durar o duelo, e a
-  // guarda de `applyPreferences` é que a segura. Aqui só se apaga a memória do
-  // que estava aplicado, para o valor da sala não ser confundido com ele.
+  // The local weather preference stays out for as long as the duel lasts, and the
+  // guard in `applyPreferences` is what holds it back. This only wipes the memory
+  // of what was applied, so the room's value isn't confused with it.
   appliedWeather = null;
   menu.show('none');
   match.startOnline(config.role);
@@ -181,10 +184,10 @@ online.onStart((config) => {
 
 online.onOver((won, reason) => {
   if (menu.current === 'outcome') return;
-  // **Antes de `leave`**, e a ordem é o que impede o mundo de sair andando
-  // sozinho atrás da tela de fim: `leave` desliga a sessão de rede, e sem ela o
-  // passo seguinte cairia no caminho de quem simula — dois cascos integrando
-  // física local, sem capitão da máquina e sem entrada nenhuma para o segundo.
+  // **Before `leave`**, and the order is what stops the world from wandering off
+  // alone behind the end screen: `leave` shuts down the network session, and without
+  // it the next step would fall into the simulating path — two hulls integrating
+  // local physics, with no machine captain and no input at all for the second.
   match.endOnline(won);
   audio.outcome(won);
   menu.showOutcome(won, match.stats, 'online');
@@ -193,28 +196,28 @@ online.onOver((won, reason) => {
 });
 
 /**
- * Clicar em qualquer lugar pede o ponteiro — mas só quando se está de fato
- * jogando, senão o menu perderia o cursor no primeiro clique de botão.
+ * Clicking anywhere asks for the pointer — but only while actually playing,
+ * otherwise the menu would lose the cursor on the first button click.
  *
- * O ouvinte fica na **janela**, e não no canvas, e a diferença já custou uma
- * sessão inteira de teste: as camadas de interface cobrem a tela toda, e basta
- * uma delas esquecer o `pointer-events: none` para o canvas parar de receber
- * clique — o jogo continua desenhando, o teclado continua andando, e só a câmera
- * do mouse morre, que é o sintoma mais difícil de ligar à causa. Na janela, o
- * clique chega por borbulhamento venha ele de onde vier. (A camada culpada era o
- * HUD; ver a nota em `hud.css`.)
+ * The listener sits on the **window**, not on the canvas, and the difference has
+ * already cost a whole test session: the interface layers cover the entire
+ * screen, and one of them forgetting `pointer-events: none` is enough to stop the
+ * canvas from receiving clicks — the game keeps drawing, the keyboard keeps
+ * walking, and only the mouse camera dies, which is the symptom hardest to connect
+ * to its cause. On the window, the click arrives by bubbling wherever it comes
+ * from. (The guilty layer was the HUD; see the note in `hud.css`.)
  */
 window.addEventListener('click', () => {
   if (!menu.open && match.running) input.requestPointerLock();
 });
 
 /**
- * Alinha a casca ao estado do menu: quem recebe entrada, o que aparece na tela e
- * onde a câmera fica.
+ * Lines the shell up with the menu state: who receives input, what shows on screen
+ * and where the camera sits.
  *
- * Roda quando a tela muda, e não a cada quadro, porque tudo aqui é troca de estado.
- * A câmera livre de inspeção (`C`) é respeitada: o modo `detached` nunca é
- * atropelado, senão a bancada de capturas perderia o enquadramento no primeiro
+ * Runs when the screen changes, not every frame, because everything here is a state
+ * change. The free inspection camera (`C`) is respected: `detached` mode is never
+ * overridden, otherwise the capture bench would lose its framing on the first
  * `Esc`.
  */
 function syncShell(): void {
@@ -229,8 +232,8 @@ function syncShell(): void {
   } else {
     if (rig.mode === 'player') rig.cinematic();
     input.exitPointerLock();
-    // Um resgate pedido no último quadro antes de o menu abrir deixaria a órbita
-    // cinematográfica atrás de um pano preto até o corte terminar sozinho.
+    // A rescue asked for on the last frame before the menu opens would leave the
+    // cinematic orbit behind a black curtain until the cut finished on its own.
     blackout.clear();
   }
 }
@@ -238,9 +241,9 @@ function syncShell(): void {
 let lastScreen: Screen | null = null;
 syncShell();
 
-// --- câmera livre de inspeção (DEV) ------------------------------------------
-// Fica fora do jogo: `C` solta a câmera do jogador para inspecionar a cena de
-// fora, e é o que a bancada `__game` usa para posicionar capturas de tela.
+// --- free inspection camera (DEV) --------------------------------------------
+// It sits outside the game: `C` detaches the camera from the player to inspect the
+// scene from outside, and it's what the `__game` bench uses to place screenshots.
 const cameraState = {
   yaw: 0,
   pitch: -0.08,
@@ -248,10 +251,10 @@ const cameraState = {
   velocity: new THREE.Vector3(),
 };
 
-/** Aponta a câmera livre para um ponto do mundo, sem mexer na posição dela. */
+/** Aims the free camera at a point in the world, without moving its position. */
 function aimCameraAt(target: THREE.Vector3): void {
   const to = target.clone().sub(camera.position);
-  // atan2(-x, -z) porque a câmera olha para -Z quando o yaw é zero.
+  // atan2(-x, -z) because the camera looks down -Z when yaw is zero.
   cameraState.yaw = Math.atan2(-to.x, -to.z);
   cameraState.pitch = Math.atan2(to.y, Math.hypot(to.x, to.z));
 }
@@ -277,19 +280,19 @@ function updateFreeCamera(dt: number): void {
   if (target.lengthSq() > 0) target.normalize();
   target.multiplyScalar(cameraState.speed * (input.isDown('sprint') ? 4 : 1));
 
-  // Amortecimento independente do frame rate: acelera e para com peso.
+  // Frame-rate-independent damping: it accelerates and stops with weight.
   cameraState.velocity.x = damp(cameraState.velocity.x, target.x, 9, dt);
   cameraState.velocity.y = damp(cameraState.velocity.y, target.y, 9, dt);
   cameraState.velocity.z = damp(cameraState.velocity.z, target.z, 9, dt);
 
   camera.position.addScaledVector(cameraState.velocity, dt);
 
-  // Não deixa a câmera mergulhar: por enquanto não há visual submerso.
+  // Keeps the camera from diving: there's no underwater look yet.
   const waterHeight = environment.sampleHeight(camera.position.x, camera.position.z);
   camera.position.y = Math.max(camera.position.y, waterHeight + 0.8);
 }
 
-/** Solta a câmera do jogador e a põe onde ela está agora, olhando para o mesmo lado. */
+/** Detaches the camera from the player, leaving it where it is and facing the same way. */
 function detachCamera(): void {
   rig.detach();
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -299,13 +302,13 @@ function detachCamera(): void {
 }
 
 /**
- * `C` alterna entre jogar e voar de câmera livre pela cena.
+ * `C` toggles between playing and flying the free camera around the scene.
  *
- * Passa pelo sistema de ações (`freeCamera`), e não por um `keydown` solto na
- * janela como antes. A diferença não é organização: um ouvinte próprio ignora o
- * `input.captured`, e apertar `C` na tela de título soltava a câmera para o modo
- * `detached` — do qual `syncShell` nunca tira ninguém, de propósito. A órbita
- * cinematográfica atrás do menu morria ali e só voltava recarregando a página.
+ * It goes through the action system (`freeCamera`), not a loose `keydown` on the
+ * window like before. The difference isn't tidiness: a listener of its own ignores
+ * `input.captured`, and pressing `C` on the title screen dropped the camera into
+ * `detached` mode — which `syncShell` deliberately never pulls anyone out of. The
+ * cinematic orbit behind the menu died there and only came back on a page reload.
  */
 function toggleFreeCamera(): void {
   if (rig.mode === 'detached') rig.attachPlayer();
@@ -313,18 +316,18 @@ function toggleFreeCamera(): void {
 }
 
 /**
- * Como o adversário é anunciado no HUD.
+ * How the opponent is announced on the HUD.
  *
- * Contra a máquina é a intenção do capitão, que é meia leitura do duelo — ver
- * alguém em "Tapando rombos" diz mais que qualquer barra de vida. Em rede é o
- * apelido de quem está do outro lado, porque a intenção de uma pessoa não é
- * nossa para contar.
+ * Against the machine it's the captain's intent, which is half a read on the duel —
+ * seeing someone on "Patching holes" says more than any health bar. Online it's the
+ * nickname of whoever is on the other side, because a person's intent isn't ours
+ * to tell.
  */
 function foeLabel(): string {
   return match.ai ? INTENT_LABELS[match.ai.intent] : online.opponentName;
 }
 
-// --- overlay de telemetria ---------------------------------------------------
+// --- telemetry overlay -------------------------------------------------------
 const debugOverlay = document.createElement('pre');
 debugOverlay.className = 'debug-overlay';
 debugOverlay.hidden = !settings.preferences.showDebug;
@@ -349,17 +352,17 @@ function updateDebug(dt: number): void {
   const ai = match.ai;
   const waterHeight = environment.sampleHeight(camera.position.x, camera.position.z);
 
-  // 'YXZ' separa guinada, caturro e balanço na ordem em que se lê um navio.
+  // 'YXZ' separates yaw, pitch and roll in the order you read a ship in.
   _shipEuler.setFromQuaternion(ship.body.orientation, 'YXZ');
 
-  // Ângulo do vento aparente medido a partir da popa: 0° é vento em popa (o rumo
-  // mais rápido) e 180° é vento pela proa.
+  // Apparent wind angle measured from the stern: 0° is dead downwind (the fastest
+  // heading) and 180° is wind on the bow.
   const windSpeed = ship.sail.localWind.length();
   const pointOfSail = windSpeed > 0.01
     ? Math.acos(clamp(-ship.sail.localWind.z / windSpeed, -1, 1)) * RAD
     : 0;
 
-  // Uma leitura só: o getter monta um objeto, e o overlay usa nove campos dele.
+  // A single read: the getter builds an object, and the overlay uses nine of its fields.
   const avatar = match.avatar.debug;
   const foeBody = match.enemyAvatar.debug;
 
@@ -382,8 +385,8 @@ function updateDebug(dt: number): void {
     `anchor ${ship.anchor.state}  ${(ship.anchor.deploy * 100).toFixed(0)}%  ·  tension ${(ship.anchor.tension / 1000).toFixed(1)} kN`,
     `hold ${(ship.damage.floodFraction * 100).toFixed(1)}%  (${ship.damage.floodVolume.toFixed(2)} of ${ship.damage.holdVolume.toFixed(1)} m³)  ·  holes ${ship.damage.breaches.length}  ·  inflow ${(totalInflow * 1000).toFixed(0)} L/s${ship.damage.isSinking ? '  ·  SINKING' : ''}`,
     '',
-    // As linhas do capitão da máquina só existem quando há um. Em rede, o que
-    // sobra é o que se pode medir de fora: o casco do outro e o contato.
+    // The machine captain's lines only exist when there is one. Online, what's left
+    // is what can be measured from outside: the other hull and the contact.
     ...(ai
       ? [
           `ENEMY (${match.difficulty.label})  ${INTENT_LABELS[ai.intent]}  ·  ${enemy.knots.toFixed(2)} kn`,
@@ -396,16 +399,16 @@ function updateDebug(dt: number): void {
           `ENEMY (${online.opponentName || 'remote'})  ${enemy.knots.toFixed(2)} kn  ·  range ${match.range.toFixed(0)} m`,
           `enemy hold ${(enemy.damage.floodFraction * 100).toFixed(1)}%  ·  holes ${enemy.damage.breaches.length}  ·  planks ${enemy.planks}`,
           `enemy crew ${match.crew[1].controller.station}${match.crew[1].controller.onLadder ? ' (ladder)' : ''}  ·  local x ${match.crew[1].controller.local.x.toFixed(2)}  z ${match.crew[1].controller.local.z.toFixed(2)}`,
-          // O corpo dele, medido do mesmo jeito que o do jogador logo abaixo: é
-          // por esta linha que se vê se o adversário está sendo **animado** ou
-          // só posicionado — um `gait` cravado em zero com ele andando na tela é
-          // exatamente o defeito que o corpo remoto existe para não ter.
+          // His body, measured the same way as the player's just below: this
+          // line is what tells whether the opponent is being **animated** or
+          // merely positioned — a `gait` pinned at zero while he walks across
+          // the screen is exactly the defect the remote body exists not to have.
           `enemy body ${match.enemyAvatar.root.visible ? 'shown' : 'hidden'}  ·  gait w ${foeBody.walk.toFixed(2)} r ${foeBody.run.toFixed(2)} i ${foeBody.idle.toFixed(2)} air ${foeBody.air.toFixed(2)} climb ${foeBody.climb.toFixed(2)} helm ${foeBody.helm.toFixed(2)}  ·  speed ${match.crew[1].controller.gait.speed.toFixed(2)} m/s`,
         ]),
     `contact ${match.contact.contacts} points  ·  depth ${(match.contact.depth * 100).toFixed(0)} cm`,
-    // O bloco de rede só existe num duelo em rede, e é o painel que diz se o
-    // netcode está saudável. Os alvos: rtt < 120 ms, jitter < 30, fila entre 2 e
-    // 4, fome perto de zero, erro de predição abaixo de 5 cm.
+    // The net block only exists in an online duel, and it's the panel that says
+    // whether the netcode is healthy. The targets: rtt < 120 ms, jitter < 30, queue
+    // between 2 and 4, starves near zero, prediction error below 5 cm.
     ...(net
       ? [
           '',
@@ -415,11 +418,11 @@ function updateDebug(dt: number): void {
       : []),
     '',
     `player ${match.player.station}${match.player.onLadder ? ' (ladder)' : ''}${match.player.grounded ? '' : ' (airborne)'}${match.player.inWater ? ' (swimming)' : ''}  ·  local x ${match.player.local.x.toFixed(2)}  y ${match.player.local.y.toFixed(2)}  z ${match.player.local.z.toFixed(2)}`,
-    // O relógio da água tem duas fases e dois clipes, e esta linha mostra as duas
-    // metades: à esquerda o que o relógio pede, à direita (`f`/`s`) o peso que
-    // cada clipe de fato levou. Divergência entre os dois lados quer dizer GLB sem
-    // `Float`/`Swim` — a água devolve zero e o corpo volta a nadar em pé. Ver
-    // `PlayerAvatar.updateSwim`.
+    // The water clock has two phases and two clips, and this line shows both
+    // halves: on the left what the clock asks for, on the right (`f`/`s`) the weight
+    // each clip actually took. Divergence between the two sides means a GLB with no
+    // `Float`/`Swim` — the water returns zero and the body goes back to swimming
+    // upright. See `PlayerAvatar.updateSwim`.
     `water ${match.player.inWater ? `${match.player.waterTime.toFixed(1)} s` : 'dry'}  ·  swim w ${match.player.swim.weight.toFixed(2)} stroke ${match.player.swim.stroke.toFixed(2)} phase ${match.player.swim.phase.toFixed(2)}/${match.player.swim.floatPhase.toFixed(2)} at ${match.player.swim.speed.toFixed(2)} m/s  ·  pose f ${avatar.float.toFixed(2)} s ${avatar.swim.toFixed(2)}  ·  rescue ${match.player.canRequestRescue() ? 'ready' : '—'}`,
     `body ${match.avatar.root.visible ? 'worn' : 'hidden'}  ·  legs ${(avatar.twist * RAD).toFixed(0)}° ${avatar.reversed ? 'reverse' : 'forward'}  ·  head clip ${avatar.headClip >= HEAD_CLIP_OFF ? 'off' : avatar.headClip.toFixed(2)}  ·  gait w ${avatar.walk.toFixed(2)} r ${avatar.run.toFixed(2)} i ${avatar.idle.toFixed(2)} air ${avatar.air.toFixed(2)} climb ${avatar.climb.toFixed(2)} helm ${avatar.helm.toFixed(2)}`,
     `cannons ${ship.cannons.map((c) => c.state).join(' / ')}  ·  locker ${ship.cannonballs} shot / ${ship.planks} planks  ·  focus ${match.interaction.focus?.id ?? '—'}`,
@@ -431,39 +434,39 @@ function updateDebug(dt: number): void {
   ].join('\n');
 }
 
-// --- guarda de desempenho ----------------------------------------------------
+// --- performance guard -------------------------------------------------------
 
 /**
- * O preset desce sozinho quando a máquina não sustenta o que ela pediu.
+ * The preset steps down on its own when the machine can't hold what it asked for.
  *
- * A detecção por nome de GPU (ver `detectPreset`) acerta a ordem de grandeza e
- * erra o resto: ela não sabe a resolução do monitor, não sabe se há um navegador
- * com quarenta abas do lado, e não sabe que este jogador está **hospedando** um
- * duelo, o que põe a física de dois cascos na mesma máquina. Quando erra, o
- * jogador fica com um jogo a vinte quadros e nenhuma pista de que a solução está
- * a dois cliques de distância no menu.
+ * Detection by GPU name (see `detectPreset`) gets the order of magnitude right and
+ * everything else wrong: it doesn't know the monitor's resolution, doesn't know
+ * whether there's a browser with forty tabs alongside, and doesn't know this player
+ * is **hosting** a duel, which puts the physics of two hulls on the same machine.
+ * When it gets it wrong, the player is left with a game at twenty frames and no hint
+ * that the fix is two clicks away in the menu.
  *
- * Três decisões que valem por si:
+ * Three decisions that stand on their own:
  *
- * - **Só desce.** Subir de volta ao primeiro trecho tranquilo daria um jogo que
- *   oscila entre dois presets, e o pior momento de uma queda de quadros é o
- *   combate, que é exatamente quando ela voltaria.
- * - **Precisa de uma janela inteira abaixo do alvo.** Um engasgo de meio segundo
- *   ao carregar uma textura não é uma máquina fraca; seis segundos seguidos são.
- * - **Vale o que ficou gravado.** A escolha persiste, então quem abriu o jogo
- *   numa máquina modesta já começa a próxima sessão no preset que funcionou.
+ * - **It only goes down.** Climbing back up at the first quiet stretch would give a
+ *   game that oscillates between two presets, and the worst moment for a frame rate
+ *   drop is combat, which is exactly when it would come back.
+ * - **It needs a whole window below the target.** A half-second hitch while loading
+ *   a texture isn't a weak machine; six seconds in a row is.
+ * - **What was saved counts.** The choice persists, so whoever opened the game on a
+ *   modest machine starts the next session on the preset that worked.
  */
 const AUTO_QUALITY_FPS = 40;
 const AUTO_QUALITY_WINDOW = 6;
-/** Carência depois de descer um degrau: dá tempo de o preset novo se assentar. */
+/** Grace period after stepping down a rung: gives the new preset time to settle. */
 const AUTO_QUALITY_COOLDOWN = 10;
 
 let lowFrameRateTime = 0;
 let autoQualityCooldown = AUTO_QUALITY_COOLDOWN;
 
 function guardPerformance(dt: number): void {
-  // Só durante a partida: o menu tem órbita cinematográfica e transições, e é
-  // onde a taxa de quadros diz menos sobre o que a máquina aguenta jogando.
+  // Only during the match: the menu has a cinematic orbit and transitions, and it's
+  // where the frame rate says the least about what the machine can take in play.
   if (menu.open || !match.running) {
     lowFrameRateTime = 0;
     return;
@@ -478,9 +481,9 @@ function guardPerformance(dt: number): void {
   if (index <= 0) return;
 
   if (engine.fps >= AUTO_QUALITY_FPS) {
-    // Decai em vez de zerar: uma máquina que oscila em volta do alvo ainda
-    // acumula, só que mais devagar. Zerar deixaria o caso mais comum de todos —
-    // o que passa de 40 de vez em quando — nunca disparar.
+    // Decays instead of resetting to zero: a machine that oscillates around the
+    // target still accumulates, only more slowly. Resetting would leave the most
+    // common case of all — the one that crosses 40 now and then — never firing.
     lowFrameRateTime = Math.max(0, lowFrameRateTime - dt);
     return;
   }
@@ -501,38 +504,38 @@ function guardPerformance(dt: number): void {
 const engine = new Engine();
 
 /**
- * O tradutor entre o relógio do monitor e o da simulação.
+ * The translator between the monitor's clock and the simulation's.
  *
- * Amostra a entrada em `beginFrame` (que roda antes dos passos fixos) e entrega
- * um quadro por passo. Ver `InputSampler` para os dois bugs que ele existe para
- * não deixar acontecer.
+ * Samples input in `beginFrame` (which runs before the fixed steps) and hands out
+ * one frame per step. See `InputSampler` for the two bugs it exists to keep from
+ * happening.
  */
 const sampler = new InputSampler();
 
 /**
- * A entrada do passo, montada uma vez e reaproveitada.
+ * The step's input, built once and reused.
  *
- * `enemy` fica em `null` enquanto o adversário é a máquina; quando um segundo
- * jogador entrar, é aqui que o quadro dele chega. Nenhum dos dois campos aloca
- * por tick.
+ * `enemy` stays `null` while the opponent is the machine; when a second player
+ * joins, this is where his frame arrives. Neither of the two fields allocates
+ * per tick.
  */
 const matchInputs = { player: createInputFrame(), enemy: null as InputFrame | null };
 
 engine.start({
   beginFrame: (dt) => {
     input.beginFrame(dt);
-    // Só amostra o que vale como comando: com o menu no ar, ou com a câmera solta
-    // para inspeção, o marujo recebe passos de entrada vazia em vez de nenhum
-    // passo — a simulação continua correndo, que é o que o mundo de fundo pede.
+    // Only samples what counts as a command: with the menu up, or the camera loose
+    // for inspection, the deckhand gets steps of empty input instead of no step at
+    // all — the simulation keeps running, which is what the background world asks for.
     sampler.setLive(!menu.open && rig.mode === 'player' && match.running);
     sampler.sample(input);
   },
   fixedUpdate: (dt, tick) => {
     const guest = online.guest;
     if (guest) {
-      // O cliente magro amostra a entrada no **relógio de predição**, à frente do
-      // host, para que ela chegue lá no instante em que for consumida. Ver os três
-      // relógios em `GuestSession`.
+      // The thin client samples input on the **prediction clock**, ahead of the
+      // host, so that it arrives there at the instant it gets consumed. See the
+      // three clocks in `GuestSession`.
       const frame = sampler.consume(guest.predictionTick());
       match.fixedUpdateRemote(dt, frame);
       guest.fixedUpdate(frame);
@@ -540,25 +543,25 @@ engine.start({
     }
 
     matchInputs.player = sampler.consume(tick);
-    // Contra a máquina isto é `null` e quem pilota o outro casco é o `ShipAI`.
+    // Against the machine this is `null` and `ShipAI` is what steers the other hull.
     matchInputs.enemy = online.enemyInput(match.tick + 1);
     match.fixedUpdate(dt, matchInputs);
     online.afterHostStep(match.tick);
   },
   update: (dt, alpha) => {
-    // O menu primeiro: ele decide se o resto do quadro é jogo ou vitrine.
+    // The menu first: it decides whether the rest of the frame is game or showcase.
     menu.update(input, dt);
-    // Fora do `if` do menu de propósito: a sessão também tem de correr com o menu
-    // fechado, que é quando a partida em rede acontece.
+    // Outside the menu's `if` on purpose: the session also has to run with the menu
+    // closed, which is when the online match happens.
     online.update(dt);
     if (menu.open) {
-      // Com a entrada congelada, `Input` deixa passar `Esc` do teclado e os botões
-      // Menu e View do controle — o suficiente para fechar o que está aberto sem
-      // precisar largar o aparelho que abriu. `Tab` fica de fora de propósito:
-      // congelado, ele é a navegação de foco do próprio menu.
+      // With input frozen, `Input` lets through `Esc` from the keyboard and the
+      // controller's Menu and View buttons — enough to close what's open without
+      // having to put down the device that opened it. `Tab` is left out on purpose:
+      // frozen, it's the menu's own focus navigation.
       if (input.wasPressed('pause')) menu.back();
-      // View faz o caminho de ida e de volta com o mesmo aperto: abre a tela de
-      // controles de onde estiver, e a fecha quando ela já é a que está no ar.
+      // View makes the round trip on the same press: it opens the controls screen
+      // from wherever you are, and closes it when that's already the one up.
       if (input.wasPressed('controls')) {
         if (menu.current === 'controls') menu.back();
         else menu.openOverlay('controls');
@@ -566,7 +569,7 @@ engine.start({
     } else {
       if (input.wasPressed('pause')) menu.openOverlay('settings');
       if (input.wasPressed('controls')) menu.openOverlay('controls');
-      // Congelado, `freeCamera` nem chega aqui: é o menu barrando a câmera livre.
+      // Frozen, `freeCamera` never gets here: the menu is blocking the free camera.
       if (input.wasPressed('freeCamera')) toggleFreeCamera();
     }
 
@@ -575,29 +578,30 @@ engine.start({
       syncShell();
     }
 
-    // O resíduo de olhar entra aqui: é ele que dá à câmera a taxa do monitor com
-    // a cabeça andando a 60 Hz. Ver `PlayerController.syncView`.
+    // The leftover look goes in here: it's what gives the camera the monitor's rate
+    // with the head moving at 60 Hz. See `PlayerController.syncView`.
     match.update(dt, alpha, sampler.pendingLookX, sampler.pendingLookY);
-    // O desvio de reconciliação some em dois décimos de segundo. Ver `GuestSession`.
+    // The reconciliation offset fades in two tenths of a second. See `GuestSession`.
     online.guest?.decayOffset(dt);
 
-    // O corte para o preto do resgate, por borda do contador. Fica aqui, e não
-    // dentro do `Match`, porque é apresentação pura: quem tira o marujo da água é
-    // o passo fixo (no duelo em rede, o do host), e este pano só cobre o instante.
+    // The rescue's cut to black, on the counter's edge. It lives here and not inside
+    // `Match` because it's pure presentation: what pulls the deckhand out of the
+    // water is the fixed step (the host's, in an online duel), and this curtain only
+    // covers the instant.
     if (match.player.rescueCount !== lastRescueCount) {
       lastRescueCount = match.player.rescueCount;
       blackout.play();
     }
     blackout.update(dt);
 
-    // A pose interpolada já foi escrita por `match.update`, então a câmera lê a
-    // matriz do quadro e não a do anterior — do contrário ela seguiria um frame
-    // atrás e tremeria contra o convés.
+    // The interpolated pose has already been written by `match.update`, so the
+    // camera reads this frame's matrix and not the previous one's — otherwise it
+    // would trail a frame behind and jitter against the deck.
     if (rig.mode === 'detached') updateFreeCamera(dt);
     else rig.update(dt, match.player, match.playerShip);
 
-    // O laço só informa **de onde o corpo está sendo olhado**; se ele aparece, e
-    // com ou sem cabeça, é decisão do próprio personagem. Ver `PlayerAvatar`.
+    // The loop only says **where the body is being looked at from**; whether it
+    // shows, with or without a head, is the character's own call. See `PlayerAvatar`.
     match.avatar.update(dt, match.player, rig.mode === 'player');
 
     environment.update(dt, camera.position);
@@ -605,12 +609,12 @@ engine.start({
     prompts.update(input, match.interaction, match.player, match.playerShip);
     hud.update(match.playerShip, match.enemyShip, foeLabel(), camera, environment.waveField);
 
-    // O ouvido acompanha a câmera, e não o navio: no canhão a cabeça vai para trás
-    // da culatra, e é de lá que o jogador escuta.
+    // The ear follows the camera, not the ship: at the cannon the head goes behind
+    // the breech, and that's where the player hears from.
     audio.setListener(camera);
     audio.setSeaState(environment.waveField.windStrength, environment.dayNight.nightFactor);
 
-    // As lanternas acendem sozinhas conforme a noite fecha.
+    // The lanterns light themselves as night closes in.
     for (const ship of match.ships) {
       ship.model.setLanternIntensity(environment.dayNight.nightFactor);
     }
@@ -619,12 +623,12 @@ engine.start({
     input.endFrame();
   },
   render: (dt) => {
-    // Os dois passes fora de tela vêm antes do quadro. A esteira carimba na pose
-    // que `syncModel` acabou de escrever, e a textura troca de lugar a cada quadro
-    // (ping-pong), então o oceano tem de ser reapontado sempre.
+    // The two offscreen passes come before the frame. The wake stamps on the pose
+    // `syncModel` has just written, and the texture swaps places every frame
+    // (ping-pong), so the ocean has to be repointed every time.
     wake.update(renderer.webgl, dt, match.ships);
     environment.ocean.setWake(wake.texture, wake.center, wake.size, 1);
-    // A LUT do céu precisa estar pronta antes do render: mar e domo leem dela.
+    // The sky LUT has to be ready before the render: sea and dome both read from it.
     environment.prepare(renderer.webgl);
     renderer.render(dt);
   },
@@ -633,26 +637,27 @@ engine.start({
 window.addEventListener('resize', () => renderer.resize());
 
 /**
- * Espalha as preferências para quem as consome.
+ * Spreads the preferences out to whoever consumes them.
  *
- * Roda na troca, e não a cada quadro, porque tudo aqui é caro ou é estado: o
- * preset gráfico remonta a cadeia de pós-processamento, o campo de visão
- * recompõe a matriz de projeção e o tempo travado interrompe a máquina de
- * estados do clima.
+ * Runs on change, not every frame, because everything here is either expensive
+ * or state: the graphics preset rebuilds the post-processing chain, the field of
+ * view recomposes the projection matrix and held weather halts the weather state
+ * machine.
  *
- * ## Por que há guardas de igualdade aqui
+ * ## Why there are equality guards here
  *
- * "Na troca" era mentira para quem arrasta um deslizante: cada pixel de arraste
- * emite um `input`, e cada `input` chamava esta função **inteira**. Mudar o
- * volume descartava e remontava o `EffectComposer` (Bloom, GodRays, SMAA) dezenas
- * de vezes por segundo e, pior, `Environment.applyQuality` regera o campo de
- * ondas — o mar da partida em curso era ressemeado no meio de um tiro em voo.
+ * "On change" was a lie for anyone dragging a slider: every pixel of drag emits
+ * an `input`, and every `input` called this **entire** function. Changing the
+ * volume threw away and rebuilt the `EffectComposer` (Bloom, GodRays, SMAA) dozens
+ * of times a second and, worse, `Environment.applyQuality` regenerates the wave
+ * field — the sea of the match in progress was reseeded in the middle of a shot
+ * in flight.
  *
- * As guardas ficam deste lado porque é aqui que se sabe **o que** mudou:
- * `applyQuality` recebe um objeto de preset e não tem como distinguir "de novo o
- * mesmo" de "a primeira vez". O preço é lembrar do valor anterior; o ganho é que
- * volume, sensibilidade e campo de visão continuam aplicando a cada quadro de
- * arraste, que é o que o jogador precisa ver enquanto calibra.
+ * The guards live on this side because this is where **what** changed is known:
+ * `applyQuality` takes a preset object and has no way to tell "the same one
+ * again" from "the first time". The price is remembering the previous value; the
+ * gain is that volume, sensitivity and field of view keep applying on every frame
+ * of the drag, which is what the player needs to see while calibrating.
  */
 let appliedQuality: QualityPreset | null = null;
 let appliedWeather: WeatherMode | null = null;
@@ -665,22 +670,22 @@ function applyPreferences(prefs: PlayerPreferences): void {
     wake.applyQuality(settings.quality);
   }
 
-  // `Weather.set` reinicia rajada, relâmpago e contagem regressiva. Reaplicar o
-  // mesmo modo a cada quadro de arraste zerava a rajada antes de ela existir, e o
-  // vento travado ficava liso como uma tabela.
+  // `Weather.set` restarts gust, lightning and countdown. Reapplying the same mode
+  // on every frame of a drag zeroed the gust before it existed, and the held wind
+  // came out as flat as a table.
   //
-  // Num duelo em rede o modo é da **sala**, e o menu não manda nele: o vento
-  // entra na força da vela, então um capitão que trocasse para "calmaria" no
-  // meio da partida estaria escolhendo o próprio mar. Quem simula ignora a
-  // preferência; quem não simula recebe o tempo pronto no instantâneo de
-  // qualquer forma.
+  // In an online duel the mode belongs to the **room**, and the menu doesn't
+  // command it: wind feeds into sail force, so a captain who switched to "clear"
+  // mid-match would be picking his own sea. The simulating side ignores the
+  // preference; the side that doesn't simulate gets the weather ready-made in
+  // the snapshot anyway.
   if (prefs.weather !== appliedWeather && match.role === 'solo') {
     appliedWeather = prefs.weather;
     environment.setWeatherMode(prefs.weather);
   }
 
-  // Estes três são atribuições idempotentes e baratas: aplicam sempre, e é o que
-  // dá o retorno imediato do deslizante enquanto ele está sendo arrastado.
+  // These three are idempotent, cheap assignments: they apply every time, and it's
+  // what gives the slider its immediate feedback while it's being dragged.
   environment.dayNight.dayLengthSeconds = prefs.dayLengthMinutes * 60;
   match.player.setFieldOfView(prefs.fieldOfView);
 }
@@ -688,17 +693,17 @@ function applyPreferences(prefs: PlayerPreferences): void {
 settings.onChange(applyPreferences);
 applyPreferences(settings.preferences);
 
-// Bancada de inspeção para os testes automatizados (paridade de onda, sondagem da
-// LUT do céu, telemetria de física, condução do duelo sem menu). Só existe em dev —
-// o build de produção remove o bloco inteiro por dead-code elimination.
+// Inspection bench for the automated tests (wave parity, sky LUT probing, physics
+// telemetry, driving the duel without a menu). Dev only — the production build
+// strips the whole block by dead-code elimination.
 if (import.meta.env.DEV) {
   /**
-   * Congela a cena num estado exato para comparar capturas de tela entre ajustes
-   * de shader. Sem isso o sol anda entre um screenshot e o outro e qualquer
-   * diferença vira ruído.
+   * Freezes the scene in an exact state so screenshots can be compared across
+   * shader tweaks. Without it the sun moves between one screenshot and the next
+   * and any difference turns into noise.
    *
-   * `yawTowardSun` aponta a câmera para o sol (`1`), para o lado oposto (`-1`) ou
-   * para 90° dele (`0`), sempre relativo à posição atual do astro.
+   * `yawTowardSun` points the camera at the sun (`1`), at the opposite side (`-1`)
+   * or 90° away from it (`0`), always relative to the sun's current position.
    */
   function setView(options: {
     timeOfDay?: number;
@@ -716,7 +721,7 @@ if (import.meta.env.DEV) {
     if (waveTime !== undefined) environment.waveField.time = waveTime;
 
     const sun = environment.dayNight.sunDirection;
-    // atan2(x, z) porque a câmera olha para -Z com yaw = 0.
+    // atan2(x, z) because the camera looks down -Z with yaw = 0.
     const sunYaw = Math.atan2(sun.x, sun.z) + Math.PI;
     cameraState.yaw = sunYaw + (1 - yawTowardSun) * (Math.PI / 2);
     cameraState.pitch = pitch;
@@ -724,7 +729,7 @@ if (import.meta.env.DEV) {
     camera.position.set(0, height, 0);
   }
 
-  /** Órbita ao redor de um dos navios, para inspecionar o modelo de todos os lados. */
+  /** Orbits one of the ships, to inspect the model from every side. */
   function setShipView(options: {
     azimuth?: number;
     distance?: number;

@@ -1,46 +1,49 @@
 /**
- * O capitão inimigo: decide a intenção, e distribui os dois homens que tem.
+ * The enemy captain: decides the intent, and splits the two men he has.
  *
- * Este arquivo é o único da IA que sabe que existe um *duelo*. `Helmsman` sabe
- * governar, `Gunner` sabe atirar, `Crew` sabe que só há um par de mãos livres —
- * nenhum deles sabe que há um inimigo. Aqui se lê a geometria dos dois navios e
- * dela saem três ordens: um rumo, um bordo de combate e um posto para o marujo.
+ * This is the only AI file that knows a *duel* exists. `Helmsman` knows how to
+ * steer, `Gunner` knows how to shoot, `Crew` knows there is only one pair of free
+ * hands — none of them knows there is an enemy. Here the geometry of the two
+ * ships is read, and out of it come three orders: a course, a firing side and a
+ * post for the deckhand.
  *
- * ## A tática nasce do batente da carreta
+ * ## The tactics come from the end of the carriage's travel
  *
- * O canhão só gira 26° para cada lado do través (`TRAVERSE_LIMIT`). Isso significa
- * que o setor de tiro de cada bordo é a faixa de 64° a 116° de marcação relativa —
- * e que **manter o inimigo sob fogo é trabalho do timão**, não da pontaria. Toda a
- * tática deste arquivo é uma consequência disso: o capitão passa a partida
- * tentando pôr o adversário no través, e é essa dança que o jogador enfrenta.
+ * The gun only traverses 26° to either side of the beam (`TRAVERSE_LIMIT`). That
+ * means each side's firing arc is the band from 64° to 116° of relative bearing —
+ * and that **keeping the enemy under fire is the helm's job**, not the gunner's.
+ * Every tactic in this file follows from that: the captain spends the match
+ * trying to put his opponent abeam, and that dance is what the player is up
+ * against.
  *
- * A conta que faz isso é uma linha. A marcação relativa desejada do alvo é
+ * The math that does it is one line. The target's desired relative bearing is
  *
  * ```
- * β = 90° − k · (alcance − distância_de_combate)
+ * β = 90° − k · (range − standoff)
  * ```
  *
- * Longe, `β` cai e a proa vira para o inimigo: fecha distância. Perto, `β` passa
- * de 90° e o navio abre. **No ponto certo, `β` = 90° e ele fica de través, com as
- * duas peças em batalha.** Um controlador proporcional de distância disfarçado de
- * manobra naval — e o que se vê na tela é um capitão circulando o jogador.
+ * Far out, `β` drops and the bow swings toward the enemy: it closes. Close in,
+ * `β` goes past 90° and the ship opens. **At the right distance, `β` = 90° and he
+ * sits abeam, with both guns in the fight.** A proportional range controller
+ * dressed up as a naval maneuver — and what shows up on screen is a captain
+ * circling the player.
  *
- * ## O que a dificuldade *não* muda
+ * ## What difficulty does *not* change
  *
- * Nada de física. Ver a tabela em `Difficulty`. O que muda é o atraso com que ele
- * percebe a mudança de situação (`reaction`), a firmeza da mão no timão
- * (`helmGain`), a distância que ele julga boa (`standoff`), o quanto de água ele
- * deixa entrar antes de largar o canhão (`floodAlarm`) e quanto do turno ele
- * entrega ao porão antes de a briga chamá-lo de volta (`holdShift`/`gunShift`).
+ * No physics. See the table in `Difficulty`. What changes is how late he notices
+ * the situation has turned (`reaction`), how firm his hand is on the helm
+ * (`helmGain`), the distance he judges good (`standoff`), how much water he lets
+ * in before he leaves the gun (`floodAlarm`) and how much of the shift he gives
+ * the hold before the fight calls him back (`holdShift`/`gunShift`).
  *
- * ## O marujo não conserta tudo, e é aqui que se decide isso
+ * ## The deckhand doesn't fix everything, and this is where that gets decided
  *
- * O rodízio de `assignCrew` é a peça que faz um duelo terminar. Antes dele, o
- * marujo descia ao porão e só voltava com o casco fechado e o poço seco — um par de
- * mãos que fechava cinco rombos por minuto enquanto o timoneiro seguia governando,
- * e nenhuma taxa de acerto plausível do jogador ultrapassava isso. Agora ele entrega
- * um turno e sobe, com o casco no estado em que estiver, porque o combate está lá em
- * cima. Ver a nota longa em `assignCrew`.
+ * The rotation in `assignCrew` is the piece that lets a duel end. Before it, the
+ * deckhand went down to the hold and only came back up with the hull sealed and
+ * the bilge dry — one pair of hands closing five breaches a minute while the
+ * helmsman kept steering, and no plausible player hit rate could beat that. Now
+ * he gives one shift and comes up, with the hull in whatever state it is in,
+ * because the fight is up there. See the long note in `assignCrew`.
  */
 
 import * as THREE from 'three';
@@ -53,10 +56,10 @@ import { Crew } from './Crew';
 import { Gunner, type GunneryTarget } from './Gunner';
 import { Helmsman } from './Helmsman';
 
-/** O que o capitão está tentando fazer agora. O HUD mostra isso ao jogador. */
+/** What the captain is trying to do right now. The HUD shows this to the player. */
 export type Intent = 'closing' | 'engaging' | 'evading' | 'repairing' | 'sunk';
 
-/** Rótulos das intenções, para o HUD e para a telemetria. */
+/** Intent labels, for the HUD and for telemetry. */
 export const INTENT_LABELS: Record<Intent, string> = {
   closing: 'Closing in',
   engaging: 'Engaging',
@@ -68,100 +71,104 @@ export const INTENT_LABELS: Record<Intent, string> = {
 const HALF_PI = Math.PI / 2;
 
 /**
- * Onde a pontaria mira, em coordenadas do alvo: **na linha d'água**.
+ * Where gunnery aims, in target coordinates: **at the waterline**.
  *
- * O número foi medido, não escolhido, e a primeira tentativa estava errada. Mirando
- * a 0,39 m (um palmo acima da linha d'água de projeto), a Lenda abria nove rombos
- * em quarenta tiros e o alagamento do alvo passava de 4% em dois minutos e meio —
- * absurdo para quem acerta o que quer.
+ * The number was measured, not chosen, and the first attempt was wrong. Aiming at
+ * 0.39 m (a hand's breadth above the design waterline), the Legend opened nine
+ * breaches in forty shots and the target's flooding passed 4% in two and a half
+ * minutes — absurd for someone who hits whatever he aims at.
  *
- * A causa é que `floods` e *alagar* não são a mesma coisa. `HitDetection` marca
- * `floods` em tudo que entra abaixo do convés, mas a água só entra de fato enquanto
- * `depth = superfície − rombo` for positivo (`ShipDamage`). Um rombo acima da linha
- * d'água só bebe quando passa crista de onda; com o mar de 1,8 m de altura
- * significativa a 0,39 m isso dá menos de um terço do tempo.
+ * The cause is that `floods` and *flooding* are not the same thing. `HitDetection`
+ * marks `floods` on anything that gets in below deck, but water only actually
+ * comes in while `depth = surface − breach` is positive (`ShipDamage`). A breach
+ * above the waterline only drinks when a wave crest goes past; in a sea of 1.8 m
+ * significant height, at 0.39 m that is less than a third of the time.
  *
- * Em 0,10 m o rombo fica submerso mais da metade do tempo, e o alagamento acontece.
- * Não desce mais que isso porque a bala chega em arco descendente: mirar abaixo da
- * superfície faz o segmento cruzar a água antes de encontrar o costado, e
- * `CannonballPool` resolve isso como respingo curto — tiro perdido.
+ * At 0.10 m the breach stays submerged more than half the time, and the flooding
+ * happens. It goes no lower than that because the cannonball arrives on a
+ * descending arc: aiming below the surface makes the segment cross the water
+ * before it meets the hull side, and `CannonballPool` resolves that as a short
+ * splash — a wasted shot.
  *
- * É o ponto de mira que a artilharia naval sempre pregou, e por exatamente esta
- * razão: na linha d'água é onde o furo custa caro.
+ * It is the point of aim naval gunnery always preached, and for exactly this
+ * reason: the waterline is where a hole costs dear.
  */
 const AIM_LOCAL = new THREE.Vector3(0, 0.1, 0);
 
 /**
- * Distância abaixo da qual o capitão rompe o contato, em metros.
+ * Distance below which the captain breaks contact, in meters.
  *
- * Não é medo: é o batente da carreta. Colado, a velocidade angular do alvo na
- * vista supera os 29°/s que a peça gira, e as duas partes deixam de conseguir
- * apontar. Ficar ali é trocar o duelo por um empurra-empurra.
+ * It is not fear: it is the end of the carriage's travel. Right alongside, the
+ * target's angular velocity across the sight beats the 29°/s the gun trains at,
+ * and both sides stop being able to point. Staying there trades the duel for a
+ * shoving match.
  */
 const RAM_RANGE = 34;
 
-/** Acima de `standoff` × isto, ele considera que está longe e vai fechar. */
+/** Above `standoff` × this, he counts himself far off and moves to close. */
 const CLOSE_FACTOR = 1.6;
 
-/** Ganho de distância no rumo de aproximação, em rad por metro de erro. */
+/** Range gain on the closing course, in rad per meter of error. */
 const CLOSE_GAIN = 0.03;
 /**
- * Quanto a proa pode sair do través ao fechar: **90°**, ou seja, até a caça pura.
+ * How far the bow may come off the beam while closing: **90°**, that is, up to a
+ * pure chase.
  *
- * O valor tem uma razão medida. Com o limite em 72°, a marcação desejada nunca
- * baixava de 18°, e a telemetria mostrou o inimigo estabilizar a 255 m de um alvo
- * que fugia de popa: os 18° de caranguejo custavam justo os 2% de eficiência de
- * vela que faltavam para ele ganhar terreno, e o duelo empatava para sempre.
+ * The value has a measured reason. With the limit at 72°, the desired bearing never
+ * dropped below 18°, and telemetry showed the enemy settling 255 m from a target
+ * running away astern: those 18° of crabbing cost exactly the 2% of sail efficiency
+ * he was missing to gain ground, and the duel stalemated forever.
  *
- * Fora do alcance de tiro não existe motivo para segurar bordada — o setor da
- * carreta só importa quando se vai atirar. Em 90° o `β` chega a zero e ele aponta a
- * proa no inimigo, que é o que qualquer capitão faz numa perseguição.
+ * Outside gun range there is no reason to hold a broadside — the carriage's arc
+ * only matters when you are going to shoot. At 90° `β` reaches zero and he points
+ * the bow at the enemy, which is what any captain does in a chase.
  */
 const CLOSE_LIMIT = HALF_PI;
 
-/** Os mesmos dois, em batalha: correções menores, para não perder o setor. */
+/** The same two, in the fight: smaller corrections, so the arc isn't lost. */
 const ENGAGE_GAIN = 0.022;
 const ENGAGE_LIMIT = 0.75;
 
-/** Marcação em que ele põe o alvo ao romper contato (150°: bem pela alheta). */
+/** Bearing he puts the target on when breaking contact (150°: well on the quarter). */
 const EVADE_BEARING = 150 * DEG;
 
 /**
- * Marcação relativa que o alvo precisa alcançar do outro lado para o capitão
- * trocar de bordo de combate (20°).
+ * Relative bearing the target has to reach on the other side for the captain to
+ * switch firing sides (20°).
  *
- * Sem esta histerese, um alvo passando pela proa fica um passo a bombordo, um a
- * boreste, e o marujo atravessa o convés para sempre sem chegar a carregar nada.
+ * Without this hysteresis, a target crossing the bow is one step to port, one to
+ * starboard, and the deckhand crosses the deck forever without ever loading a thing.
  */
 const SIDE_SWITCH = 20 * DEG;
 
 /**
- * Alagamento que interrompe o combate para salvar o navio.
+ * Flooding that interrupts the fight to save the ship.
  *
- * O que o devolve à briga é `preset.bilgeFloor`, e **não** uma segunda constante
- * daqui. Houve uma, cravada em 15%, e ela brigava com o piso da bomba: o marujo
- * largava a alavanca no nível que o capitão dele considera aceitável e o capitão
- * continuava em modo de reparo porque o número dele era outro. Com os dois valores
- * desalinhados no sentido errado, o inimigo fugia para sempre com o porão parado —
- * bombeando nada, atirando nada, esperando um limiar que ninguém ia atingir.
+ * What sends him back into the fight is `preset.bilgeFloor`, and **not** a second
+ * constant from here. There was one, nailed to 15%, and it fought with the pump's
+ * floor: the deckhand let go of the lever at the level his captain finds acceptable
+ * and the captain stayed in repair mode because his own number was a different one.
+ * With the two values misaligned in the wrong direction, the enemy ran away forever
+ * with the hold idle — pumping nothing, shooting nothing, waiting for a threshold
+ * nobody was going to reach.
  *
- * Um só número diz as duas coisas, que afinal são a mesma pergunta: **quanta água
- * este capitão aceita ter dentro do navio enquanto briga?**
+ * One number says both things, which are after all the same question: **how much
+ * water does this captain accept having inside the ship while he fights?**
  */
 const BREAK_OFF_FLOOD = 0.5;
 
 /**
- * Quanto o rumo pode chegar perto do vento pela proa, em radianos (35°).
+ * How close to the wind off the bow a heading may come, in radians (35°).
  *
- * A Chalupa faz 65% da velocidade contra o vento, então bolina não é impossível —
- * mas o rumo *exatamente* na cara do vento é o único que a deixa parada de
- * verdade. Quando a geometria pede um curso dentro deste cone, ele é empurrado
- * para a borda: é a guinada de bordo de um veleiro, e o navio anda em ziguezague
- * em vez de encostar no vento e morrer.
+ * The Sloop makes 65% of her speed against the wind, so beating isn't impossible —
+ * but the heading *exactly* in the wind's eye is the only one that truly stops her
+ * dead. When the geometry asks for a course inside this cone, it gets pushed to the
+ * edge: it's a sailing ship's tack, and the ship goes up in a zigzag instead of
+ * leaning into the wind and dying.
  */
 const NO_GO_HALF_ANGLE = 35 * DEG;
 
-/** Proa, em coordenadas locais de qualquer navio. */
+/** The bow, in any ship's local coordinates. */
 const LOCAL_BOW = new THREE.Vector3(0, 0, -1);
 
 const _myOrigin = new THREE.Vector3();
@@ -171,29 +178,29 @@ const _aimPoint = new THREE.Vector3();
 export class ShipAI {
   readonly helmsman = new Helmsman();
   readonly crew: Crew;
-  /** Um por peça, na mesma ordem de `ship.cannons`. */
+  /** One per gun, in the same order as `ship.cannons`. */
   readonly gunners: readonly Gunner[];
 
-  /** O que ele está fazendo. Leitura para o HUD. */
+  /** What he is doing. Read by the HUD. */
   intent: Intent = 'closing';
-  /** Bordo de combate escolhido: +1 boreste, −1 bombordo. */
+  /** Chosen firing side: +1 starboard, −1 port. */
   firingSide: 1 | -1 = 1;
 
-  /** Distância entre as origens dos dois navios, em metros. */
+  /** Distance between the two ships' origins, in meters. */
   range = Infinity;
-  /** Marcação do alvo a partir da proa, em radianos. Positivo é bombordo. */
+  /** Target bearing from the bow, in radians. Positive is port. */
   relativeBearing = 0;
 
   private readonly target: GunneryTarget;
-  /** `true` enquanto o marujo está destacado para o porão. */
+  /** `true` while the deckhand is detailed to the hold. */
   private inHold = false;
   /**
-   * Segundos de trabalho que o marujo já entregou no posto atual.
+   * Seconds of work the deckhand has already put in at the current post.
    *
-   * Conta a partir da **chegada**, e não da ordem: a escada e a travessia do
-   * convés já são cobradas em `Crew.transit`, e somá-las ao turno faria o Grumete
-   * — que tem `transitScale` 1,6 — gastar seis dos oito segundos de porão dele
-   * descendo os degraus. Ver `assignCrew`.
+   * It counts from **arrival**, not from the order: the ladder and the walk across
+   * the deck are already charged in `Crew.transit`, and adding them to the shift
+   * would make the Deckhand — whose `transitScale` is 1.6 — spend six of his eight
+   * seconds of hold time going down the steps. See `assignCrew`.
    */
   private postTime = 0;
   private pendingIntent: Intent | null = null;
@@ -203,17 +210,17 @@ export class ShipAI {
     private readonly ship: Ship,
     private readonly preset: DifficultyPreset,
     /**
-     * Semente do erro de pontaria. Fixa por partida de propósito: um duelo que se
-     * repete exatamente é a única forma de depurar uma queixa de "a IA me acertou
-     * um tiro impossível".
+     * Seed for the aiming error. Fixed per match on purpose: a duel that repeats
+     * exactly is the only way to debug a complaint of "the AI hit me with an
+     * impossible shot".
      */
     seed = 0x5eaf00d,
   ) {
     const random = createRandom(seed);
-    // Fluxo próprio, e não o dos artilheiros: com um sorteio só, o número de vezes
-    // que o marujo escolhe um rombo passaria a decidir qual desvio de pontaria sai
-    // no tiro seguinte. Continua reproduzível — a semente é a mesma —, mas as duas
-    // perícias deixam de conversar por acidente.
+    // A stream of its own, not the gunners': with a single draw, the number of times
+    // the deckhand picks a breach would end up deciding which aiming deviation comes
+    // out of the next shot. Still reproducible — the seed is the same — but the two
+    // skills stop talking to each other by accident.
     this.crew = new Crew(preset, createRandom(seed ^ 0x9e3779b9));
     this.gunners = ship.cannons.map((_, index) => new Gunner(ship, index, preset, random));
     this.target = {
@@ -223,14 +230,14 @@ export class ShipAI {
     };
   }
 
-  /** O canhão que está guarnecido agora, ou −1. Telemetria e HUD. */
+  /** The cannon that is manned right now, or −1. Telemetry and HUD. */
   get mannedCannon(): number {
     return this.crew.cannonIndex;
   }
 
   /**
-   * Segundos que faltam no turno do posto atual antes de o rodízio poder mudá-lo.
-   * Só telemetria — ver `assignCrew`.
+   * Seconds left in the current post's shift before the rotation may change it.
+   * Telemetry only — see `assignCrew`.
    */
   get shiftLeft(): number {
     const shift = this.inHold ? this.preset.holdShift : this.preset.gunShift;
@@ -238,19 +245,19 @@ export class ShipAI {
   }
 
   /**
-   * Um passo de comando. Roda **antes** de `ship.fixedUpdate`, para o timão, a
-   * pontaria e o gatilho deste passo entrarem na física deste mesmo passo.
+   * One command step. Runs **before** `ship.fixedUpdate`, so that this step's helm,
+   * aim and trigger go into the physics of this same step.
    */
   fixedUpdate(dt: number, foe: Ship, waves: WaveField): void {
-    // Zerados aqui porque são comandos de passo: quem quiser bombear neste passo
-    // pede de novo. `Ship` os lê depois de nós.
+    // Zeroed here because they are per-step commands: whoever wants to pump on this
+    // step asks again. `Ship` reads them after us.
     this.ship.controls.capstanTurns = 0;
     this.ship.controls.pumping = false;
 
     this.measure(foe);
 
     if (this.ship.damage.isSinking) {
-      // Naufrágio não se comanda. Larga tudo e deixa o mar terminar.
+      // A sinking is not commanded. Drop everything and let the sea finish it.
       this.intent = 'sunk';
       this.pendingIntent = null;
       this.helmsman.release(this.ship);
@@ -266,8 +273,8 @@ export class ShipAI {
     this.assignCrew(dt);
     this.crew.fixedUpdate(dt, this.ship);
 
-    // O alvo do artilheiro: onde acertar, para onde ele foge, e ao longo de que
-    // eixo o fogo é varrido (o comprimento do casco dele).
+    // The gunner's target: where to hit, where it is running to, and along which
+    // axis fire is swept (the length of its hull).
     foe.body.localToWorld(AIM_LOCAL, _aimPoint);
     this.target.velocity.copy(foe.body.velocity);
     foe.body.localDirToWorld(LOCAL_BOW, this.target.forward);
@@ -275,13 +282,13 @@ export class ShipAI {
     const manned = this.crew.cannonIndex;
     const fireable = this.intent === 'engaging' || this.intent === 'closing' || this.intent === 'evading';
     for (let i = 0; i < this.gunners.length; i++) {
-      // Alvo afundando já saiu da partida: gastar bala nele é só ruído.
+      // A sinking target is already out of the match: spending shot on it is noise.
       const engage = fireable && !foe.damage.isSinking;
       this.gunners[i]!.fixedUpdate(dt, engage ? this.target : null, i === manned);
     }
   }
 
-  /** Devolve o capitão ao estado de início de partida. */
+  /** Returns the captain to his start-of-match state. */
   reset(): void {
     this.intent = 'closing';
     this.pendingIntent = null;
@@ -295,7 +302,7 @@ export class ShipAI {
     for (const gunner of this.gunners) gunner.reset();
   }
 
-  // -- percepção ---------------------------------------------------------------
+  // -- perception --------------------------------------------------------------
 
   private measure(foe: Ship): void {
     this.ship.body.getOrigin(_myOrigin);
@@ -305,21 +312,22 @@ export class ShipAI {
     const dz = _foeOrigin.z - _myOrigin.z;
     this.range = Math.hypot(dx, dz);
 
-    // `atan2(−x, −z)` é a mesma convenção de `Ship.heading`: o rumo que aponta a
-    // proa para o alvo. A de `solveIntercept` é outra — ver `Gunner`.
+    // `atan2(−x, −z)` is the same convention as `Ship.heading`: the heading that
+    // points the bow at the target. `solveIntercept`'s is another — see `Gunner`.
     const bearing = Math.atan2(-dx, -dz);
     this.relativeBearing = angleDelta(this.ship.heading, bearing);
   }
 
-  // -- decisão -----------------------------------------------------------------
+  // -- decision ----------------------------------------------------------------
 
   /**
-   * Escolhe a intenção, com o atraso de reação do preset.
+   * Picks the intent, with the preset's reaction delay.
    *
-   * O atraso não é um `setTimeout` disfarçado: ele existe porque um capitão que
-   * troca de plano no mesmo passo em que a situação muda produz um navio nervoso,
-   * que corrige rumo a cada onda. Segurar a decisão por meio segundo é o que dá
-   * peso à manobra — e é a diferença mais visível entre o Grumete e a Lenda.
+   * The delay is not a `setTimeout` in disguise: it exists because a captain who
+   * changes plan on the same step the situation changes produces a jumpy ship,
+   * one that corrects its heading on every wave. Holding the decision for half a
+   * second is what gives the maneuver weight — and it is the most visible
+   * difference between the Deckhand and the Legend.
    */
   private chooseIntent(dt: number, foe: Ship): void {
     const desired = this.desiredIntent(foe);
@@ -344,17 +352,18 @@ export class ShipAI {
   private desiredIntent(foe: Ship): Intent {
     const flood = this.ship.damage.floodFraction;
 
-    // Histerese no alagamento: entra em 50%, só volta a brigar quando o porão chega
-    // ao nível que este capitão aceita levar para o combate. Sem ela o navio
-    // alterna entre fugir e voltar em cima do limiar, e não faz nem uma coisa nem
-    // outra. Ver `BREAK_OFF_FLOOD` para por que o piso de volta é o do preset.
+    // Hysteresis on the flooding: it kicks in at 50%, and he only fights again once
+    // the hold reaches the level this captain accepts taking into combat. Without it
+    // the ship alternates between running and coming back right on the threshold,
+    // and does neither. See `BREAK_OFF_FLOOD` for why the floor to return is the
+    // preset's.
     if (this.intent === 'repairing') {
       if (flood > this.preset.bilgeFloor) return 'repairing';
     } else if (flood >= BREAK_OFF_FLOOD) {
       return 'repairing';
     }
 
-    // Alvo já afundando: não há mais duelo, só sair de perto dos destroços.
+    // Target already sinking: no duel left, only getting clear of the wreckage.
     if (foe.damage.isSinking) return 'evading';
 
     if (this.range < RAM_RANGE) return 'evading';

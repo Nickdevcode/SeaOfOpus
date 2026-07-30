@@ -1,15 +1,16 @@
 /**
- * Foco de interação: o que o jogador está olhando e pode usar com `F`.
+ * Interaction focus: what the player is looking at and can use with `F`.
  *
- * **Não usa raycast.** Um raio contra a malha do navio pareceria mais rigoroso,
- * mas custaria caro por frame e daria um resultado pior: exigiria mirar no pixel
- * certo do timão, quando o que se quer é "estou perto e virado para o timão".
- * Proximidade, pavimento e ângulo de visão são o que o Sea of Thieves entrega na
- * prática — perdoa a mira e nunca oferece uma peça que está atrás de você.
+ * **No raycast.** A ray against the ship's mesh would look stricter, but it
+ * would be expensive per frame and give a worse result: it would demand aiming
+ * at the right pixel of the helm, when what's wanted is "I'm close to the helm
+ * and facing it". Proximity, level and view angle are what Sea of Thieves
+ * delivers in practice — it forgives the aim and never offers a part that is
+ * behind you.
  *
- * Tudo aqui trabalha em coordenadas locais do navio, no mesmo referencial em que
- * o `PlayerController` já vive: sem conversão de matriz e sem depender da pose
- * interpolada do modelo.
+ * Everything here works in the ship's local coordinates, in the same frame the
+ * `PlayerController` already lives in: no matrix conversion and no dependence on
+ * the model's interpolated pose.
  */
 
 import * as THREE from 'three';
@@ -28,99 +29,99 @@ import {
 import type { Breach } from '../ship/ShipDamage';
 import type { PlayerController } from './PlayerController';
 
-/** Uma coisa a bordo que responde ao `F`. */
+/** Something aboard that responds to `F`. */
 export interface Interactable {
   readonly id: string;
   /**
-   * Ponto de foco, em coordenadas locais do navio.
+   * Focus point, in the ship's local coordinates.
    *
-   * `readonly` é a referência, não o conteúdo: peças que se movem reescrevem o
-   * vetor em `refresh()`. Trocar o objeto quebraria a comparação de identidade
-   * que zera `holdTime` ao mudar de alvo.
+   * `readonly` is the reference, not the contents: parts that move rewrite the
+   * vector in `refresh()`. Swapping the object would break the identity
+   * comparison that resets `holdTime` when the target changes.
    */
   readonly local: THREE.Vector3;
-  /** Distância máxima do olho ao ponto, em metros. */
+  /** Maximum distance from the eye to the point, in meters. */
   readonly range: number;
   /**
-   * Em que pavimento a peça fica. O foco não atravessa o piso.
+   * Which level the part sits on. Focus does not go through the floor.
    *
-   * Sem isso, quem está no porão embaixo do tombadilho vê o timão a 1,5 m do
-   * olho — distância curta, cone aberto, prompt aceso — e assume o leme através
-   * das tábuas, de dentro do casco. Vale igual para os canhões e o cabrestante,
-   * todos ao alcance de quem passa por baixo deles.
+   * Without this, someone in the hold under the quarterdeck sees the helm 1.5 m
+   * from the eye — short distance, wide cone, prompt lit — and takes the rudder
+   * through the planks, from inside the hull. The same goes for the cannons and
+   * the capstan, all within reach of anyone walking underneath them.
    *
-   * É a checagem barata que substitui o raycast que este arquivo faz questão de
-   * não ter: o navio só tem dois pavimentos, e nenhuma peça pertence aos dois.
+   * It's the cheap check that replaces the raycast this file makes a point of
+   * not having: the ship has only two levels, and no part belongs to both.
    *
-   * **O mar é o terceiro**, e ele existe pela mesma razão que os outros dois, com
-   * o sinal trocado: quem está boiando na popa fica a menos de dois metros do
-   * timão, com o cone aberto e o prompt aceso — e assumiria o leme de dentro do
-   * oceano. Um pavimento próprio faz essa classe inteira de defeito ser
-   * impossível, em vez de exigir uma guarda em cada peça do navio.
+   * **The sea is the third**, and it exists for the same reason as the other
+   * two, with the sign flipped: someone floating at the stern is less than two
+   * meters from the helm, with the cone wide and the prompt lit — and would take
+   * the rudder from inside the ocean. A level of its own makes that whole class
+   * of defect impossible, instead of demanding a guard on every part of the ship.
    */
   readonly level: 'deck' | 'hold' | 'water';
   /**
-   * Texto do prompt agora. `null` esconde a peça — é assim que o canhão some da
-   * lista quando o jogador já está em outro canhão.
+   * The prompt text right now. `null` hides the part — that's how the cannon
+   * drops off the list when the player is already at another cannon.
    */
   /**
-   * Reposiciona o alvo antes do teste de foco, para peças que não têm lugar
-   * fixo. É o que permite os rombos serem uma entrada só na lista em vez de uma
-   * por buraco: a cada frame ela se muda para o rombo mais perto do jogador.
+   * Repositions the target before the focus test, for parts with no fixed place.
+   * It's what lets the breaches be a single entry in the list instead of one per
+   * hole: every frame it moves to the breach nearest the player.
    */
   refresh?(player: PlayerController): void;
   label(): string | null;
   /**
-   * Enquanto devolver `true`, a peça **segura o foco** — nem o cone de visão nem
-   * a distância tiram o prompt dela.
+   * While this returns `true`, the part **holds the focus** — neither the view
+   * cone nor the distance takes the prompt away from it.
    *
-   * Existe por causa do cabrestante, que é a única peça do navio que vira um
-   * modo: quem está dando voltas nas barras sai do cone delas no primeiro quarto
-   * de volta, e recalcular o foco ali dentro apagaria o prompt justamente na mão
-   * de quem precisa dele para largar a peça. É um contrato explícito, e não o
-   * efeito colateral de um botão segurado.
+   * It exists because of the capstan, the only part of the ship that turns into
+   * a mode: someone walking the bars leaves their cone within the first quarter
+   * turn, and recalculating the focus in there would kill the prompt right in
+   * the hands of the player who needs it to let the part go. It's an explicit
+   * contract, not the side effect of a held button.
    */
   locks?(): boolean;
-  /** Toque: dispara uma vez por pressionada. */
+  /** Tap: fires once per press. */
   press?(): void;
-  /** Segurar: chamado a cada frame enquanto o `F` estiver pressionado. */
+  /** Hold: called every frame while `F` is held down. */
   hold?(dt: number): void;
   /**
-   * Progresso de 0 a 1 para a barra do prompt, ou `null` quando não há nada em
-   * andamento. É o estado da peça, não o tempo de tecla segurada: o cabrestante
-   * mostra o quanto da amarra já subiu, e soltar o `F` congela a barra onde
-   * estava em vez de zerá-la.
+   * Progress from 0 to 1 for the prompt bar, or `null` when nothing is under
+   * way. It's the part's state, not the key-hold time: the capstan shows how
+   * much of the cable is already up, and releasing `F` freezes the bar where it
+   * was instead of resetting it.
    */
   progress?(): number | null;
 }
 
 /**
- * Meia-abertura do foco na horizontal, em radianos (40°).
+ * Half-width of the focus cone in the horizontal, in radians (40°).
  *
- * O limite é geométrico, não de gosto: com FOV vertical de 62° em 16:9 a
- * meia-tela horizontal dá ~47°. Passar disso acende o prompt de uma peça que não
- * está desenhada em lugar nenhum — no spawn, o canhão de boreste fica 53° fora
- * do centro e pintava "Assumir o canhão de boreste" sobre o mar vazio. 40° cabe
- * na tela em qualquer proporção razoável e ainda dá 80° de tolerância.
+ * The limit is geometric, not taste: with a 62° vertical FOV at 16:9 the
+ * horizontal half-screen is ~47°. Going past that lights the prompt of a part
+ * that isn't drawn anywhere — at spawn, the starboard cannon sits 53° off center
+ * and it painted "Man the starboard cannon" over empty sea. 40° fits on screen at
+ * any reasonable aspect ratio and still leaves 80° of tolerance.
  */
 const FOCUS_AZIMUTH = 0.7;
 /**
- * E na vertical, bem mais folgado (65°).
+ * And in the vertical, far looser (65°).
  *
- * Não é assimetria gratuita: a tela é mais larga que alta e a cabeça vira muito
- * mais fácil do que abaixa. O cabrestante e a escotilha estão na altura da
- * cintura e do chão — de pé a um passo deles, o alvo cai 48° e 57° abaixo do
- * olhar sem que ninguém esteja mirando errado. Cobrar 40° aqui apagaria o prompt
- * justo de quem já chegou na peça.
+ * Not gratuitous asymmetry: the screen is wider than it is tall, and the head
+ * turns far more easily than it looks down. The capstan and the hatch are at
+ * waist and floor height — standing a step away from them, the target falls 48°
+ * and 57° below the gaze with nobody aiming wrong. Charging 40° here would kill
+ * the prompt for exactly the player who already reached the part.
  */
 const FOCUS_ELEVATION = 1.13;
 
 /**
- * Até onde a mão alcança um rombo, em metros.
+ * How far the hand reaches a breach, in meters.
  *
- * Mais folgado que o alcance das outras peças: um rombo pode abrir rente à
- * quilha, num canto onde não dá para chegar de pé, e cobrar 2,2 m ali deixaria
- * o buraco impossível de tapar sem motivo nenhum.
+ * Looser than the reach of the other parts: a breach can open flush with the
+ * keel, in a corner you can't get to standing up, and charging 2.2 m there would
+ * leave the hole impossible to patch for no reason at all.
  */
 const REPAIR_REACH = 3;
 
@@ -133,21 +134,21 @@ const _toBreach = new THREE.Vector3();
 export class Interaction {
   readonly items: Interactable[] = [];
 
-  /** O que está em foco neste frame, ou `null`. */
+  /** What is in focus this frame, or `null`. */
   focus: Interactable | null = null;
-  /** Segundos que o `F` está sendo segurado no foco atual. */
+  /** Seconds `F` has been held on the current focus. */
   holdTime = 0;
 
   /**
-   * `true` enquanto o jogador está de fato pregando tábua num rombo.
+   * `true` while the player is actually nailing a plank over a breach.
    *
-   * Não é o mesmo que "o foco é um rombo": olhar para o buraco sem apertar nada
-   * não põe madeira na mão de ninguém. Quem lê isto é o corpo do jogador, para
-   * saber quando trocar a pose e quando fazer a tábua aparecer.
+   * Not the same as "the focus is a breach": looking at the hole without pressing
+   * anything puts wood in nobody's hands. What reads this is the player's body,
+   * to know when to switch the pose and when to make the plank appear.
    *
-   * Mora aqui porque é aqui que a informação existe. O `PlayerController` não
-   * conhece rombos, e a `ShipDamage` não conhece botão segurado — só esta classe
-   * vê as duas coisas no mesmo quadro.
+   * It lives here because this is where the information exists. The
+   * `PlayerController` doesn't know about breaches, and `ShipDamage` doesn't know
+   * about a held button — only this class sees both in the same frame.
    */
   patching = false;
 
@@ -156,15 +157,15 @@ export class Interaction {
   }
 
   /**
-   * Um passo de foco contextual.
+   * One step of contextual focus.
    *
-   * Roda no passo fixo junto com o marujo, e não no quadro. O que isso conserta
-   * de imediato, mesmo sem rede: `hold(dt)` alimentava `ship.patchBreach` com o
-   * `dt` do **quadro**, então pregar uma tábua era mais rápido a 144 fps que a 30.
+   * Runs on the fixed step along with the deckhand, not on the frame. What that
+   * fixes right away, even with no network: `hold(dt)` fed `ship.patchBreach` the
+   * **frame**'s `dt`, so nailing a plank was faster at 144 fps than at 30.
    */
   update(dt: number, frame: InputFrame, player: PlayerController): void {
-    // Em estação, o único comando que interessa é sair dela — e quem cuida
-    // disso é o loop principal, não o foco de interação.
+    // At a station, the only command that matters is leaving it — and that's the
+    // main loop's job, not the interaction focus's.
     if (player.station !== 'deck' || player.onLadder) {
       this.focus = null;
       this.holdTime = 0;
@@ -173,24 +174,25 @@ export class Interaction {
     }
 
     const previous = this.focus;
-    // **Segurar prende o foco.** Sem isto, começar uma ação e virar a cabeça a
-    // interrompe.
+    // **Holding pins the focus.** Without this, starting an action and turning
+    // the head interrupts it.
     //
-    // O alvo continua tendo de existir (`label()`), e é essa cláusula que faz o
-    // reparo se comportar: no quadro em que o rombo fecha, ele sai da lista, o
-    // rótulo vira `null` e o foco é recalculado na hora — sem soltar o botão, a
-    // tábua seguinte já engata no buraco seguinte. Antes o alvo ficava congelado
-    // num rombo que não existia mais, e o jogador via o contador passar de 100%
-    // com o furo ainda esguichando ao lado.
+    // The target still has to exist (`label()`), and it's that clause that makes
+    // the repair behave: on the frame the breach closes, it drops off the list,
+    // the label goes `null` and the focus is recalculated on the spot — without
+    // releasing the button, the next plank already latches onto the next hole.
+    // Before, the target stayed frozen on a breach that no longer existed, and
+    // the player watched the counter go past 100% with the hole still spraying
+    // right next to it.
     //
-    // Uma peça em modo (`locks`) tem precedência sobre as duas coisas: ela não
-    // depende de botão segurado nem de estar no cone.
+    // A part in mode (`locks`) takes precedence over both: it depends neither on
+    // a held button nor on being in the cone.
     const locked = this.lockedItem();
     const held = isHeld(frame, InputBit.Interact) && previous !== null && previous.label() !== null;
     this.focus = locked ?? (held ? previous : this.findFocus(player));
 
-    // Trocar de peça zera a contagem: não dá para começar a girar o cabrestante
-    // num alvo e terminar noutro.
+    // Switching parts resets the count: you can't start turning the capstan on
+    // one target and finish on another.
     if (this.focus !== previous) this.holdTime = 0;
     if (!this.focus) {
       this.patching = false;
@@ -205,15 +207,15 @@ export class Interaction {
       this.holdTime = 0;
     }
 
-    // Depois do `hold`, e não antes: o quadro em que o rombo fecha é justamente
-    // o quadro em que `hold` o tira da lista, e é aí que a tábua tem de sair da
-    // mão para reaparecer pregada no casco.
+    // After the `hold`, not before: the frame the breach closes is exactly the
+    // frame `hold` takes it off the list, and that's when the plank has to leave
+    // the hand to reappear nailed to the hull.
     this.patching = this.focus.id === 'breach'
       && isHeld(frame, InputBit.Interact)
       && this.focus.label() !== null;
   }
 
-  /** Rótulo do prompt a ser desenhado, ou `null` quando não há foco. */
+  /** The prompt label to draw, or `null` when there is no focus. */
   get prompt(): string | null {
     return this.focus?.label() ?? null;
   }
@@ -225,11 +227,11 @@ export class Interaction {
   }
 
   /**
-   * A peça que está segurando o foco por ser um modo, se houver.
+   * The part holding the focus by being a mode, if any.
    *
-   * Varre a lista em vez de olhar só para o foco do quadro anterior: assim o
-   * modo se sustenta mesmo depois de uma pausa, de um menu ou de qualquer outra
-   * coisa que tenha zerado o foco no meio do caminho.
+   * Sweeps the list instead of looking only at the previous frame's focus: that
+   * way the mode holds up even after a pause, a menu or anything else that
+   * cleared the focus along the way.
    */
   private lockedItem(): Interactable | null {
     for (const item of this.items) {
@@ -254,20 +256,20 @@ export class Interaction {
       const distance = _toItem.length();
       if (distance > item.range || distance < 1e-4) continue;
 
-      // No referencial do olho a direção vira dois ângulos separados, e é isso
-      // que permite cobrar da horizontal e da vertical coisas diferentes.
-      // Frente é −Z, como em todo o resto do projeto.
+      // In the eye's frame the direction becomes two separate angles, and that's
+      // what lets the horizontal and the vertical be held to different limits.
+      // Forward is −Z, as everywhere else in the project.
       _eyeSpace.copy(_toItem).applyQuaternion(_inverseEye);
       const azimuth = Math.atan2(_eyeSpace.x, -_eyeSpace.z);
       const elevation = Math.atan2(_eyeSpace.y, Math.hypot(_eyeSpace.x, _eyeSpace.z));
 
-      // Distância angular normalizada pelos dois limites: 1 é a borda da elipse.
-      // O que está atrás cai fora sozinho — o azimute passa de 90°.
+      // Angular distance normalized by both limits: 1 is the edge of the ellipse.
+      // Anything behind drops out on its own — the azimuth goes past 90°.
       const offAxis = Math.hypot(azimuth / FOCUS_AZIMUTH, elevation / FOCUS_ELEVATION);
       if (offAxis > 1) continue;
 
-      // Mira pesa mais que distância: entre o timão e o cabrestante quase
-      // juntos, ganha aquele para o qual o jogador virou a cabeça.
+      // Aim weighs more than distance: between the helm and the capstan almost on
+      // top of each other, the one the player turned their head toward wins.
       const score = (1 - offAxis) / (1 + distance * 0.25);
       if (score > bestScore) {
         bestScore = score;
@@ -280,11 +282,12 @@ export class Interaction {
 }
 
 /**
- * Monta as peças interativas da Chalupa.
+ * Builds the Sloop's interactive parts.
  *
- * Fica aqui, e não em `main.ts`, porque cada uma depende de saber *onde* a peça
- * foi desenhada — e essa conta é a mesma que o `ShipBuilder` fez. Todas leem de
- * `ShipDimensions`, então mover uma estação move o modelo e o prompt junto.
+ * It lives here, and not in `main.ts`, because each one depends on knowing
+ * *where* the part was drawn — and that's the same math `ShipBuilder` did. They
+ * all read from `ShipDimensions`, so moving a station moves the model and the
+ * prompt together.
  */
 export function createShipInteractables(ship: Ship, player: PlayerController): Interactable[] {
   const items: Interactable[] = [
@@ -299,31 +302,31 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
     {
       id: 'capstan',
       local: new THREE.Vector3(0, DECK_Y + 0.45, tToZ(STATIONS.capstan)),
-      // Um pouco **menor** que o alcance do modo, e não maior: o ponto de foco
-      // fica 1,21 m acima do olho-a-pé, então 2,4 m de olho ao alvo são 2,07 m
-      // no plano do convés — dentro dos 2,1 m que `pushCapstan` exige. Assim o
-      // prompt nunca acende num lugar de onde o toque não pega as barras.
+      // A little **shorter** than the mode's reach, not longer: the focus point
+      // sits 1.21 m off the standing eye, so 2.4 m from eye to target is 2.07 m
+      // in the deck plane — inside the 2.1 m `pushCapstan` requires. That way the
+      // prompt never lights somewhere the tap won't catch the bars.
       range: 2.4,
       level: 'deck',
       label: () => {
         const anchor = ship.anchor;
         if (anchor.state === 'stowed') return 'Drop anchor';
         if (anchor.state === 'dropping') return 'Dropping anchor…';
-        // Diz o que fazer, não o que está acontecendo: quem assume o cabrestante
-        // com o ferro no fundo precisa descobrir que tem de **andar para
-        // frente**, e essa é a única chance de contar isso sem tela de tutorial.
+        // Says what to do, not what is happening: whoever takes the capstan with
+        // the anchor on the bottom has to find out they need to **walk forward**,
+        // and this is the only chance to say so without a tutorial screen.
         const raised = Math.round(clamp01(anchor.raised) * 100);
         return player.atCapstan
           ? `Walk forward to heave — ${raised}%`
           : `Take the capstan — ${raised}%`;
       },
-      // Largar é um toque, suspender é um **modo**. A assimetria é a do jogo, e
-      // vem de `Anchor`: o ferrolho solta sozinho, o cabrestante precisa de
-      // braço — e aqui braço é o jogador dando voltas de verdade.
+      // Dropping is a tap, weighing is a **mode**. The asymmetry is the game's,
+      // and it comes from `Anchor`: the latch lets go by itself, the capstan
+      // needs muscle — and here muscle is the player actually walking laps.
       //
-      // O mesmo botão entra e sai. Isto roda **depois** do `PlayerController` no
-      // quadro (ver `Match.update`), que é o que garante que o toque de entrada
-      // não seja lido como saída no mesmo quadro.
+      // The same button enters and leaves. This runs **after** the
+      // `PlayerController` in the frame (see `Match.update`), which is what
+      // guarantees the entry tap isn't read as an exit in the same frame.
       press: () => {
         if (player.atCapstan) {
           player.leaveCapstan();
@@ -334,30 +337,31 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
           anchor.drop(ship.body);
           return;
         }
-        // Durante a queda não há barra que responda — `Anchor.heave` descarta o
-        // esforço enquanto a amarra corre, e entrar no modo ali daria voltas em
-        // falso.
+        // While it's dropping no bar responds — `Anchor.heave` discards the
+        // effort while the cable runs out, and entering the mode there would walk
+        // laps for nothing.
         if (anchor.state === 'set' || anchor.state === 'raising') player.enterCapstan();
       },
-      // Não há `hold`: quem soma as voltas é o próprio `PlayerController`, que é
-      // o único que sabe o quanto o marujo andou. Ver `pushCapstan`.
+      // There is no `hold`: what adds up the laps is the `PlayerController`
+      // itself, the only one that knows how far the deckhand walked. See
+      // `pushCapstan`.
       locks: () => player.atCapstan,
       progress: () => (ship.anchor.isDeployed ? clamp01(ship.anchor.raised) : null),
     },
-    // A escada do porão **não** está nesta lista, e é de propósito: ela virou um
-    // lance inclinado, que é chão. Não há o que interagir com um chão — anda-se
-    // nele. Ver `stairSurfaceY`.
+    // The hold's ladder is **not** on this list, and that's deliberate: it became
+    // a sloped flight of stairs, which is floor. There's nothing to interact with
+    // on a floor — you walk on it. See `stairSurfaceY`.
     {
       id: 'pump',
       local: new THREE.Vector3(BILGE_PUMP.x - 0.5, BILGE_PUMP_HANDLE_Y, BILGE_PUMP.z + 0.1),
       range: 2.3,
       level: 'hold',
-      // Só aparece com água no porão: bomba seca não tem o que fazer, e o
-      // prompt aceso à toa competiria com o da escada, logo ao lado.
-      // "Hold to pump — hold at 45%" tinha a mesma palavra em dois sentidos na
-      // mesma frase: o verbo de segurar o botão e o porão que se esvazia. Quem
-      // lia entendia que 45% era o progresso do bombeio, ficava segurando à
-      // espera de chegar a 100 e concluía que a bomba não fazia nada.
+      // Only shows up with water in the hold: a dry pump has nothing to do, and a
+      // prompt lit for nothing would compete with the stairs' one, right beside
+      // it. "Hold to pump — hold at 45%" had the same word in two senses in the
+      // same sentence: the verb for holding the button and the hold that drains.
+      // Whoever read it took 45% for the pumping progress, kept holding waiting to
+      // reach 100 and concluded the pump did nothing.
       label: () => {
         const flood = ship.damage.floodFraction;
         if (flood < 0.005) return null;
@@ -366,35 +370,37 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
       hold: () => {
         ship.controls.pumping = true;
       },
-      // A barra mostra o quanto **falta** esvaziar, então ela enche conforme a
-      // água baixa. Uma barra que anda para trás enquanto se trabalha seria a
-      // leitura errada do esforço.
+      // The bar shows how much is **left** to drain, so it fills as the water
+      // goes down. A bar that runs backward while you work would be the wrong
+      // reading of the effort.
       progress: () =>
         ship.damage.floodFraction > 0.005 ? clamp01(1 - ship.damage.floodFraction) : null,
     },
   ];
 
-  // A escada do mastro: um modo em que se entra e se sai pela **mesma tecla**,
-  // e é isso que a separa do lance do porão logo acima.
+  // The mast ladder: a mode you enter and leave with the **same key**, and that's
+  // what separates it from the hold's flight of stairs just above.
   //
-  // Ela era agarrada por encostar andando para vante, e aquilo custava as duas
-  // coisas que um modo não pode custar. Subia sem ninguém pedir — o mastro fica
-  // no meio do corredor e quem o contorna raspa nos degraus. E não tinha saída
-  // pelo alto: descer exigia o mesmo gesto de subir, então quem chegava ao cesto
-  // ficava preso lá em cima com o mar de moldura.
+  // It used to be grabbed by brushing against it walking forward, and that cost
+  // the two things a mode can't cost. It climbed with nobody asking — the mast
+  // sits in the middle of the walkway and anyone going around it scrapes the
+  // rungs. And there was no way out at the top: climbing down took the same
+  // gesture as climbing up, so whoever reached the crow's nest was stuck up there
+  // with the sea for a frame.
   //
-  // O alvo persegue a altura do olho porque o mesmo item serve às duas pontas.
-  // Fixo no pé da escada, o prompt sumiria justo na gávea, que é de onde mais se
-  // precisa dele.
+  // The target chases eye height because the same item serves both ends. Pinned
+  // at the foot of the ladder, the prompt would disappear right at the topsail
+  // platform, which is where it's needed most.
   const ladderItem: Interactable = {
     id: 'mast-ladder',
     local: new THREE.Vector3(0, DECK_Y + 1, MAST_LADDER.z),
     range: 2.4,
     level: 'deck',
     refresh: () => {
-      // Na altura do olho, e não na do pé: o alvo tem de cair perto da linha
-      // de visada nas duas pontas, senão na gávea ele fica um metro abaixo do
-      // olhar e sai do cone justamente de quem quer descer.
+      // At eye height, not foot height: the target has to land near the line of
+      // sight at both ends, otherwise up on the topsail platform it sits a meter
+      // below the gaze and leaves the cone of exactly the player who wants to
+      // climb down.
       ladderItem.local.y = clamp(
         player.eyeLocal.y,
         MAST_LADDER.bottomY + 0.5,
@@ -403,39 +409,39 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
     },
     label: () => {
       if (!player.canGrabMastLadder()) return null;
-      // A mesma pergunta que o controlador faz para saber em que piso o jogador
-      // está — não uma altura parecida escrita de novo aqui.
+      // The same question the controller asks to know which floor the player is
+      // on — not a similar height written out again here.
       return player.onCrowNest() ? 'Climb down to the deck' : 'Climb to the crow’s nest';
     },
     press: () => player.grabMastLadder(),
   };
   items.push(ladderItem);
 
-  // As duas peças do mar. Vivem no pavimento `'water'`, o que já as esconde de
-  // quem está a bordo e esconde o navio inteiro de quem está na água — ver
-  // `Interactable.level`.
+  // The two parts of the sea. They live on the `'water'` level, which already
+  // hides them from anyone aboard and hides the whole ship from anyone in the
+  // water — see `Interactable.level`.
   //
-  // A escada de embarque é **uma entrada que se muda de bordo**, e não duas: quem
-  // está na água só pode alcançar a do próprio lado do casco, então a segunda
-  // nunca teria como estar em foco. É a mesma economia dos rombos, logo abaixo.
+  // The boarding ladder is **one entry that changes sides**, not two: someone in
+  // the water can only reach the one on their own side of the hull, so the second
+  // could never be in focus. Same economy as the breaches, just below.
   const ladderPoint = new THREE.Vector3();
   const boardingItem: Interactable = {
     id: 'boarding-ladder',
     local: ladderPoint,
-    // Da posição do olho de quem boia até a barra: são ~0,9 m na vertical (o olho
-    // fica 22 cm acima da superfície, o alvo 40 cm abaixo dela) mais o alcance de
-    // 1,5 m no plano da água. 2,4 m cobre a diagonal com folga, e continua sendo o
-    // alcance padrão das peças do navio.
+    // From the floating eye's position to the rung: ~0.9 m in the vertical (the
+    // eye sits 22 cm above the surface, the target 40 cm below it) plus the 1.5 m
+    // reach in the water plane. 2.4 m covers the diagonal with room to spare, and
+    // it's still the standard reach of the ship's parts.
     range: 2.4,
     level: 'water',
     refresh: (p) => {
       const spec = boardingLadderForSide(p.local.x);
-      // O alvo é a barra logo **acima** da linha d'água, e não a barra mais funda:
-      // é para ela que um nadador olha, e é ela que está desenhada fora do mar.
+      // The target is the rung just **above** the waterline, not the deepest one:
+      // that's the one a swimmer looks at, and the one drawn out of the sea.
       boardingLadderPoint(spec, 0.4, ladderPoint);
     },
-    // Quem decide se dá para agarrar é o controlador, que é quem sabe o alcance da
-    // mão e onde o corpo ficaria pendurado. Aqui só se pergunta.
+    // What decides whether it can be grabbed is the controller, which knows the
+    // hand's reach and where the body would end up hanging. Here it's only asked.
     label: () => (player.reachableBoardingLadder() ? 'Climb aboard' : null),
     press: () => {
       const spec = player.reachableBoardingLadder();
@@ -444,31 +450,32 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
   };
   items.push(boardingItem);
 
-  // O resgate. É a única peça do jogo que **não é uma peça**: não há para onde
-  // apontar, porque a decisão não mora em lugar nenhum do mundo — o navio está
-  // longe e é justamente por isso que se pede socorro.
+  // The rescue. It's the only part of the game that **isn't a part**: there's
+  // nowhere to point, because the decision doesn't live anywhere in the world —
+  // the ship is far away and that's exactly why help is being called for.
   //
-  // O Nicolas pediu "um botão para clicar"; o jogo roda com o ponteiro travado, e
-  // um botão de tela ali significaria destravar o mouse no meio da partida. A
-  // tradução é esta: o mesmo prompt de ação de todo o resto, com a mesma tecla.
+  // Nicolas asked for "a button to click"; the game runs with the pointer locked,
+  // and an on-screen button there would mean unlocking the mouse mid-match. This
+  // is the translation of it: the same action prompt as everything else, with the
+  // same key.
   const rescueItem: Interactable = {
     id: 'rescue',
     local: new THREE.Vector3(),
     range: 2,
     level: 'water',
     refresh: (p) => {
-      // O alvo acompanha o olhar, um metro à frente do olho: assim ele está sempre
-      // dentro do cone e dentro do alcance, e o prompt aparece por **estar na água
-      // há tempo bastante**, que é a única condição que existe. Fixá-lo no casco
-      // faria o socorro depender de o nadador estar olhando para um navio que já
-      // desapareceu no horizonte.
+      // The target follows the gaze, a meter in front of the eye: that way it's
+      // always inside the cone and inside the range, and the prompt appears for
+      // **having been in the water long enough**, which is the only condition
+      // there is. Pinning it to the hull would make the rescue depend on the
+      // swimmer looking at a ship that has already vanished over the horizon.
       _aim.set(0, 0, -1).applyQuaternion(p.eyeQuaternion);
       rescueItem.local.copy(p.eyeLocal).addScaledVector(_aim, 1);
     },
-    // **A escada ganha do resgate**, e não é questão de pontuação: subir por si
-    // mesmo é sempre melhor que a tela preta, e um alvo colado no centro da vista
-    // venceria o da escada em qualquer disputa de mira. Some enquanto houver barra
-    // ao alcance.
+    // **The ladder beats the rescue**, and it isn't a matter of score: climbing up
+    // by yourself is always better than the black screen, and a target glued to
+    // the center of the view would beat the ladder's in any aim contest. It
+    // disappears while there's a rung within reach.
     label: () =>
       player.canRequestRescue() && !player.reachableBoardingLadder()
         ? 'Signal for a rope'
@@ -477,20 +484,19 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
   };
   items.push(rescueItem);
 
-  // Rombos: uma entrada só, que se muda para o buraco mais próximo. São até 24
-  // ao mesmo tempo e nascem em posições imprevisíveis — cadastrar um item por
-  // rombo obrigaria a mexer na lista no meio do combate.
+  // Breaches: a single entry that moves to the nearest hole. There are up to 24
+  // at once and they appear in unpredictable positions — registering one item per
+  // breach would mean touching the list in the middle of combat.
   let targetBreach: Breach | null = null;
 
   /**
-   * O alvo, se ele ainda for um rombo de verdade.
+   * The target, if it's still a real breach.
    *
-   * O alvo é uma referência guardada numa closure, e `refresh` só roda quando o
-   * foco é recalculado — ou seja, **nunca** enquanto o botão está segurado. Um
-   * rombo tapado no meio do hold continuava aqui dentro, vivo e recebendo
-   * tábuas, porque nada avisava esta variável de que ele tinha saído da lista.
-   * A checagem de pertinência é o aviso, e ela é barata: no pior caso são 24
-   * comparações de referência.
+   * The target is a reference held in a closure, and `refresh` only runs when the
+   * focus is recalculated — that is, **never** while the button is held. A breach
+   * patched in the middle of a hold stayed in here, alive and taking planks,
+   * because nothing told this variable it had left the list. The membership check
+   * is that notice, and it's cheap: 24 reference comparisons in the worst case.
    */
   const currentBreach = (): Breach | null => {
     if (targetBreach && !ship.damage.breaches.includes(targetBreach)) targetBreach = null;
@@ -509,10 +515,10 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
     label: () => {
       const breach = currentBreach();
       if (!breach) return null;
-      // O paiol vazio continua mostrando o rombo, e de propósito: sumir com o
-      // aviso deixaria o jogador achando que está longe demais ou mirando
-      // errado. O que ele precisa saber é que o buraco está lá e que não há mais
-      // madeira para ele — daí em diante o trabalho é na bomba.
+      // An empty locker still shows the breach, and deliberately so: making the
+      // notice disappear would leave the player thinking they are too far away or
+      // aiming wrong. What they need to know is that the hole is there and that
+      // there's no more wood for it — from then on the work is at the pump.
       if (!ship.hasPlanks) return 'No planks left — man the pump';
       const done = Math.round(clamp01(breach.repair) * 100);
       const left = `${ship.planks} in the locker`;
@@ -521,8 +527,8 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
     hold: (dt) => {
       const breach = currentBreach();
       if (!breach) return;
-      // O retorno **importa**: é ele que diz que o buraco fechou. Ignorá-lo era
-      // o que mantinha o jogador pregando tábua no vazio depois dos 100%.
+      // The return value **matters**: it's what says the hole closed. Ignoring it
+      // was what kept the player nailing planks into thin air past 100%.
       if (ship.patchBreach(breach, dt)) targetBreach = null;
     },
     progress: () => {
@@ -536,9 +542,9 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
     const local = new THREE.Vector3();
     items.push({
       id: cannon.side > 0 ? 'cannon-starboard' : 'cannon-port',
-      // O ponto de foco é a culatra, não a boca: é de onde se opera a peça, e é
-      // o que impede o canhão de boreste de roubar o foco de quem está a
-      // bombordo olhando através do navio.
+      // The focus point is the breech, not the muzzle: it's where the gun is
+      // worked from, and it's what keeps the starboard cannon from stealing the
+      // focus of someone at port looking through the ship.
       local: cannon.getPivotLocal(local),
       range: 2.5,
       level: 'deck',
@@ -551,21 +557,22 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
 }
 
 /**
- * O rombo que o jogador está **olhando**, e não simplesmente o mais próximo.
+ * The breach the player is **looking at**, not simply the nearest one.
  *
- * `ShipDamage.findNear` responde por distância pura, que é o certo para decidir
- * se uma bala nova alarga um furo existente — mas é a pergunta errada aqui. Uma
- * salva abre vários buracos na mesma tábua, e `MERGE_DISTANCE` é de só 42 cm:
- * com dois rombos dentro do alcance da mão, o jogador mirava um e o código
- * pregava a tábua no outro, aos pés dele. A barra enchia, um buraco fechava, e o
- * que ele estava olhando continuava esguichando — exatamente a leitura de "cheguei
- * a 100% e o rombo não sumiu". Com a fusão mais apertada isso ficou **mais**
- * frequente, não menos: cabem mais rombos no mesmo palmo de costado.
+ * `ShipDamage.findNear` answers by pure distance, which is the right thing for
+ * deciding whether a fresh cannonball widens an existing hole — but it's the
+ * wrong question here. A broadside opens several holes in the same plank, and
+ * `MERGE_DISTANCE` is only 42 cm: with two breaches within the hand's reach, the
+ * player aimed at one and the code nailed the plank over the other, at their feet.
+ * The bar filled, one hole closed, and the one they were looking at kept spraying
+ * — exactly the reading of "I got to 100% and the breach didn't go away". With the
+ * merge tightened up this got **more** frequent, not less: more breaches fit in
+ * the same handspan of hull side.
  *
- * A pontuação é a mesma do foco de interação: mira pesa mais que distância.
+ * The score is the same as the interaction focus's: aim weighs more than distance.
  */
 function aimedBreach(ship: Ship, player: PlayerController): Breach | null {
-  // Frente é −Z, como em todo o resto do projeto.
+  // Forward is −Z, as everywhere else in the project.
   _aim.set(0, 0, -1).applyQuaternion(player.eyeQuaternion);
 
   let best: Breach | null = null;
@@ -576,8 +583,8 @@ function aimedBreach(ship: Ship, player: PlayerController): Breach | null {
     const distance = _toBreach.length();
     if (distance > REPAIR_REACH || distance < 1e-4) continue;
 
-    // Cosseno do ângulo entre a mira e o rombo. O que está atrás cai fora
-    // sozinho, sem precisar de um segundo teste.
+    // Cosine of the angle between the aim and the breach. Anything behind drops
+    // out on its own, with no need for a second test.
     const alignment = _toBreach.dot(_aim) / distance;
     if (alignment <= 0) continue;
 

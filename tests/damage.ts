@@ -1,37 +1,37 @@
 /**
- * Testes do modelo de avaria — a propriedade que faltava e ninguém viu por meses.
+ * Damage model tests — the property that was missing and nobody saw for months.
  *
- * Rodável no navegador, como os outros:
+ * Runnable in the browser, like the others:
  *
  * ```js
  * const t = await import('/tests/damage.ts');
  * console.table(t.runDamageTests().cases);
  * ```
  *
- * **O que se prova aqui, e por que vale um arquivo.** O modelo de alagamento não
- * tem "resposta certa" para comparar — vazão de rombo em casco de madeira é um
- * número afinado, não um teorema. O que ele *tem* é uma propriedade estrutural que
- * qualquer jogo de combate precisa respeitar e que este aqui violava:
+ * **What gets proven here, and why it's worth a file.** The flooding model has no
+ * "right answer" to compare against — breach flow rate in a wooden hull is a tuned
+ * number, not a theorem. What it *does* have is a structural property that any
+ * combat game needs to respect and that this one violated:
  *
- * > **Um acerto vale um acerto, caia onde cair.**
+ * > **A hit is worth a hit, wherever it lands.**
  *
- * A violação era discreta e vinha de duas regras razoáveis que se somavam mal. Um
- * tiro perto de um rombo aberto *alargava* aquele rombo em vez de abrir outro (com
- * um raio de 90 cm, três vezes e meia o vão que a bala faz), e a vazão de cada rombo
- * era limitada por um teto **fixo**, igual para um furo pequeno e para um do dobro
- * do tamanho. Juntas, elas diziam que alargar não vale nada — e, portanto, que
- * agrupar os tiros é desperdício.
+ * The violation was subtle and came out of two reasonable rules that added up
+ * badly. A shot near an open breach *widened* that breach instead of opening
+ * another one (with a 90 cm radius, three and a half times the span a cannonball
+ * makes), and each breach's flow rate was limited by a **fixed** ceiling, the same
+ * for a small hole and for one twice the size. Together, they said that widening is
+ * worth nothing — and therefore that grouping the shots is a waste.
  *
- * Medido: oito acertos num palmo do costado punham 10% de água no porão; os mesmos
- * oito varridos ao longo do casco **afundavam o navio**. Quem mirava melhor causava
- * dez vezes menos dano, e a IA — que varre por doutrina — jogava no lado bom daquela
- * curva enquanto o jogador jogava no lado ruim, sem ter como saber que a curva
- * existia.
+ * Measured: eight hits within a handspan of the hull side put 10% of water in the
+ * hold; the same eight swept along the hull **sank the ship**. Whoever aimed better
+ * did ten times less damage, and the AI — which sweeps by doctrine — played on the
+ * good side of that curve while the player played on the bad side, with no way to
+ * know the curve existed.
  *
- * Os três casos abaixo prendem o conserto: a fusão sai do vão real do rombo, a vazão
- * é linear na área **inclusive depois da saturação**, e a razão entre fogo agrupado
- * e fogo varrido fica acima de um piso. Nenhum deles precisa de navio, de oceano nem
- * de canvas — só da geometria e da conta.
+ * The three cases below pin the fix down: the merge comes out of the breach's real
+ * span, the flow rate is linear in area **including past saturation**, and the ratio
+ * between grouped fire and swept fire stays above a floor. None of them needs a
+ * ship, an ocean or a canvas — only the geometry and the arithmetic.
  */
 
 import * as THREE from 'three';

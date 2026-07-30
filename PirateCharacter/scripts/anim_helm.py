@@ -1,98 +1,101 @@
-"""Timão: um ciclo, um punho, e a roda como régua.
+"""Helm: one cycle, one spoke handle, and the wheel as the ruler.
 
-Este clipe segue a mesma regra que rege todos os outros desta pasta — **nenhum
-clipe roda no relógio se existe uma grandeza física de onde ser lido**. A marcha
-lê a distância, o pulo lê a velocidade vertical, a escalada lê a altura vencida.
-Aqui a grandeza é o **ângulo da roda**, e o casamento é o mais limpo do projeto:
-
-```
-fase = frac(wheelAngle / (π/4))
-```
-
-Um ciclo do clipe cobre exatamente **45° de roda**, que é o passo dos oito
-punhos. Como o passo é o mesmo em qualquer ponto do curso, acertar a fase é
-acertar para sempre: a mão cai em cima de um punho **desenhado**, com o leme a
-meio, todo a bombordo ou em qualquer lugar entre os dois. Não há alinhamento
-para fazer ao agarrar, como a escada precisa (`ClimbClock.align`) — a grade da
-roda é periódica de nascença.
-
-E, como na escada, **girar para o outro lado é este mesmo clipe com a fase
-andando para trás**. Não é economia: os contatos de uma guinada a bombordo têm
-de cair nos mesmos oito punhos da guinada a boreste, e um segundo clipe teria de
-reproduzir essa grade. Rodando o mesmo ciclo com a fase decrescente o contato é
-idêntico por construção — a mão que puxava passa a empurrar, que é exatamente o
-que o timoneiro faz.
-
-## Por que as duas mãos ficam 45° separadas, e não onde daria jeito
-
-Porque os punhos ficam. Duas mãos em dois punhos estão sempre a um **múltiplo
-inteiro de 45°** uma da outra — não há como escolher 25° nem 60°. Esse é o
-primeiro fato que este arquivo teve de engolir, e ele manda em todo o resto: com
-a mão direita trabalhando o quadrante de boreste e a esquerda o de bombordo,
-elas se revezam em torno do topo da roda, que é onde o braço deste personagem
-alcança.
-
-## O déficit de alcance, que é o assunto de verdade
-
-Projetado no plano da roda, o ombro cai **quase em cima do círculo dos punhos**:
-o raio de pega é 0,660 m e o ombro está a 0,683 m do cubo. Em duas dimensões o
-sujeito segura a roda sem esforço. O problema é a terceira:
+This clip follows the same rule that governs every other one in this folder —
+**no clip runs on the clock if there is a physical quantity to read it from**.
+The walk reads distance, the jump reads vertical speed, the climb reads the
+height gained. Here the quantity is the **wheel angle**, and the match is the
+cleanest in the project:
 
 ```
-posto do timoneiro ....... z = 7,170        (HELM_STAND, hoje)
-plano da roda ............ z = 6,320
-vão a vencer ............. 0,850 m
-braço (ombro→palma) ...... 0,678 m
+phase = frac(wheelAngle / (π/4))
 ```
 
-**Faltam 17 cm**, e nenhuma pose os inventa de graça. Este arquivo entregou duas
-variantes para a decisão ser tomada com o olho, e não com o argumento. **A
-decisão está tomada: venceu a `NEAR`** — e é ela quem carrega o nome `Helm`.
+One cycle of the clip covers exactly **45° of wheel**, which is the pitch of the
+eight handles. Since the pitch is the same anywhere along the travel, getting
+the phase right gets it right forever: the hand lands on top of a **drawn**
+handle, with the rudder amidships, hard to port or anywhere in between. There is
+no alignment to do on grabbing, the way the ladder needs one
+(`ClimbClock.align`) — the wheel's grid is periodic from birth.
 
-- `NEAR` — **a canônica**. O posto vem 23 cm para vante (`+0,85` → `+0,62`).
-  Postura ereta, cotovelo dobrado, braço em **88%**. Cobra do jogo as duas
-  linhas listadas em `NEAR.note`, e é só isso que ela cobra.
-- `INTACT` — o caminho que não se seguiu. Nada mudava no jogo: os 17 cm saíam de
-  tronco inclinado, quadril avançado sobre os tornozelos e ombro projetado, e
-  custavam **91%** de extensão de braço. Funciona; parece o que é, um homem
-  esticado sobre uma roda longe demais. Fica sob o nome `_HelmIntact`, fora do
-  export, como referência de para onde se pode voltar.
+And, as on the ladder, **turning the other way is this same clip with the phase
+running backwards**. It's not thrift: the contacts of a turn to port have to
+land on the same eight handles as a turn to starboard, and a second clip would
+have to reproduce that grid. Running the same cycle with a decreasing phase
+makes the contact identical by construction — the hand that was pulling starts
+pushing, which is exactly what the helmsman does.
 
-Os dois têm exatamente o mesmo contato: 2,2 cm de mão envolvendo a madeira,
-0,3 mm de escorregamento, e meio milímetro de deriva ao longo dos 360° do curso.
-O que mudava entre eles é postura, e postura é o que se julga com o olho.
+## Why the two hands sit 45° apart, and not wherever would be convenient
 
-## O punho tem 9,5 cm de diâmetro; a mão tem 5,8
+Because the handles do. Two hands on two handles are always an **integer
+multiple of 45°** from each other — there is no picking 25° or 60°. That is the
+first fact this file had to swallow, and it rules everything else: with the right
+hand working the starboard quadrant and the left the port one, they take turns
+around the top of the wheel, which is where this character's arm reaches.
 
-Então **os dedos não fecham em volta**. A pose certa não é punho cerrado, é mão
-em concha por cima: a palma pousa no dorso do punho e os dedos descem pelo lado
-de lá até onde chegam. É por isso que `FINGER_CURL` aqui é metade do da escada —
-lá a barra tem 5,2 cm de diâmetro e cabe dentro da mão fechada.
+## The reach deficit, which is the real subject
 
-O *roll* da mão é o que decide se isso lê como pegada ou como mão cerrada ao
-lado da madeira, e ele não sai da IK: sobra um grau de liberdade depois que a
-posição está resolvida. `_aim_hand` escolhe esse grau alinhando a palma com a
-perpendicular comum entre o antebraço e o **eixo do punho** — e é aí que este
-arquivo não pôde reaproveitar o da escada: lá o eixo é uma constante
-(`RUNG_AXIS`, os degraus são todos paralelos), aqui ele é **radial** e muda a
-cada punho e a cada quadro.
+Projected onto the plane of the wheel, the shoulder falls **almost right on the
+circle of handles**: the grip radius is 0.660 m and the shoulder sits 0.683 m
+from the hub. In two dimensions the man holds the wheel effortlessly. The
+problem is the third:
 
-E o *sentido* desse roll é espelhado entre as mãos, porque uma mão é um objeto
-quiral: com o mesmo par (dedos, palma) nos dois lados, um polegar sai para cima e
-o outro para baixo. Foi assim que a mão direita passou meses invertida com todas
-as medidas de contato dando certo — ver `PALM_SIGN`.
+```
+helmsman's post .......... z = 7.170        (HELM_STAND, today)
+plane of the wheel ....... z = 6.320
+gap to cover ............. 0.850 m
+arm (shoulder→palm) ...... 0.678 m
+```
 
-## E a mão pega onde a madeira **está**
+**17 cm are missing**, and no pose invents them for free. This file shipped two
+variants so the decision could be made by eye, and not by argument. **The
+decision is made: `NEAR` won** — and it is the one carrying the name `Helm`.
 
-Parece óbvio e não era. Os ângulos de pega saíam do alcance do ombro e caíam 2,7°
-fora da grade dos oito punhos; `verify()` não via porque media a mão contra um
-punho desenhado no ângulo da própria mão. Hoje `GRAB_R` e `GRAB_L` são pontos da
-grade, `off_grid_deg` cobra isso, e o preço — 5,4° de assimetria entre os dois
-arcos — está descrito em `SPLAY_R`.
+- `NEAR` — **the canonical one**. The post comes 23 cm forward (`+0.85` →
+  `+0.62`). Upright posture, bent elbow, arm at **88%**. It asks the game for
+  the two lines listed in `NEAR.note`, and that is all it asks.
+- `INTACT` — the road not taken. Nothing changed in the game: the 17 cm came out
+  of a leaning torso, hips carried forward over the ankles and a protracted
+  shoulder, and cost **91%** of arm extension. It works; it looks like what it
+  is, a man stretched over a wheel that is too far away. It stays under the name
+  `_HelmIntact`, out of the export, as a record of where one can go back to.
 
-Convenções do rig, como no resto da pasta: o personagem olha para **-Y**,
-1 unidade = 1 metro, chão em Z = 0, `+X` é a esquerda dele. Aqui o -Y aponta
-para a roda.
+Both have exactly the same contact: 2.2 cm of hand wrapping the wood, 0.3 mm of
+slip, and half a millimeter of drift over the 360° of travel. What changed
+between them is posture, and posture is what gets judged by eye.
+
+## The handle is 9.5 cm across; the hand is 5.8
+
+So **the fingers do not close around it**. The right pose is not a clenched
+fist, it's a hand cupped over the top: the palm rests on the back of the handle
+and the fingers come down the far side as far as they get. That is why
+`FINGER_CURL` here is half the ladder's — there the rung is 5.2 cm across and
+fits inside a closed hand.
+
+The hand's *roll* is what decides whether this reads as a grip or as a fist
+clenched next to the wood, and it doesn't come out of the IK: one degree of
+freedom is left over once the position is solved. `_aim_hand` picks that degree
+by aligning the palm with the common perpendicular between the forearm and the
+**handle axis** — and this is where this file could not reuse the ladder's:
+there the axis is a constant (`RUNG_AXIS`, the rungs are all parallel), here it
+is **radial** and changes with every handle and every frame.
+
+And the *sign* of that roll is mirrored between the hands, because a hand is a
+chiral object: with the same (fingers, palm) pair on both sides, one thumb comes
+out up and the other down. That is how the right hand spent months inverted with
+every contact measurement checking out — see `PALM_SIGN`.
+
+## And the hand grabs where the wood **is**
+
+Sounds obvious and it wasn't. The grip angles came out of the shoulder's reach
+and landed 2.7° off the grid of the eight handles; `verify()` didn't see it
+because it measured the hand against a handle drawn at the hand's own angle.
+Today `GRAB_R` and `GRAB_L` are points on the grid, `off_grid_deg` enforces
+that, and the price — 5.4° of asymmetry between the two arcs — is described in
+`SPLAY_R`.
+
+Rig conventions, as in the rest of the folder: the character faces **-Y**,
+1 unit = 1 meter, ground at Z = 0, `+X` is his left. Here -Y points at the
+wheel.
 """
 
 from __future__ import annotations
@@ -108,290 +111,301 @@ import anim_gait
 
 FPS = 30
 
-#: Quadros de um ciclo — 45° de roda.
+#: Frames in one cycle — 45° of wheel.
 #:
-#: 25 não é redondo por acaso: `HAND_STANCE`, `HAND_GAP` e o defasamento entre as
-#: mãos são frações de vinte e cinco avos exatas (17, 2 e 6 quadros), então os
-#: instantes de largar e agarrar caem **em cima** de um keyframe. Fora da grade,
-#: a interpolação linear do three.js espalharia a soltura por um quadro inteiro e
-#: a mão sairia do punho antes da hora.
+#: 25 is not a round number by accident: `HAND_STANCE`, `HAND_GAP` and the offset
+#: between the hands are exact twenty-fifths (17, 2 and 6 frames), so the
+#: instants of letting go and grabbing land **on** a keyframe. Off the grid,
+#: three.js's linear interpolation would smear the release over a whole frame and
+#: the hand would leave the handle early.
 #:
-#: A cadência nativa que isso implica (0,833 s por punho) não precisa bater com a
-#: do jogo, e não bate: a `WHEEL_RATE` de 2,1 rad/s cobre 45° em 0,374 s. Quem
-#: manda na fase é o ângulo da roda, exatamente como a subida manda na escada.
+#: The native cadence this implies (0.833 s per handle) doesn't have to match the
+#: game's, and doesn't: a `WHEEL_RATE` of 2.1 rad/s covers 45° in 0.374 s. What
+#: rules the phase is the wheel angle, exactly as the climb rules on the ladder.
 CYCLE_FRAMES = 25
 
 
-# -- a roda de verdade --------------------------------------------------------
+# -- the real wheel -----------------------------------------------------------
 
-#: Medidas lidas de `src/ship/ShipParts.ts` (`createWheel` e `buildHelmFrame`) e
-#: de `ShipDimensions.ts`. Estão aqui em cópia porque o Blender não lê
-#: TypeScript, e comentadas porque um número solto vira mentira na primeira vez
-#: que alguém mexer no navio.
+#: Measurements read from `src/ship/ShipParts.ts` (`createWheel` and
+#: `buildHelmFrame`) and from `ShipDimensions.ts`. They are here as a copy
+#: because Blender doesn't read TypeScript, and commented because a loose number
+#: turns into a lie the first time somebody touches the ship.
 #:
-#: Tudo convertido do sistema do **navio** (+Y cima, -Z proa, +X boreste) para o
-#: do **rig** (+Z cima, -Y frente, +X esquerda do personagem), com a origem nos
-#: pés do timoneiro:
+#: All of it converted from the **ship's** system (+Y up, -Z bow, +X starboard)
+#: to the **rig's** (+Z up, -Y front, +X the character's left), with the origin
+#: at the helmsman's feet:
 #:
-#:     rig_x = -navio_x        rig_y = navio_z - 7,170        rig_z = navio_y - 1,825
+#:     rig_x = -ship_x        rig_y = ship_z - 7.170        rig_z = ship_y - 1.825
 #:
-#: O espelho em X não é detalhe: de frente para a proa, bombordo fica à esquerda
-#: do timoneiro, e é a mão esquerda dele que trabalha o lado de bombordo da roda.
-WHEEL_Y = 2.620                       # altura do cubo no navio
-DECK_Y = 1.740 + 0.085                # QUARTERDECK_Y + deckCamber(0, ...) = 1,825
-#: Altura do cubo acima dos pés. É a âncora vertical de tudo aqui.
-HUB_Z = WHEEL_Y - DECK_Y              # 0,795
+#: The mirror in X is not a detail: facing the bow, port is on the helmsman's
+#: left, and it is his left hand that works the port side of the wheel.
+WHEEL_Y = 2.620                       # hub height on the ship
+DECK_Y = 1.740 + 0.085                # QUARTERDECK_Y + deckCamber(0, ...) = 1.825
+#: Hub height above the feet. It is the vertical anchor for everything here.
+HUB_Z = WHEEL_Y - DECK_Y              # 0.795
 
-WHEEL_RADIUS = 0.550                  # raio médio do aro
-RIM_TUBE = 0.055                      # meia espessura do aro
-#: O punho é um tubo **radial**, no plano da roda — como numa roda de leme de
-#: verdade, é o raio que atravessa o aro e sobra do lado de fora. Vai de
-#: `R + 0,03` a `R + 0,19`, afinando de 5,2 para 4,3 cm de raio.
-HANDLE_INNER = WHEEL_RADIUS + 0.030   # 0,580
-HANDLE_OUTER = WHEEL_RADIUS + 0.190   # 0,740
-HANDLE_RADIUS = 0.0475                # média do afunilamento
-#: Onde a mão pega: o meio do punho.
-GRIP_RADIUS = 0.5 * (HANDLE_INNER + HANDLE_OUTER)     # 0,660
+WHEEL_RADIUS = 0.550                  # mean radius of the rim
+RIM_TUBE = 0.055                      # half thickness of the rim
+#: The handle is a **radial** tube, in the plane of the wheel — as on a real
+#: helm, it is the spoke that goes through the rim and sticks out the far side.
+#: It runs from `R + 0.03` to `R + 0.19`, tapering from 5.2 to 4.3 cm of radius.
+HANDLE_INNER = WHEEL_RADIUS + 0.030   # 0.580
+HANDLE_OUTER = WHEEL_RADIUS + 0.190   # 0.740
+HANDLE_RADIUS = 0.0475                # mean of the taper
+#: Where the hand grabs: the middle of the handle.
+GRIP_RADIUS = 0.5 * (HANDLE_INNER + HANDLE_OUTER)     # 0.660
 
 HANDLE_COUNT = 8
 HANDLE_PITCH = 360.0 / HANDLE_COUNT   # 45°
-#: O punho zero nasce no topo, e é dele que sai a marca de latão do leme a meio.
-#: Ângulo mundial do punho *i*: `HANDLE_ZERO + i·45° - wheelAngle`.
+#: Handle zero is born at the top, and it is the one carrying the brass mark for
+#: the rudder amidships. World angle of handle *i*:
+#: `HANDLE_ZERO + i·45° - wheelAngle`.
 HANDLE_ZERO = 90.0
 
 HUB_RADIUS = 0.135
 HUB_HALF = 0.110
 
-#: Peças do cavalete que fecham a janela de pega. Nenhuma delas é decoração:
-#: são elas que proíbem a mão de descer pelos punhos de baixo.
-CROSSBAR_Z = HUB_Z - 0.520            # travessa na altura do peito
-CROSSBAR_HALF = (1.035, 0.080, 0.070)  # meias medidas em (x, y, z) do rig
-DRUM_RADIUS = 0.220                   # tambor do leme, cilindro em X
+#: Parts of the frame that close off the grip window. None of them is decoration:
+#: they are what forbids the hand from going down onto the lower handles.
+CROSSBAR_Z = HUB_Z - 0.520            # crossbar at chest height
+CROSSBAR_HALF = (1.035, 0.080, 0.070)  # half measures in rig (x, y, z)
+DRUM_RADIUS = 0.220                   # rudder drum, a cylinder along X
 DRUM_HALF_X = 0.220
-#: Mancal de ferro ligando o montante ao eixo — uma barra em X na altura exata
-#: do cubo. É ele, e não o tambor, que corta os punhos das 3 e das 9 horas.
+#: Iron bearing tying the post to the axle — a bar along X at exactly hub
+#: height. It is this, not the drum, that cuts off the 3 and 9 o'clock handles.
 BEARING_RADIUS = 0.055
 BEARING_INNER_X = 0.300
 BEARING_OUTER_X = 0.890
 POST_X = 0.950
-POST_HALF = (0.085, 0.105)            # meia largura em x, meia espessura em y
+POST_HALF = (0.085, 0.105)            # half width in x, half thickness in y
 POST_TOP_Z = (WHEEL_Y + 0.26) - DECK_Y
 
 
-# -- geometria da pega --------------------------------------------------------
+# -- grip geometry ------------------------------------------------------------
 
-#: Ombro em repouso, lido do rig (`upperarm.L.head_local`). Fica aqui como
-#: constante porque é dele que sai o ângulo de trabalho das mãos, e esse cálculo
-#: precisa acontecer no momento em que o módulo é lido — antes de haver cena.
+#: Shoulder at rest, read from the rig (`upperarm.L.head_local`). It lives here
+#: as a constant because the hands' working angle comes out of it, and that
+#: calculation has to happen the moment the module is read — before any scene.
 SHOULDER_X = 0.145
 SHOULDER_Z = 1.462
-#: Comprimentos do braço, também do rig. `build` relê tudo da armature e os usa;
-#: aqui servem só para a conta de alcance que documenta o déficit.
+#: Arm lengths, also from the rig. `build` re-reads everything from the armature
+#: and uses that; these are only for the reach arithmetic that documents the
+#: deficit.
 HUMERUS = 0.3576
 FOREARM = 0.2503
 
-#: Distância do punho (a articulação) ao centro do punho (a peça de madeira), ao
-#: longo do antebraço. Mesma definição do `anim_climb`: quem segura é a **palma**,
-#: e mirar a articulação em vez dela joga 7 cm de alcance fora.
-HAND_GRIP_REACH = anim_climb.HAND_GRIP_REACH   # 0,070
+#: Distance from the wrist (the joint) to the center of the handle (the piece of
+#: wood), along the forearm. Same definition as in `anim_climb`: what holds on is
+#: the **palm**, and aiming the joint instead throws 7 cm of reach away.
+HAND_GRIP_REACH = anim_climb.HAND_GRIP_REACH   # 0.070
 
-#: Alcance total ombro→palma. É a régua contra a qual o déficit é medido.
-ARM_REACH = HUMERUS + FOREARM + HAND_GRIP_REACH  # 0,678
+#: Total shoulder→palm reach. It is the ruler the deficit is measured against.
+ARM_REACH = HUMERUS + FOREARM + HAND_GRIP_REACH  # 0.678
 
-#: **Onde o braço alcança melhor**, e não onde ficaria bonito.
+#: **Where the arm reaches best**, and not where it would look pretty.
 #:
-#: Projetado no plano da roda, o ombro está a `hypot(0,145; 1,462-0,795)` =
-#: 0,683 m do cubo, contra 0,660 m do círculo de pega: praticamente em cima dele.
-#: Logo o punho mais fácil de alcançar é o que cai no **mesmo azimute** do ombro,
-#: e qualquer grau de afastamento desse azimute custa alcance ao quadrado.
+#: Projected onto the plane of the wheel, the shoulder is `hypot(0.145;
+#: 1.462-0.795)` = 0.683 m from the hub, against 0.660 m for the grip circle:
+#: practically right on top of it. So the easiest handle to reach is the one at
+#: the **same azimuth** as the shoulder, and every degree away from that azimuth
+#: costs reach squared.
 #:
-#: Para a mão direita isso dá 77,7° (medido do eixo +X do navio, anti-horário);
-#: para a esquerda, o espelho, 102,3°. As duas ficam **em torno do topo da roda**,
-#: e não às 10 e às 2 como manda a foto de timoneiro: às 2 horas o punho está a
-#: 0,93 m do ombro, e o braço tem 0,678.
+#: For the right hand that gives 77.7° (measured from the ship's +X axis,
+#: counterclockwise); for the left, its mirror, 102.3°. Both sit **around the top
+#: of the wheel**, and not at 10 and 2 the way the helmsman photo demands: at 2
+#: o'clock the handle is 0.93 m from the shoulder, and the arm has 0.678.
 #:
-#: É o azimute **ótimo**, e não o de pega: quem manda no ângulo de pega é a grade
-#: dos oito punhos (ver `GRAB_R`). Aqui ele serve de referência para medir quanto
-#: cada mão ficou longe do ideal — `SPLAY_R` e `SPLAY_L`.
+#: It is the **optimal** azimuth, not the grip one: what rules the grip angle is
+#: the grid of the eight handles (see `GRAB_R`). Here it serves as the reference
+#: for measuring how far each hand ended up from the ideal — `SPLAY_R` and
+#: `SPLAY_L`.
 REACH_ANGLE = math.degrees(math.atan2(SHOULDER_Z - HUB_Z, SHOULDER_X))
 
-#: Fração do ciclo em que cada mão está presa a um punho.
+#: Fraction of the cycle each hand spends locked onto a handle.
 #:
-#: Ela decide duas coisas de uma vez, e elas puxam para lados opostos. A
-#: **excursão** de uma mão é `HAND_STANCE × 45°` — quanto mais tempo presa, mais
-#: longe do azimute ótimo ela viaja, e mais o braço estica. Mas é ela também que
-#: dá o tempo com as **duas** mãos na roda, que é o que faz o timoneiro parecer
-#: timoneiro e não malabarista.
+#: It decides two things at once, and they pull in opposite directions. A hand's
+#: **excursion** is `HAND_STANCE × 45°` — the longer it stays locked, the farther
+#: from the optimal azimuth it travels, and the more the arm stretches. But it is
+#: also what buys the time with **both** hands on the wheel, which is what makes
+#: the helmsman look like a helmsman and not a juggler.
 #:
-#: 0,68 põe 44% do ciclo com as duas mãos presas e leva a excursão a 30,6° — a
-#: 20,2° do azimute ótimo no pior quadro, que o braço aguenta.
+#: 0.68 puts 44% of the cycle with both hands locked and takes the excursion to
+#: 30.6° — 20.2° off the optimal azimuth in the worst frame, which the arm takes.
 HAND_STANCE = 0.68
 
-#: Fração do ciclo em que **nenhuma** mão está na roda.
+#: Fraction of the cycle with **no** hand on the wheel.
 #:
-#: Parece defeito e é o contrário: sem ela as duas mãos disputam o mesmo punho.
-#: A conta é inevitável. Estando as mãos sempre a um múltiplo de 45° uma da
-#: outra, e tendo cada uma de largar e reagarrar uma vez por ciclo, ou sobra um
-#: vão sem mão nenhuma ou sobra um instante com as duas no mesmo lugar — e o
-#: segundo é interpenetração na tela.
+#: Looks like a defect and is the opposite: without it the two hands fight over
+#: the same handle. The arithmetic is unavoidable. With the hands always a
+#: multiple of 45° from each other, and each having to let go and re-grab once
+#: per cycle, either a gap with no hand at all is left over or an instant with
+#: both in the same place is — and the second one is interpenetration on screen.
 #:
-#: O tamanho do vão é o que separa os dois arcos: eles ficam `45° × HAND_GAP`
-#: um do outro. Com 0,08 a medição achou **6 cm** entre as palmas no pior
-#: quadro da troca, contra uma mão de 9 cm de largura — as duas se atravessavam.
-#: Com 0,12 são 12 cm, e a troca passa limpa. O preço são três quadros em vinte
-#: e cinco sem mão na roda, e menos de meio grau de alcance.
+#: The size of the gap is what separates the two arcs: they end up `45° ×
+#: HAND_GAP` apart. At 0.08 the measurement found **6 cm** between the palms in
+#: the worst frame of the handover, against a hand 9 cm wide — the two went
+#: through each other. At 0.12 it is 12 cm, and the handover goes clean. The
+#: price is three frames in twenty-five with no hand on the wheel, and less than
+#: half a degree of reach.
 HAND_GAP = 0.12
 
-#: Excursão de uma mão, em graus de roda.
-SWING = HAND_STANCE * HANDLE_PITCH                    # 30,6°
-#: Separação entre os centros dos dois arcos, no mundo. Sai da aritmética acima,
-#: não de escolha: `45° × (stance + gap)`. É o mesmo que `CENTER_L − CENTER_R`
-#: mais abaixo, e conferir os dois é o teste de que a grade fechou.
-CENTER_SPREAD = (HAND_STANCE + HAND_GAP) * HANDLE_PITCH   # 36,0°
+#: Excursion of one hand, in degrees of wheel.
+SWING = HAND_STANCE * HANDLE_PITCH                    # 30.6°
+#: Separation between the centers of the two arcs, in the world. It comes out of
+#: the arithmetic above, not out of choice: `45° × (stance + gap)`. It is the same
+#: as `CENTER_L − CENTER_R` further down, and checking the two against each other
+#: is the test that the grid closed.
+CENTER_SPREAD = (HAND_STANCE + HAND_GAP) * HANDLE_PITCH   # 36.0°
 
-#: Fase em que cada mão agarra. A direita abre o ciclo; a esquerda vem depois,
-#: pelo tanto que o vão e o apoio deixam.
+#: Phase at which each hand grabs. The right one opens the cycle; the left comes
+#: after, by however much the gap and the stance leave.
 GRAB_PHASE_R = 0.0
-GRAB_PHASE_L = 1.0 - HAND_STANCE - HAND_GAP           # 0,20
+GRAB_PHASE_L = 1.0 - HAND_STANCE - HAND_GAP           # 0.20
 
-#: Ângulo em que cada mão **toma** o punho: o alto do seu arco. Girando a roda a
-#: boreste os punhos descem, então a mão pega em cima e desce com ele.
+#: Angle at which each hand **takes** the handle: the top of its arc. Turning the
+#: wheel to starboard the handles come down, so the hand grabs high and rides down
+#: with it.
 #:
-#: > [!warning] Estes dois números **não são escolha**: são a grade da roda
-#: > A fase zero do clipe é `wheelAngle ≡ 0 (mod 45°)`, porque é isso que
-#: > `HelmClock` calcula. Nesse instante os oito punhos estão exatamente em
-#: > `HANDLE_ZERO + i × 45°` — o punho de latão no topo, que é a marca do leme a
-#: > meio que o jogador usa para se orientar. Logo, para a mão cair em cima de
-#: > madeira **desenhada**, o ângulo de pega tem de ser um ponto dessa grade, e
-#: > não o que o alcance do ombro preferiria.
+#: > [!warning] These two numbers are **not a choice**: they are the wheel's grid
+#: > Phase zero of the clip is `wheelAngle ≡ 0 (mod 45°)`, because that is what
+#: > `HelmClock` computes. At that instant the eight handles are exactly at
+#: > `HANDLE_ZERO + i × 45°` — the brass handle at the top, which is the rudder
+#: > amidships mark the player uses to orient himself. So, for the hand to land
+#: > on **drawn** wood, the grip angle has to be a point on that grid, and not
+#: > whatever the shoulder's reach would prefer.
 #: >
-#: > Este arquivo escolheu o alcance por três meses. As duas mãos pegavam 2,7°
-#: > fora da grade — 3,1 cm de arco —, e ninguém viu porque `verify()` media a
-#: > mão contra um punho desenhado **no ângulo da mão**, e não contra os oito que
-#: > existem: um punho fantasma acompanha qualquer erro de posição. O que
-#: > acontecia de verdade era a palma afundar 2 cm na madeira, escondida pelo
-#: > tanto que a concha da mão já sobrepõe a peça de propósito.
+#: > This file picked reach for three months. Both hands grabbed 2.7° off the
+#: > grid — 3.1 cm of arc —, and nobody saw it because `verify()` measured the
+#: > hand against a handle drawn **at the hand's angle**, and not against the
+#: > eight that exist: a phantom handle follows any position error. What actually
+#: > happened was the palm sinking 2 cm into the wood, hidden by how much the cup
+#: > of the hand already overlaps the piece on purpose.
 #: >
-#: > O erro só apareceu no dia em que a palma da mão direita passou para o outro
-#: > lado do punho (ver `PALM_SIGN`): ali os 2,7° deixaram de ser compensados
-#: > pelo deslocamento da palma e viraram 1 cm de mão no ar, que o `sweep_check`
-#: > acusou na hora.
+#: > The error only showed up the day the right hand's palm moved to the other
+#: > side of the handle (see `PALM_SIGN`): there the 2.7° stopped being
+#: > compensated by the palm's offset and turned into 1 cm of hand in mid-air,
+#: > which `sweep_check` called out on the spot.
 #:
-#: A esquerda pega o punho seguinte, e o `1 − GRAB_PHASE_L` é o quanto a roda já
-#: girou quando chega a vez dela: entre as duas pegas o mundo andou, e é por isso
-#: que os dois ângulos ficam a 36° um do outro no mundo enquanto os **punhos**
-#: continuam a 45° na roda, como sempre estiveram.
+#: The left hand takes the next handle, and the `1 − GRAB_PHASE_L` is how much the
+#: wheel has already turned by the time its turn comes: between the two grabs the
+#: world moved, and that is why the two angles end up 36° apart in the world while
+#: the **handles** stay 45° apart on the wheel, as they always were.
 GRAB_R = HANDLE_ZERO
 GRAB_L = HANDLE_ZERO + HANDLE_PITCH * (1.0 - GRAB_PHASE_L)
 
-#: Centro do arco de cada mão, em ângulo mundial de roda.
+#: Center of each hand's arc, in world wheel angle.
 CENTER_R = GRAB_R - 0.5 * SWING
 CENTER_L = GRAB_L - 0.5 * SWING
 
-#: Quanto cada arco ficou do azimute ótimo do seu ombro. **Não é escolha, é o
-#: resto**: a grade e as fases de pega já decidiram tudo, e isto é a conta do
-#: prejuízo.
+#: How far each arc ended up from its shoulder's optimal azimuth. **Not a choice,
+#: it's the remainder**: the grid and the grab phases already decided everything,
+#: and this is the tally of the damage.
 #:
-#: Repartir o desvio igualmente entre as duas mãos era o que a versão anterior
-#: fazia, e era mais bonito no papel — 5,7° para cada lado. Custava as duas mãos
-#: fora da grade, que é o defeito descrito acima. Assim a direita fica a 3,0° do
-#: ótimo e a esquerda a 8,4°, e a assimetria é inevitável enquanto houver vão:
-#: com `HAND_GAP` em zero os dois arcos ficariam simétricos, e as duas mãos
-#: disputariam o mesmo punho na troca.
+#: Splitting the deviation equally between the two hands is what the previous
+#: version did, and it was prettier on paper — 5.7° to each side. It cost both
+#: hands off the grid, which is the defect described above. This way the right one
+#: sits 3.0° from optimal and the left 8.4°, and the asymmetry is unavoidable as
+#: long as there is a gap: with `HAND_GAP` at zero the two arcs would be
+#: symmetric, and the two hands would fight over the same handle at the handover.
 #:
-#: O preço é 1,2 cm de alcance no braço esquerdo, e ele cabe: o pior quadro fica
-#: em 85% de extensão, contra o batente de 98%.
+#: The price is 1.2 cm of reach on the left arm, and it fits: the worst frame sits
+#: at 85% of extension, against the 98% stop.
 SPLAY_R = REACH_ANGLE - CENTER_R
 SPLAY_L = CENTER_L - (180.0 - REACH_ANGLE)
 
 
-# -- como a mão pousa no punho ------------------------------------------------
+# -- how the hand lands on the handle -----------------------------------------
 
-#: Quanto o ponto de pega fica afastado do **eixo** do punho.
+#: How far the grip point sits from the handle's **axis**.
 #:
-#: O punho tem 9,5 cm de diâmetro e a mão não fecha em volta: ela pousa por cima.
-#: Então o ponto de pega não vai no eixo da madeira — vai fora dela, mais meia
-#: espessura de palma. Cravar o ponto no eixo enfia o punho pelo meio da mão, que
-#: é o mesmo erro que o `anim_climb` já pagou com o degrau.
+#: The handle is 9.5 cm across and the hand doesn't close around it: it rests on
+#: top. So the grip point doesn't go on the axis of the wood — it goes outside it,
+#: plus half a palm's thickness. Nailing the point to the axis drives the handle
+#: through the middle of the hand, which is the same mistake `anim_climb` already
+#: paid for with the rung.
 #:
-#: O centímetro de folga sobre o raio é **medido**, não escolhido, e foi afinado
-#: duas vezes: com 0,8 cm o `verify()` achou a palma 1,9 cm dentro da madeira e a
-#: ponta do dedo médio 3,2 cm — passando do meio da peça; com 2,4 cm a palma
-#: ficou 1,2 cm **fora**, flutuando, e só os dedos encostavam. Cada centímetro
-#: aqui sai um a um da penetração.
+#: The centimeter of slack over the radius is **measured**, not chosen, and was
+#: tuned twice: at 0.8 cm `verify()` found the palm 1.9 cm inside the wood and the
+#: middle fingertip 3.2 cm — past the center of the piece; at 2.4 cm the palm sat
+#: 1.2 cm **outside**, floating, and only the fingers touched. Every centimeter
+#: here comes one for one out of the penetration.
 PALM_OVER_HANDLE = HANDLE_RADIUS + 0.010
 
-#: Quanto a mão se afasta do plano da roda no meio da viagem de volta, na
-#: direção do timoneiro.
+#: How far the hand pulls away from the plane of the wheel halfway through the
+#: return trip, toward the helmsman.
 #:
-#: Não é enfeite: entre largar um punho e tomar o seguinte a mão cruza **um**
-#: punho inteiro (ela anda 45° em relação à roda, que é o passo). Sem recuar,
-#: passa por dentro da madeira. 12 cm é o que folga a peça mais a própria mão.
+#: Not an ornament: between letting go of one handle and taking the next the hand
+#: crosses **one** whole handle (it moves 45° relative to the wheel, which is the
+#: pitch). Without pulling back, it goes through the wood. 12 cm is what clears
+#: the piece plus the hand itself.
 HAND_LIFT = 0.120
-#: E encolhe um pouco o raio na volta, para o antebraço não abrir contra o
-#: montante que fica em x = ±0,95.
+#: And it shrinks the radius a little on the way back, so the forearm doesn't open
+#: out against the post that sits at x = ±0.95.
 HAND_SWING_NARROW = 0.045
 
-#: Fecho dos dedos na madeira, em graus por falange.
+#: Finger closure on the wood, in degrees per phalanx.
 #:
-#: Bem menos que na escada (42/48), e a razão é aritmética: um dedo de 4,6 cm
-#: envolve `4,6/2,6 = 1,8 rad` de uma barra de escada e só `4,6/4,75 = 0,97 rad`
-#: deste punho. Metade do arco, metade da dobra. Dobrar até o fim mete a falange
-#: dentro da madeira e a mão lê como soco.
+#: Much less than on the ladder (42/48), and the reason is arithmetic: a 4.6 cm
+#: finger wraps `4.6/2.6 = 1.8 rad` of a ladder rung and only `4.6/4.75 =
+#: 0.97 rad` of this handle. Half the arc, half the bend. Bending all the way puts
+#: the phalanx inside the wood and the hand reads as a punch.
 FINGER_CURL = (28.0, 32.0)
 THUMB_CURL = (17.0, 20.0)
 FINGERS = anim_climb.FINGERS
 
-#: Teto de extensão dos membros, o mesmo do resto da pasta.
-ARM_EXTENSION_LIMIT = anim_climb.ARM_EXTENSION_LIMIT      # 0,980
-LEG_EXTENSION_LIMIT = anim_climb.LEG_EXTENSION_LIMIT      # 0,985
+#: Extension ceiling for the limbs, the same as in the rest of the folder.
+ARM_EXTENSION_LIMIT = anim_climb.ARM_EXTENSION_LIMIT      # 0.980
+LEG_EXTENSION_LIMIT = anim_climb.LEG_EXTENSION_LIMIT      # 0.985
 
-#: Para onde aponta o cotovelo. Para fora e para **baixo**, como na escalada, e
-#: pelo mesmo motivo: com a dica jogada para trás o braço vira asa de galinha em
-#: todo quadro. Aqui há um agravante — o braço trabalha quase reto para a frente,
-#: e é justamente aí que a IK fica mais livre para escolher errado.
+#: Where the elbow points. Out and **down**, as in the climb, and for the same
+#: reason: with the hint thrown backwards the arm turns into a chicken wing on
+#: every frame. Here there is an aggravating factor — the arm works almost
+#: straight forward, and that is exactly where the IK is freest to choose wrong.
 ELBOW_HINT = (0.62, 0.20, -0.76)
-#: Joelho para a frente, e um palmo para fora: é postura de quem está firmado.
+#: Knee forward, and a hand's width out: it's the stance of a man braced.
 KNEE_HINT = (0.22, -0.97, 0.0)
 
 
-# -- as duas variantes --------------------------------------------------------
+# -- the two variants ---------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Stand:
-    """Um posto de timoneiro: onde ele fica e como se estica para chegar à roda.
+    """A helmsman's post: where he stands and how he stretches to reach the wheel.
 
-    As duas instâncias abaixo existem para serem **comparadas com o olho**. Elas
-    não diferem em estilo: diferem em quanto do déficit de 17 cm cada uma paga
-    com postura, e postura tem preço na tela.
+    The two instances below exist to be **compared by eye**. They don't differ in
+    style: they differ in how much of the 17 cm deficit each one pays with
+    posture, and posture has a price on screen.
     """
 
     name: str
     action: str
-    #: Distância dos pés ao plano da roda, em metros. `HELM_STAND.z - 6,320`.
+    #: Distance from the feet to the plane of the wheel, in meters.
+    #: `HELM_STAND.z - 6.320`.
     stand: float
 
-    # -- o que o corpo faz para alcançar --------------------------------------
-    #: Quanto o quadril avança sobre os tornozelos, com os pés plantados.
+    # -- what the body does to reach ------------------------------------------
+    #: How far the hips carry forward over the ankles, with the feet planted.
     surge: float
-    #: Quanto o corpo assenta. Negativo dobra os joelhos — e ele **tem** que ser
-    #: negativo quando há avanço: a perna deste rig já está a 99% da extensão de
-    #: pé, então cada centímetro para a frente sem afundar o quadril estoura a IK.
+    #: How far the body settles. Negative bends the knees — and it **has** to be
+    #: negative when there is surge: this rig's leg is already at 99% extension
+    #: standing, so every centimeter forward without sinking the hips blows up the
+    #: IK.
     settle: float
-    #: Inclinação do tronco, em graus. Positivo joga o peito para a roda.
+    #: Torso lean, in degrees. Positive throws the chest at the wheel.
     lean: float
-    #: Projeção do ombro (protração da clavícula), em graus. É a base; quem
-    #: precisa de mais ganha mais, por `SHOULDER_REACH_GAIN`.
+    #: Shoulder projection (clavicle protraction), in degrees. It is the baseline;
+    #: whoever needs more gets more, through `SHOULDER_REACH_GAIN`.
     shoulder: float
 
-    # -- onde os pés ficam ----------------------------------------------------
-    #: Meia distância entre os tornozelos.
+    # -- where the feet go ----------------------------------------------------
+    #: Half the distance between the ankles.
     foot_x: float
-    #: Quanto o pé esquerdo avança e o direito recua. Base escalonada: é o que
-    #: sustenta a inclinação sem o personagem cair para a frente.
+    #: How far the left foot advances and the right one falls back. Staggered
+    #: stance: it is what holds up the lean without the character falling forward.
     foot_stagger: float
-    #: Abertura da ponta dos pés, em graus.
+    #: Toe-out of the feet, in degrees.
     foot_splay: float
 
     note: str = ""

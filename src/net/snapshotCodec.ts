@@ -1,34 +1,36 @@
 /**
- * O estado do mundo em bytes, e de volta.
+ * The world state in bytes, and back.
  *
- * ## O que **não** vai no instantâneo
+ * ## What does **not** go in the snapshot
  *
- * As balas. E não é economia: `stepBallistic` é uma função pura, sem sorteio
- * nenhum, e o evento de tiro já carrega a posição e a velocidade exatas da boca.
- * O cliente que recebe esse evento gera a bala e a integra a 60 Hz — a trajetória
- * sai **idêntica** à do host, e mais suave do que interpolar a 15 Hz uma posição
- * que chega pelo fio. Manda-se o disparo, não o voo.
+ * The cannonballs. And it isn't about saving bytes: `stepBallistic` is a pure
+ * function with no randomness at all, and the shot event already carries the exact
+ * muzzle position and velocity. The client that receives that event spawns the
+ * cannonball and integrates it at 60 Hz — the trajectory comes out **identical**
+ * to the host's, and smoother than interpolating at 15 Hz a position that arrives
+ * over the wire. Send the shot, not the flight.
  *
- * ## Quantização, não compressão delta
+ * ## Quantization, not delta compression
  *
- * Um quaternion cabe em quatro `i16` com erro no quinto decimal — meio milímetro
- * de guinada num casco de quinze metros. Isso encolhe o instantâneo em dez vezes
- * e **não tem estado**: cada quadro se lê sozinho.
+ * A quaternion fits in four `i16` with error in the fifth decimal — half a
+ * millimeter of yaw on a fifteen-meter hull. That shrinks the snapshot tenfold and
+ * is **stateless**: every frame reads on its own.
  *
- * Compressão delta encolheria mais e custaria caro em outro lugar: exigiria
- * histórico de instantâneos confirmados no host, confirmação do cliente e uma
- * baseline comum aos dois. Toda uma classe de bug em que o cliente aplica uma
- * diferença contra a base errada e se afasta da verdade sem nunca perceber.
+ * Delta compression would shrink it further and cost dearly elsewhere: it would
+ * require a history of acknowledged snapshots on the host, an acknowledgement from
+ * the client, and a baseline common to both. A whole class of bug where the client
+ * applies a difference against the wrong base and drifts away from the truth
+ * without ever noticing.
  *
- * A única concessão é a lista de rombos, que vai num **campo condicional**: só é
- * escrita quando mudou. Campo condicional não é delta — continua sem baseline,
- * sem histórico e sem cadeia; é só um campo que às vezes não está lá.
+ * The one concession is the breach list, which goes in a **conditional field**: it
+ * is only written when it changed. A conditional field is not a delta — still no
+ * baseline, no history and no chain; it's just a field that sometimes isn't there.
  *
- * ## Nada aloca por quadro
+ * ## Nothing allocates per frame
  *
- * O buffer e a `DataView` são criados uma vez. A 15 instantâneos por segundo, um
- * `ArrayBuffer` novo a cada um seria lixo para o coletor recolher dentro do
- * orçamento de 16 ms do quadro de render.
+ * The buffer and the `DataView` are created once. At 15 snapshots per second, a
+ * fresh `ArrayBuffer` for each one would be garbage for the collector to pick up
+ * inside the render frame's 16 ms budget.
  */
 
 import type * as THREE from 'three';
@@ -40,40 +42,40 @@ import type { Match } from '../game/Match';
 import type { MatchEvent } from '../game/MatchEvents';
 import type { Ship } from '../ship/Ship';
 
-/** Teto de um quadro. O mesmo do servidor — ver `MAX_FRAME_BYTES` lá. */
+/** Cap for one frame. The same as the server's — see `MAX_FRAME_BYTES` there. */
 const BUFFER_BYTES = 4096;
 
-/** Bits do byte de sinalizadores do instantâneo. */
+/** Bits of the snapshot's flag byte. */
 const SNAPSHOT_FLAG = {
-  /** A lista de rombos vem junto porque mudou desde o último. */
+  /** The breach list comes along because it changed since the last one. */
   Breaches: 1 << 0,
-  /** A partida acabou; `winner` está no quadro. */
+  /** The match is over; `winner` is in the frame. */
   Over: 1 << 1,
 } as const;
 
-/** Estado de um canhão, no fio. */
+/** A cannon's state, on the wire. */
 const CANNON_STATE = ['empty', 'loading', 'loaded'] as const;
 
-/** Estado da âncora, no fio. */
+/** The anchor's state, on the wire. */
 const ANCHOR_STATE = ['stowed', 'dropping', 'set', 'raising'] as const;
 
 /**
- * Os tempos, no fio.
+ * The weather states, on the wire.
  *
- * ⚠️ A ordem é o formato de rede — acrescente no fim, nunca reordene. É a mesma
- * regra de `MessageType` e de `InputBit`, e aqui ela vale duas vezes: reordenar
- * trocaria temporal por céu limpo entre duas versões do jogo, e o sintoma seria
- * um adversário navegando numa tempestade que o outro não vê.
+ * ⚠️ The order is the network format — append at the end, never reorder. It's the
+ * same rule as `MessageType` and `InputBit`, and here it counts twice: reordering
+ * would swap storm for clear sky between two versions of the game, and the symptom
+ * would be an opponent sailing through a storm the other one can't see.
  */
 const WEATHER_ID = ['clear', 'breeze', 'squall', 'storm'] as const;
 
 /**
- * Um escritor sequencial sobre um buffer fixo.
+ * A sequential writer over a fixed buffer.
  *
- * `DataView` com endianness **explícita** em toda chamada. O padrão de
- * `DataView` é big-endian, o das máquinas em que isto roda é little — deixar o
- * padrão valer daria um código que funciona porque os dois lados erram igual, e
- * que quebra no dia em que um deles parar de errar.
+ * `DataView` with **explicit** endianness on every call. `DataView` defaults to
+ * big-endian, the machines this runs on default to little — letting the default
+ * stand would give code that works because both sides get it wrong the same way,
+ * and that breaks the day one of them stops getting it wrong.
  */
 class Writer {
   offset = 0;
@@ -103,13 +105,13 @@ class Writer {
     this.view.setFloat32(this.offset, value, true);
     this.offset += 4;
   }
-  /** Um vetor de mundo, em precisão cheia: o mar tem quilômetros. */
+  /** A world vector, at full precision: the sea is kilometers across. */
   vec3(v: THREE.Vector3): void {
     this.f32(v.x);
     this.f32(v.y);
     this.f32(v.z);
   }
-  /** Um vetor local a bordo, quantizado: o navio tem quinze metros. */
+  /** A vector local to the ship, quantized: the ship is fifteen meters long. */
   local(v: THREE.Vector3, scale: number): void {
     this.i16(quantize(v.x, scale));
     this.i16(quantize(v.y, scale));
@@ -165,18 +167,18 @@ class Reader {
   }
 }
 
-// -- entrada: guest → host ----------------------------------------------------
+// -- input: guest → host ------------------------------------------------------
 
 const inputBuffer = new ArrayBuffer(256);
 const inputView = new DataView(inputBuffer);
 
 /**
- * Empacota um lote de quadros de entrada.
+ * Packs a batch of input frames.
  *
- * Vão quatro por mensagem, sendo os dois mais novos e dois repetidos do envio
- * anterior. A repetição é o que faz a perda de um pacote não custar nada: o
- * quadro que se perdeu chega de novo no seguinte, e o host ainda o consome
- * dentro do prazo. É mais barato que confirmar e reenviar.
+ * Four go per message: the two newest plus two repeated from the previous send.
+ * The repetition is what makes losing a packet cost nothing: the frame that was
+ * lost arrives again in the next one, and the host still consumes it in time. It's
+ * cheaper than acknowledging and resending.
  */
 export function encodeInput(frames: readonly InputFrame[]): ArrayBuffer {
   const w = new Writer(inputView);
@@ -187,22 +189,22 @@ export function encodeInput(frames: readonly InputFrame[]): ArrayBuffer {
     w.u32(frame.tick);
     w.u16(frame.held);
     w.u16(frame.pressed);
-    // Os eixos de caminhada são −1..1 e vêm de teclas ou de analógico: um byte
-    // com sinal dá 1/127 de resolução, mais fina que a zona morta do controle.
+    // The walk axes are −1..1 and come from keys or from a stick: a signed byte
+    // gives 1/127 of resolution, finer than the controller's dead zone.
     w.i8(Math.round(Math.max(-1, Math.min(1, frame.moveX)) * 127));
     w.i8(Math.round(Math.max(-1, Math.min(1, frame.moveY)) * 127));
-    // O delta continua indo, e é o que a **mira do canhão** consome: ela é
-    // acumular-e-grampear dos mesmos incrementos dos dois lados.
+    // The delta still goes, and it's what the **cannon's aim** consumes: it is
+    // accumulate-and-clamp over the same increments on both sides.
     w.i16(quantize(frame.lookX, QUANT.angle));
     w.i16(quantize(frame.lookY, QUANT.angle));
-    // E o olhar **absoluto** vai junto, quatro bytes a mais, porque delta não
-    // sobrevive a pacote perdido — ver `PlayerController.applyLook` para o que
-    // quebra quando ele não sobrevive.
+    // And the **absolute** gaze goes along, four extra bytes, because a delta
+    // doesn't survive a lost packet — see `PlayerController.applyLook` for what
+    // breaks when it doesn't survive.
     //
-    // O rumo é normalizado para −π..π antes de quantizar: ele cresce sem limite
-    // enquanto o jogador gira sempre para o mesmo lado, e o `i16` desta escala
-    // satura em ±3,27 rad. Sem normalizar, meia dúzia de voltas grampeariam a
-    // cabeça do adversário num canto para o resto da partida.
+    // The heading is normalized to −π..π before quantizing: it grows without bound
+    // while the player keeps turning the same way, and the `i16` at this scale
+    // saturates at ±3.27 rad. Without normalizing, half a dozen turns would clamp
+    // the opponent's head into a corner for the rest of the match.
     w.i16(quantize(wrapAngle(frame.yaw), QUANT.angle));
     w.i16(quantize(frame.pitch, QUANT.angle));
   }
@@ -211,14 +213,14 @@ export function encodeInput(frames: readonly InputFrame[]): ArrayBuffer {
 }
 
 /**
- * Desempacota um lote de entrada para dentro dos objetos passados.
+ * Unpacks a batch of input into the objects passed in.
  *
- * A contagem é conferida contra o **tamanho do buffer** antes de qualquer
- * leitura, e não é zelo teórico: um quadro truncado (ou forjado) faria
- * `DataView` lançar no meio do laço, e esse lançamento sobe pelo `onmessage` do
- * socket — ou seja, um pacote ruim de um lado derrubaria o tratador de rede do
- * outro. Devolver zero quadros é a resposta certa: o `InputBuffer` já sabe o que
- * fazer quando não chega comando.
+ * The count is checked against the **buffer size** before any read, and that isn't
+ * theoretical diligence: a truncated (or forged) frame would make `DataView` throw
+ * in the middle of the loop, and that throw travels up through the socket's
+ * `onmessage` — meaning one bad packet from one side would take down the other's
+ * network handler. Returning zero frames is the right answer: `InputBuffer` already
+ * knows what to do when no command arrives.
  */
 export function decodeInput(buffer: ArrayBuffer, out: InputFrame[]): number {
   if (buffer.byteLength < 2) return 0;
@@ -238,35 +240,35 @@ export function decodeInput(buffer: ArrayBuffer, out: InputFrame[]): number {
     frame.lookY = dequantize(r.i16(), QUANT.angle);
     frame.yaw = dequantize(r.i16(), QUANT.angle);
     frame.pitch = dequantize(r.i16(), QUANT.angle);
-    // Quem vem do fio manda no ângulo da **cabeça**; o delta segue valendo para
-    // a mira da peça. Ver `PlayerController.applyLook`.
+    // What comes off the wire rules the **head** angle; the delta still rules the
+    // gun's aim. See `PlayerController.applyLook`.
     frame.absoluteView = true;
   }
 
   return Math.min(count, out.length);
 }
 
-// -- instantâneo: host → guest ------------------------------------------------
+// -- snapshot: host → guest ---------------------------------------------------
 
 const snapshotBuffer = new ArrayBuffer(BUFFER_BYTES);
 const snapshotView = new DataView(snapshotBuffer);
 
-/** O cabeçalho de um instantâneo, depois de lido. */
+/** A snapshot's header, once read. */
 export interface SnapshotHeader {
   tick: number;
-  /** Quadros de entrada que o host tem em fila. O guest ajusta o avanço por isto. */
+  /** Input frames the host has queued. The guest adjusts its lead from this. */
   bufferDepth: number;
   /**
-   * Passos sem comando desde o instantâneo anterior.
+   * Steps with no command since the previous snapshot.
    *
-   * É o sinal que manda o avanço subir, e ele existe porque a profundidade da
-   * fila **não** distingue os dois casos que importam: ela fica em zero tanto
-   * quando o comando chega tarde demais quanto quando ele chega na hora exata.
-   * Guiar o avanço só pela fila fazia ele subir em cima do segundo caso e nunca
-   * mais descer — 22 passos de atraso numa conexão que pedia 12.
+   * It's the signal that tells the lead to go up, and it exists because the queue
+   * depth does **not** tell apart the two cases that matter: it sits at zero both
+   * when the command arrives too late and when it arrives exactly on time. Driving
+   * the lead from the queue alone made it climb on top of the second case and never
+   * come back down — 22 steps of delay on a connection that asked for 12.
    */
   starved: number;
-  /** Último tick de entrada que o host consumiu — mede a ida e volta de graça. */
+  /** Last input tick the host consumed — measures the round trip for free. */
   ackTick: number;
   over: boolean;
   winner: 0 | 1;
@@ -276,7 +278,7 @@ export interface EncodeOptions {
   bufferDepth: number;
   starved: number;
   ackTick: number;
-  /** `true` quando a lista de rombos mudou desde o último instantâneo. */
+  /** `true` when the breach list changed since the last snapshot. */
   includeBreaches: boolean;
   over: boolean;
   winner: 0 | 1;
@@ -310,23 +312,23 @@ function writeShip(w: Writer, ship: Ship, includeBreaches: boolean): void {
     const stateIndex = CANNON_STATE.indexOf(cannon.state);
     w.u8(stateIndex < 0 ? 0 : stateIndex);
     w.u8(Math.round(Math.max(0, Math.min(1, cannon.loadProgress)) * 255));
-    // O recuo é 0..~0,6 m; um byte sobre meio metro dá 2 mm de resolução, o que
-    // é bem mais fino que o olho distingue num tubo que anda em 0,15 s.
+    // Recoil is 0..~0.6 m; a byte over half a meter gives 2 mm of resolution, far
+    // finer than the eye can tell on a barrel that travels in 0.15 s.
     w.u8(Math.round(Math.max(0, Math.min(1, cannon.recoil)) * 255));
   }
 
   const { damage } = ship;
-  // A água do porão vai como fração da capacidade: o número absoluto tem casas
-  // que não interessam, e a fração é justamente o que o HUD desenha.
+  // The water in the hold goes as a fraction of capacity: the absolute number has
+  // digits nobody cares about, and the fraction is exactly what the HUD draws.
   w.u16(Math.round(Math.max(0, Math.min(1, damage.floodFraction)) * 65535));
   w.u16(Math.round(Math.min(damage.sinkTime, 65) * 1000));
 
   if (!includeBreaches) return;
 
-  // ⚠️ O teto é o **mesmo** dos dois lados do fio, e agora ele é uma constante
-  // só, importada de onde os rombos moram. Enquanto o escritor mandava quantos
-  // houvesse e o leitor parava em 32, um casco muito castigado desalinhava o
-  // instantâneo inteiro a partir dali. Ver `MAX_BREACHES`.
+  // ⚠️ The cap is the **same** on both sides of the wire, and now it's a single
+  // constant, imported from where the breaches live. While the writer sent however
+  // many there were and the reader stopped at 32, a badly battered hull threw the
+  // whole snapshot out of alignment from there on. See `MAX_BREACHES`.
   const breachCount = Math.min(damage.breaches.length, MAX_BREACHES);
   w.u8(breachCount);
   for (let i = 0; i < breachCount; i++) {
@@ -336,20 +338,20 @@ function writeShip(w: Writer, ship: Ship, includeBreaches: boolean): void {
     w.i8(Math.round(breach.normal.x * 127));
     w.i8(Math.round(breach.normal.y * 127));
     w.i8(Math.round(breach.normal.z * 127));
-    // A escala mora em `QUANT` porque ela **não é óbvia**: ver a nota lá para o
-    // teto que saturava e cortava um rombo alargado quase pela metade.
+    // The scale lives in `QUANT` because it is **not obvious**: see the note there
+    // for the cap that saturated and cut a widened breach nearly in half.
     w.u8(Math.round(Math.min(breach.area * QUANT.breachArea, 255)));
     w.u8(Math.round(Math.max(0, Math.min(1, breach.repair)) * 255));
   }
 
-  // As tábuas pregadas viajam junto, e é o que faltava para o costado do
-  // adversário contar a história certa: sem elas, um rombo tapado do outro lado
-  // simplesmente **sumia** do casco aqui, em vez de virar cicatriz com madeira
-  // por cima. Um navio no fim de um combate longo é uma colcha de retalhos, e
-  // metade dessa leitura estava indo embora no fio.
+  // The nailed planks travel along, and that's what was missing for the opponent's
+  // hull side to tell the right story: without them, a breach patched on the other
+  // side simply **vanished** from the hull here, instead of becoming a scar with
+  // wood over it. A ship at the end of a long fight is a patchwork quilt, and half
+  // of that reading was being lost on the wire.
   //
-  // Onze bytes por tábua, e só quando a lista muda: `repair` não existe aqui
-  // (uma tábua está pregada ou não está), então ela é um rombo menos um byte.
+  // Eleven bytes per plank, and only when the list changes: `repair` doesn't exist
+  // here (a plank is either nailed or it isn't), so it's a breach minus one byte.
   const patchCount = Math.min(damage.patches.length, MAX_BREACHES);
   w.u8(patchCount);
   for (let i = 0; i < patchCount; i++) {
@@ -364,11 +366,11 @@ function writeShip(w: Writer, ship: Ship, includeBreaches: boolean): void {
 }
 
 /**
- * Escreve o mundo inteiro num buffer e devolve a fatia usada.
+ * Writes the whole world into a buffer and returns the slice used.
  *
- * A fatia é uma cópia — `WebSocket.send` é assíncrono e o buffer é reaproveitado
- * no instantâneo seguinte; mandar a memória viva seria mandar bytes que já
- * mudaram quando saírem.
+ * The slice is a copy — `WebSocket.send` is asynchronous and the buffer is reused
+ * on the next snapshot; sending the live memory would be sending bytes that have
+ * already changed by the time they leave.
  */
 export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffer {
   const w = new Writer(snapshotView);
@@ -381,25 +383,25 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   w.u32(match.tick);
   w.u8(Math.min(options.bufferDepth, 255));
   w.u8(Math.min(options.starved, 255));
-  // Quatro bytes, e não dois: ver a nota da versão 2 em `PROTOCOL_VERSION`.
+  // Four bytes, not two: see the version 2 note in `PROTOCOL_VERSION`.
   w.u32(options.ackTick >>> 0);
   w.u8(options.winner);
 
-  // Vento e força do mar. Sem isto, o clima de cada lado correria no relógio
-  // dele — e o vento entra na força da vela, então seria vantagem para um dos
-  // dois. Ver a nota sobre o modo de tempo em `DuelRoom.onReady`.
+  // Wind and sea state. Without this, each side's weather would run on its own
+  // clock — and wind feeds the sail force, so it would be an advantage for one of
+  // the two. See the note about weather mode in `DuelRoom.onReady`.
   const waves = match.environment.waveField;
   w.i16(quantize(waves.windDirection, QUANT.angle));
   w.u8(Math.round(Math.max(0, Math.min(1, waves.windStrength)) * 255));
   w.f32(waves.time);
-  // ⚠️ **O rumo da ondulação de fundo, e ele faltava.** As duas ondas longas do
-  // espectro compõem a direção com este ângulo (ver `WaveField.syncUniforms`), e
-  // são justamente elas que levantam um casco de 16 m. Ele nascia do vento
-  // *local* de cada cliente — diferente nos dois, porque cada um tinha passado
-  // um tempo diferente na tela de título — e depois só andava do lado que
-  // simula, porque quem o move é `followWind`. Resultado: dois mares distintos
-  // desde o primeiro quadro, e um navio que aos olhos de um dos dois flutua fora
-  // da onda. Dois bytes fecham a conta inteira.
+  // ⚠️ **The background swell's heading, and it was missing.** The spectrum's two
+  // long waves compose their direction from this angle (see
+  // `WaveField.syncUniforms`), and they are precisely the ones that lift a 16 m
+  // hull. It was born from each client's *local* wind — different on the two,
+  // because each had spent a different amount of time on the title screen — and
+  // after that it only moved on the side that simulates, because what moves it is
+  // `followWind`. Result: two distinct seas from the very first frame, and a ship
+  // that, to one of the two, floats off the wave. Two bytes settle the whole bill.
   w.i16(quantize(wrapAngle(waves.swellDirection), QUANT.angle));
 
   writeSky(w, match);
@@ -409,46 +411,47 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   for (const crewman of match.crew) {
     const c = crewman.controller;
     w.local(c.local, QUANT.local);
-    // ⚠️ **Normalizado, como no caminho da entrada — e por muito tempo não era.**
+    // ⚠️ **Normalized, like on the input path — and for a long time it wasn't.**
     //
-    // Os dois caminhos nasceram em momentos diferentes e só um deles aprendeu a
-    // lição: `encodeInput` wrappa desde que o olhar passou a viajar absoluto (ver a
-    // nota lá), e este ficou para trás porque a pergunta parecia outra — "o rumo do
-    // meu próprio marujo" soa como um número pequeno, e num jogador que só olha em
-    // volta ele é.
+    // The two paths were born at different times and only one of them learned the
+    // lesson: `encodeInput` has wrapped ever since the gaze started traveling
+    // absolute (see the note there), and this one was left behind because the
+    // question looked different — "my own deckhand's heading" sounds like a small
+    // number, and for a player who only looks around it is.
     //
-    // Só que `PlayerController.yaw` **nunca** é normalizado: ele integra o olhar do
-    // mouse, que cresce sem limite para quem gira sempre para o mesmo lado, e ainda
-    // por cima **acumula uma volta inteira por volta de cabrestante**
-    // (`followCapstan` soma o ângulo varrido direto no rumo). Nesta escala o `i16`
-    // satura em ±3,2767 rad, ou seja em ±187,7°: suspender o ferro é passar disso
-    // na primeira volta. O que o outro lado via era a cabeça e o rumo do corpo do
-    // adversário **travados** no batente enquanto ele dava voltas no cabrestante, e
-    // o corpo dele parado de lado em vez de acompanhando a barra.
+    // Except `PlayerController.yaw` is **never** normalized: it integrates the mouse
+    // look, which grows without bound for anyone who keeps turning the same way, and
+    // on top of that it **accumulates a whole turn per capstan turn**
+    // (`followCapstan` adds the swept angle straight into the heading). At this
+    // scale the `i16` saturates at ±3.2767 rad, that is at ±187.7°: weighing anchor
+    // means passing that on the first turn. What the other side saw was the
+    // opponent's head and body heading **stuck** against the stop while he went
+    // round and round the capstan, and his body frozen sideways instead of
+    // following the bar.
     //
-    // O conserto fica aqui, e não na origem, de propósito: normalizar `yaw` dentro
-    // do controlador é seguro (tudo que consome aquele ângulo já trabalha por
-    // caminho curto — `damp` com `wrapAngle`, `setFromEuler`, `foldLegHeading`),
-    // mas seria uma mudança de comportamento em cinco arquivos para consertar um
-    // defeito que existe em um. Aqui é onde o número entra na faixa em que ele não
-    // cabe, e é aqui que ele é posto de volta nela.
+    // The fix sits here, and not at the source, on purpose: normalizing `yaw`
+    // inside the controller is safe (everything that consumes that angle already
+    // works the short way round — `damp` with `wrapAngle`, `setFromEuler`,
+    // `foldLegHeading`), but it would be a behavior change across five files to fix
+    // a defect that exists in one. Here is where the number enters the range it
+    // doesn't fit in, and here is where it's put back into it.
     w.i16(quantize(wrapAngle(c.yaw), QUANT.angle));
     w.i16(quantize(c.pitch, QUANT.angle));
     const station = c.station === 'deck' ? 0 : c.station === 'helm' ? 1 : 2;
-    // Estação, canhão e os cinco estados de corpo **fecham o byte**: são 2 + 1 + 5
-    // bits de informação, e um campo por coisa custaria seis bytes por marujo em
-    // cada um dos quinze instantâneos por segundo. Não sobra mais bandeira aqui —
-    // a próxima paga um byte.
+    // Station, cannon and the five body states **fill the byte**: that's 2 + 1 + 5
+    // bits of information, and a field per thing would cost six bytes per deckhand
+    // in each of the fifteen snapshots per second. No flag is left over here — the
+    // next one pays a byte.
     //
-    // A tábua na mão é o único deles que **não** sai do controlador: quem vê o
-    // rombo e o botão segurado no mesmo passo é a `Interaction`. Sem este bit o
-    // adversário tapava rombo de mãos vazias — ver a nota da versão 6 do
-    // protocolo.
+    // The plank in hand is the only one of them that does **not** come out of the
+    // controller: what sees the breach and the held button in the same step is
+    // `Interaction`. Without this bit the opponent patched breaches empty-handed —
+    // see the protocol's version 6 note.
     //
-    // O mar é o último, e é o único estado da água que viaja: a posição já vai, e
-    // dela se deriva o resto — inclusive **em qual escada de embarque** ele está
-    // pendurado, porque as duas ficam a sete metros uma da outra em Z. Ver
-    // `PlayerController.boardingLadder`.
+    // The sea is the last one, and it's the only water state that travels: the
+    // position already goes, and the rest is derived from it — including **which
+    // boarding ladder** he's hanging on, because the two sit seven meters apart in
+    // Z. See `PlayerController.boardingLadder`.
     w.u8(
       station |
         ((c.cannonIndex < 0 ? 0 : c.cannonIndex) << 2) |
@@ -460,40 +463,40 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
     );
   }
 
-  // `netEvents`, e **não** `events`: a segunda é esvaziada uma vez por quadro
-  // pelo desenho, e o instantâneo sai a cada quatro passos. Ver a nota em
-  // `Match.netEvents` — é a diferença entre o guest ver todos os tiros e ver um
-  // em cada quatro.
+  // `netEvents`, and **not** `events`: the latter is drained once per frame by the
+  // drawing, and the snapshot goes out every four steps. See the note in
+  // `Match.netEvents` — it's the difference between the guest seeing every shot and
+  // seeing one in four.
   writeEvents(w, match.netEvents);
 
   return snapshotBuffer.slice(0, w.offset);
 }
 
 /**
- * O céu e o tempo: dez bytes que faltavam.
+ * The sky and the weather: ten bytes that were missing.
  *
- * ## Por que o instantâneo carrega isto
+ * ## Why the snapshot carries this
  *
- * Porque o cliente que não simula **não roda nem o relógio do dia nem a máquina
- * de estados do tempo**, e não pode rodar. `Environment.fixedUpdate` mora dentro
- * de `Match.fixedUpdate`, que é o caminho de quem simula; o guest segue por
- * `fixedUpdateRemote`. O efeito é que, no instante em que o duelo começa, o
- * relógio dele congela na hora em que estava e o tempo dele para no estado em
- * que estava — enquanto do outro lado o sol anda, a chuva chega e a tempestade
- * vira. Dois jogadores, dois céus, e nenhum aviso de que é assim.
+ * Because the client that doesn't simulate **runs neither the day clock nor the
+ * weather state machine**, and can't. `Environment.fixedUpdate` lives inside
+ * `Match.fixedUpdate`, which is the path of whoever simulates; the guest goes
+ * through `fixedUpdateRemote`. The effect is that, the moment the duel starts, its
+ * clock freezes at the hour it was at and its weather stops in the state it was
+ * in — while on the other side the sun moves, the rain arrives and the storm
+ * rolls in. Two players, two skies, and no warning that it works that way.
  *
- * Deixar os dois lados **simularem** o tempo em paralelo seria a alternativa —
- * a máquina de estados é semeada e determinística —, mas ela depende de somar
- * `dt` em ponto flutuante por dez minutos e de os dois nunca perderem um passo,
- * e o guest perde passos por construção (o motor descarta o excedente quando a
- * aba engasga). Uma divergência aqui não é um pixel: é o vento, e vento é força
- * de vela.
+ * Letting both sides **simulate** the weather in parallel would be the
+ * alternative — the state machine is seeded and deterministic — but it depends on
+ * summing `dt` in floating point for ten minutes and on neither side ever missing
+ * a step, and the guest misses steps by construction (the engine drops the surplus
+ * when the tab hitches). A divergence here isn't a pixel: it's the wind, and wind
+ * is sail force.
  *
- * ## O que vai, e o que se deriva
+ * ## What goes, and what is derived
  *
- * Vão os dois estados da transição (`current` e `target`) em vez do rótulo e da
- * severidade: com eles, `label` e `severity` saem dos mesmos getters que já
- * existem, e o texto do HUD não precisa atravessar o fio.
+ * The two states of the transition (`current` and `target`) go instead of the
+ * label and the severity: with them, `label` and `severity` come out of the same
+ * getters that already exist, and the HUD text doesn't need to cross the wire.
  */
 function writeSky(w: Writer, match: Match): void {
   const { weather, dayNight } = match.environment;
@@ -507,25 +510,26 @@ function writeSky(w: Writer, match: Match): void {
   w.u8(Math.round(Math.max(0, Math.min(1, weather.windBase)) * 255));
   w.u8(Math.round(Math.max(0, Math.min(1, weather.clouds)) * 255));
   w.u8(Math.round(Math.max(0, Math.min(1, weather.rain)) * 255));
-  // Visibilidade em metros cabe folgada em `u16`: o preset mais aberto são
-  // 4.200 m e o `far` da câmera são 12.000.
+  // Visibility in meters fits comfortably in a `u16`: the most open preset is
+  // 4,200 m and the camera's `far` is 12,000.
   w.u16(Math.min(Math.round(weather.visibility), 65535));
   w.u8(Math.round(Math.max(0, Math.min(1, weather.flash)) * 255));
 }
 
 /**
- * Os eventos do intervalo desde o último instantâneo.
+ * The events from the interval since the last snapshot.
  *
- * É o que carrega estrondo, respingo, lasca e clarão para o outro lado. Sem eles
- * o duelo do guest seria mudo e sem fumaça — e, pior, ele não teria de onde tirar
- * as balas, que nascem do evento de tiro.
+ * It's what carries the boom, the splash, the splinter and the flash to the other
+ * side. Without them the guest's duel would be mute and smokeless — and, worse, it
+ * would have nowhere to get the cannonballs from, since they are born from the shot
+ * event.
  */
 function writeEvents(w: Writer, events: readonly MatchEvent[]): void {
-  // O teto protege o buffer num intervalo excepcional — quatro passos com dois
-  // bordos cheios e um abalroamento no meio. Trinta e dois eventos são uns 600
-  // bytes num quadro que raramente passa de 900, então a folga continua enorme;
-  // perder o trigésimo terceiro estrondo de um instante desses não é perda que
-  // alguém note, e estourar o buffer derruba a partida.
+  // The cap protects the buffer in an exceptional interval — four steps with two
+  // full broadsides and a ramming in the middle. Thirty-two events are some 600
+  // bytes in a frame that rarely passes 900, so the slack is still enormous; losing
+  // the thirty-third boom of a moment like that isn't a loss anyone notices, and
+  // blowing the buffer takes down the match.
   const count = Math.min(events.length, 32);
   w.u8(count);
 
@@ -571,7 +575,7 @@ function writeEvents(w: Writer, events: readonly MatchEvent[]): void {
 
 export { SNAPSHOT_FLAG, CANNON_STATE, ANCHOR_STATE, WEATHER_ID, Reader, Writer };
 
-/** Lê só o cabeçalho, para quem precisa decidir antes de aplicar. */
+/** Reads the header only, for callers that must decide before applying. */
 export function peekSnapshotHeader(buffer: ArrayBuffer): SnapshotHeader | null {
   if (buffer.byteLength < 12) return null;
   const r = new Reader(new DataView(buffer));
