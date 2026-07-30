@@ -316,7 +316,7 @@ await test('the queue does not seat anyone in a slot that is no longer any good'
   await expect(caio, 'peer');
 });
 
-await test('quem desiste da fila devolve a vaga', async (keep) => {
+await test('whoever gives up on the queue hands the slot back', async (keep) => {
   await drainQueue();
 
   const ana = open('/queue');
@@ -387,7 +387,7 @@ await test('a third at the door does not take down the two players’ duel', asy
   }
 });
 
-await test('o resultado do host encerra a sala dos dois lados', async (keep) => {
+await test('the host result closes the room on both sides', async (keep) => {
   const { host, guest, roleA } = await pairByCode(95, 30);
   keep.push(host, guest);
 

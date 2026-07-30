@@ -1,7 +1,7 @@
 /**
- * Teste do abalroamento — os cascos se recusam a ocupar o mesmo lugar?
+ * Ramming test — do the hulls refuse to occupy the same place?
  *
- * Roda no navegador, como os outros:
+ * It runs in the browser, like the others:
  *
  * ```js
  * const t = await import('/tests/contact.ts');
