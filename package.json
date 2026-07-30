@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Jogo web 3D de combate naval numa chalupa, inspirado em Sea of Thieves",
+  "description": "3D naval combat game for the browser, sloop against sloop, inspired by Sea of Thieves",
   "workspaces": [
     "server"
   ],

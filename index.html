@@ -11,9 +11,9 @@
     <title>Sea of Opus — A Sloop Duel</title>
 
     <!--
-      Favicon embutido como SVG: um timão em latão sobre madeira. Data URI em vez de
-      arquivo porque é a única forma de o projeto continuar sem nenhum asset binário
-      — e porque um `/favicon.ico` faltando é um 404 no console a cada carregamento.
+      Favicon embedded as SVG: a brass wheel over wood. A data URI instead of a file
+      because it is the only way for the project to go on with no binary asset at all
+      — and because a missing `/favicon.ico` is a 404 in the console on every load.
     -->
     <link
       rel="icon"
@@ -23,12 +23,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!--
-      Cinzel para o logotipo (capital romana lapidar) e IM Fell English para todo
-      o resto. A IM Fell é uma digitalização dos tipos que a Oxford University
-      Press usava no século XVII: ela carrega a irregularidade de tinta e a
-      variação de traço de impressão em prensa, que é exatamente o registro de
-      uma carta náutica da época. Uma serifa moderna e limpa no lugar dela
-      deixaria a interface correta e sem lugar nenhum.
+      Cinzel for the logo (Roman capitals cut for stone) and IM Fell English for
+      everything else. IM Fell is a digitization of the types the Oxford University
+      Press used in the seventeenth century: it carries the ink irregularity and the
+      stroke variation of press printing, which is exactly the register of a nautical
+      chart of the period. A clean modern serif in its place would leave the UI
+      correct and from nowhere at all.
     -->
     <link
       href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&display=swap"
@@ -36,10 +36,10 @@
     />
   </head>
   <body>
-    <!-- O canvas WebGL é injetado aqui pelo Renderer. -->
+    <!-- The WebGL canvas is injected here by the Renderer. -->
     <div id="viewport" aria-hidden="true"></div>
 
-    <!-- Camada de interface: menu, HUD e diálogos ficam sobre o canvas. -->
+    <!-- UI layer: menu, HUD and dialogs sit on top of the canvas. -->
     <div id="ui-root"></div>
 
     <noscript>

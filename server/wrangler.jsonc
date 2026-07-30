@@ -4,21 +4,22 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
 
-  // ⚠️ Porta **fixa**, e **fora da 8787 padrão do wrangler**. As duas coisas por
-  // motivos diferentes, e as duas custaram uma sessão de depuração.
+  // ⚠️ A **fixed** port, and **off wrangler's default 8787**. The two things for
+  // different reasons, and both cost a debugging session.
   //
-  // Fixa, porque sem isso o `wrangler dev` sobe na 8788 quando a 8787 está
-  // ocupada e avisa numa linha de log que ninguém lê. O jogo segue procurando no
-  // lugar de sempre, não acha, e o jogador recebe um "connection dropped" que não
-  // tem relação nenhuma com a causa.
+  // Fixed, because without it `wrangler dev` comes up on 8788 when 8787 is taken and
+  // says so in one log line nobody reads. The game keeps looking in the usual place,
+  // does not find it, and the player gets a "connection dropped" with no relation at
+  // all to the cause.
   //
-  // Fora da 8787, porque no Windows **dois processos podem escutar a mesma
-  // porta** quando o primeiro liga com `SO_REUSEADDR` — que é o padrão do
-  // `python -m http.server`. Nesse caso o wrangler sobe anunciando sucesso, e as
-  // conexões vão para o outro processo. Não há erro para detectar, de nenhum dos
-  // lados: só um servidor de sala que responde HTML de listagem de diretório.
+  // Off 8787, because on Windows **two processes can listen on the same port** when
+  // the first one binds with `SO_REUSEADDR` — which is `python -m http.server`'s
+  // default. In that case wrangler comes up announcing success, and the connections
+  // go to the other process. There is no error to detect, on either side: just a room
+  // server answering with directory-listing HTML.
   //
-  // 8930 não é sagrada — é só improvável. Mudou aqui, muda no `.env.development`.
+  // 8930 is not sacred — it is just unlikely. Change it here, change it in
+  // `.env.development`.
   "dev": { "port": 8930 },
 
   "durable_objects": {
@@ -28,31 +29,31 @@
     ]
   },
 
-  // ⚠️ `new_sqlite_classes`, e **não** `new_classes`.
+  // ⚠️ `new_sqlite_classes`, and **not** `new_classes`.
   //
-  // Durable Objects só existem no plano gratuito com armazenamento SQLite. Com
-  // `new_classes` o deploy falha dizendo que "Durable Objects requires a paid
-  // plan" — uma mensagem que manda procurar no lugar errado, porque o problema
-  // não é o plano, é o tipo de migração.
+  // Durable Objects only exist on the free plan with SQLite storage. With
+  // `new_classes` the deploy fails saying "Durable Objects requires a paid plan" — a
+  // message that sends you looking in the wrong place, because the problem is not the
+  // plan, it is the kind of migration.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["DuelRoom", "Matchmaker"] }
   ],
 
-  // De onde o jogo pode se conectar. Sem esta lista, qualquer página na internet
-  // abre salas neste Worker e queima a cota de requests que é sua.
+  // Where the game is allowed to connect from. Without this list, any page on the
+  // internet opens rooms on this Worker and burns the request quota that is yours.
   //
-  // ⚠️ **Origem é `esquema://host[:porta]`, e nada mais** — sem barra no fim, sem
-  // caminho. `https://sopgame.vercel.app/` com a barra **não** casa com o que o
-  // navegador manda, e o efeito é uma recusa silenciosa que parece problema de
-  // rede. É a comparação de texto mais fácil de errar deste projeto.
+  // ⚠️ **An origin is `scheme://host[:port]`, and nothing else** — no trailing slash,
+  // no path. `https://sopgame.vercel.app/` with the slash does **not** match what the
+  // browser sends, and the effect is a silent refusal that looks like a network
+  // problem. It is the easiest string comparison in this project to get wrong.
   //
-  // As três primeiras são o desenvolvimento local (`vite dev` e `vite preview`);
-  // a última é a publicação.
+  // The first three are local development (`vite dev` and `vite preview`); the last
+  // one is the published site.
   //
-  // As URLs de pré-visualização da Vercel (`sopgame-git-<branch>-….vercel.app`)
-  // não estão aqui de propósito: elas mudam a cada ramo e não dá para prever o
-  // texto. Quem precisar testar um preview com rede acrescenta a origem daquele
-  // deploy e publica de novo.
+  // Vercel's preview URLs (`sopgame-git-<branch>-….vercel.app`) are deliberately not
+  // here: they change with every branch and the string cannot be predicted. Anyone
+  // who needs to test a preview with networking adds that deploy's origin and
+  // publishes again.
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,https://sopgame.vercel.app"
   },

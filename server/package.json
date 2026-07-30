@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Servidor de sala do duelo 1v1: pareia dois capitães e retransmite o que eles trocam",
+  "description": "Room server for the 1v1 duel: pairs two captains and relays what they exchange",
   "scripts": {
     "dev": "wrangler dev",
     "check": "tsc --noEmit",

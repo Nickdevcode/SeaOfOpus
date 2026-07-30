@@ -21,7 +21,7 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  // `shared` é o protocolo de rede, compartilhado com o workspace do servidor.
-  // Um formato, uma definição — ver o cabeçalho de `shared/protocol.ts`.
+  // `shared` is the network protocol, shared with the server workspace.
+  // One format, one definition — see the header of `shared/protocol.ts`.
   "include": ["src", "shared", "tests", "vite.config.ts"]
 }

@@ -1,78 +1,79 @@
 /**
- * Presets gráficos e preferências do jogador.
+ * Graphics presets and player preferences.
  *
- * O preset é detectado automaticamente na primeira execução a partir do
- * renderer WebGL relatado pela GPU, e depois pode ser trocado no menu.
- * Tudo é persistido em localStorage.
+ * The preset is detected automatically on the first run from the WebGL renderer the
+ * GPU reports, and can be changed in the menu afterwards. Everything is persisted in
+ * localStorage.
  */
 
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra';
 
 /**
- * Os presets na ordem em que aparecem no menu, do mais leve ao mais pesado.
+ * The presets in the order they appear in the menu, from lightest to heaviest.
  *
- * Existe para o menu e o validador do `localStorage` não escreverem a lista cada
- * um por conta própria: um preset novo entra aqui e os dois se ajustam.
+ * It exists so the menu and the `localStorage` validator do not each write the list
+ * on their own: a new preset goes in here and both adjust.
  */
 export const QUALITY_ORDER: readonly QualityPreset[] = ['low', 'medium', 'high', 'ultra'];
 
 export interface QualitySettings {
-  /** Multiplicador da resolução de render (1 = nativo, limitado pelo devicePixelRatio). */
+  /** Render resolution multiplier (1 = native, capped by devicePixelRatio). */
   renderScale: number;
-  /** Resolução do shadow map da luz direcional. 0 desliga sombras. */
+  /** Resolution of the directional light's shadow map. 0 switches shadows off. */
   shadowMapSize: number;
   /**
-   * Anéis concêntricos da malha do oceano. Os raios crescem em progressão
-   * geométrica, então cada anel a mais aumenta a densidade em toda a extensão,
-   * não só perto — o triângulo mantém sempre o mesmo tamanho aparente.
+   * Concentric rings of the ocean mesh. The radii grow geometrically, so every extra
+   * ring raises the density over the whole extent, not only nearby — the triangle
+   * always keeps the same apparent size.
    *
-   * Anéis e segmentos são escolhidos juntos para que o passo radial
-   * (`raio × (crescimento − 1)`) fique próximo do passo angular
-   * (`raio × 2π/segmentos`). Triângulos aproximadamente equiláteros filtram
-   * onda melhor que fatias compridas com a mesma contagem de triângulos.
+   * Rings and segments are chosen together so that the radial step
+   * (`radius × (growth − 1)`) stays close to the angular step
+   * (`radius × 2π/segments`). Roughly equilateral triangles filter waves better than
+   * long slivers with the same triangle count.
    */
   oceanRings: number;
-  /** Divisões angulares do oceano (quantos "gomos" cada anel tem). */
+  /** Angular divisions of the ocean (how many "gores" each ring has). */
   oceanSegments: number;
   //
-  // ⚠️ **Não** volte a pôr `waveCount` aqui.
+  // ⚠️ Do **not** put `waveCount` back in here.
   //
-  // Ele existiu, variando de 4 a 6 conforme o preset, e era um defeito de duas
-  // caras. O visível: arrastar o deslizante de qualidade regerava o campo de
-  // ondas no meio da partida, e um tiro em voo caía num mar que não era o de
-  // onde tinha sido disparado. O invisível, e pior: o mar é simulação, não
-  // enfeite — dois jogadores em presets diferentes navegariam mares diferentes,
-  // com forças de empuxo diferentes, na mesma sala. O campo agora tem sempre as
-  // seis ondas, e quem faz o trabalho de aliviar máquina fraca é o `waveFilterWeight`
-  // do oceano, que é onde esse trabalho pertence. O custo no preset Baixo são
-  // duas iterações a mais num laço de vertex shader.
+  // It existed, varying from 4 to 6 depending on the preset, and it was a two-faced
+  // defect. The visible one: dragging the quality slider regenerated the wave field
+  // mid-match, and a shot in flight landed on a sea that was not the one it had been
+  // fired from. The invisible one, and worse: the sea is simulation, not decoration —
+  // two players on different presets would sail different seas, with different
+  // buoyancy forces, in the same room. The field now always has the six waves, and
+  // what does the work of easing a weak machine is the ocean's `waveFilterWeight`,
+  // which is where that work belongs. The cost on the Low preset is two extra
+  // iterations in a vertex shader loop.
   //
-  /** Resolução do render target da espuma de esteira. */
+  /** Resolution of the wake foam's render target. */
   wakeResolution: number;
   bloom: boolean;
   godRays: boolean;
   /**
-   * Amostras do raio de sol, por pixel.
+   * God-ray samples, per pixel.
    *
-   * É o parâmetro mais caro da cadeia de pós-processamento: cada amostra é uma
-   * leitura de textura por pixel, e o passe roda em resolução cheia. A diferença
-   * entre 32 e 48 amostras é um bandeamento levíssimo nas franjas do sol —
-   * visível numa comparação lado a lado e em nenhuma outra situação —, e custa
-   * um terço do custo do efeito. Por isso o preset Alto ficou em 32 e só o Ultra
-   * paga os 48.
+   * It is the most expensive parameter in the post-processing chain: every sample is
+   * one texture read per pixel, and the pass runs at full resolution. The difference
+   * between 32 and 48 samples is very slight banding in the sun's fringes — visible
+   * in a side-by-side comparison and in no other situation — and it costs a third of
+   * the effect's cost. That is why the High preset settled at 32 and only Ultra pays
+   * the 48.
    */
   godRaySamples: number;
-  /** Antialiasing por SMAA no composer. */
+  /** SMAA antialiasing in the composer. */
   smaa: boolean;
   /**
-   * Mapa de ambiente pré-filtrado a partir do céu.
+   * Environment map prefiltered from the sky.
    *
-   * É o que dá reflexo aos metais e aos vidros do navio — sem ele o latão e o
-   * ferro só existem onde o sol bate. Desligado no preset Baixo, onde a luz
-   * hemisférica volta à intensidade cheia para cobrir o difuso sozinha.
+   * It is what gives the ship's metals and glass their reflections — without it the
+   * brass and the iron only exist where the sun hits. Switched off on the Low preset,
+   * where the hemisphere light goes back to full intensity to cover the diffuse on its
+   * own.
    */
   skyEnvironment: boolean;
-  /** Partículas de respingo e fumaça por evento. */
+  /** Splash and smoke particles per event. */
   particleBudget: number;
 }
 
@@ -132,16 +133,16 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualitySettings> = {
 };
 
 /**
- * Como o tempo se comporta na partida.
+ * How the weather behaves in a match.
  *
- * `dynamic` deixa a máquina de estados do `Weather` correr; qualquer outro valor
- * trava o tempo naquele estado. Travar existe por dois motivos legítimos: quem
- * quer treinar tiro num mar previsível, e quem quer *ver* a tempestade sem
- * esperar a cadeia de transições chegar nela.
+ * `dynamic` lets `Weather`'s state machine run; any other value locks the weather in
+ * that state. Locking exists for two legitimate reasons: whoever wants to practice
+ * gunnery on a predictable sea, and whoever wants to *see* the storm without waiting
+ * for the chain of transitions to reach it.
  */
 export type WeatherMode = 'dynamic' | 'clear' | 'breeze' | 'squall' | 'storm';
 
-/** Os modos de tempo na ordem do menu. Mesma razão de `QUALITY_ORDER`. */
+/** The weather modes in menu order. Same reason as `QUALITY_ORDER`. */
 export const WEATHER_MODES: readonly WeatherMode[] = [
   'dynamic',
   'clear',
@@ -153,39 +154,40 @@ export const WEATHER_MODES: readonly WeatherMode[] = [
 export interface PlayerPreferences {
   quality: QualityPreset;
   /**
-   * Nome que o adversário vê no duelo online.
+   * The name the opponent sees in an online duel.
    *
-   * Mora aqui, e não numa chave própria de `localStorage`, porque é o único lugar
-   * do projeto com validação de entrada externa, gravação adiada e descarga no
-   * `pagehide` — três coisas que um `getItem('nickname')` solto teria de repetir.
+   * It lives here, and not in a `localStorage` key of its own, because this is the
+   * only place in the project with external input validation, deferred writing and a
+   * flush on `pagehide` — three things a loose `getItem('nickname')` would have to
+   * repeat.
    */
   nickname: string;
-  /** Sensibilidade do mouse, multiplicador sobre a base. */
+  /** Mouse sensitivity, a multiplier over the base. */
   mouseSensitivity: number;
-  /** Sensibilidade do analógico direito. */
+  /** Right stick sensitivity. */
   gamepadSensitivity: number;
   gamepadDeadzone: number;
   invertY: boolean;
   masterVolume: number;
-  /** Duração de um dia completo no jogo, em minutos reais. */
+  /** Length of a full in-game day, in real minutes. */
   dayLengthMinutes: number;
-  /** Campo de visão a pé, em graus. */
+  /** Field of view on foot, in degrees. */
   fieldOfView: number;
-  /** Tempo fixo, ou `dynamic` para deixá-lo virar sozinho. */
+  /** Fixed weather, or `dynamic` to let it turn on its own. */
   weather: WeatherMode;
-  /** Mostra o overlay de telemetria de física (F3). */
+  /** Shows the physics telemetry overlay (F3). */
   showDebug: boolean;
 }
 
-/** Faixa de um ajuste numérico: o que o deslizante oferece e o que a validação aceita. */
+/** A numeric setting's range: what the slider offers and what validation accepts. */
 export interface SettingRange {
   min: number;
   max: number;
-  /** Passo do deslizante — e também o passo do d-pad na navegação por controle. */
+  /** The slider's step — and also the d-pad's step in pad navigation. */
   step: number;
 }
 
-/** Preferências numéricas, as únicas que precisam de faixa. */
+/** Numeric preferences, the only ones that need a range. */
 export type RangedPreference =
   | 'masterVolume'
   | 'mouseSensitivity'
@@ -195,19 +197,19 @@ export type RangedPreference =
   | 'fieldOfView';
 
 /**
- * As faixas dos ajustes numéricos, **em um lugar só**.
+ * The numeric settings' ranges, **in one place only**.
  *
- * O menu constrói os deslizantes a partir daqui e o validador do `localStorage`
- * confere contra a mesma tabela. Repetir os números nos dois lados é como um
- * `fieldOfView: 5000` gravado por uma versão antiga sobrevive a uma faixa que
- * encolheu depois: o menu limita o que o jogador escolhe *agora*, mas quem entra
- * pelo armazenamento não passa por deslizante nenhum.
+ * The menu builds the sliders from here and the `localStorage` validator checks
+ * against the same table. Repeating the numbers on both sides is how a
+ * `fieldOfView: 5000` written by an old version survives a range that shrank later:
+ * the menu limits what the player chooses *now*, but whatever comes in through
+ * storage passes through no slider at all.
  *
- * Sobre o campo de visão: aqui a faixa é 55–100 e o
- * `PlayerController.setFieldOfView` grampeia em 45–110. A diferença é
- * intencional e a direção importa — esta faixa vive **dentro** da do
- * controlador, então nenhum valor aceito aqui chega lá para ser silenciosamente
- * alterado. Quem for alargar isto tem de conferir a folga do outro lado antes.
+ * About the field of view: here the range is 55–100 and
+ * `PlayerController.setFieldOfView` clamps to 45–110. The difference is intentional
+ * and the direction matters — this range lives **inside** the controller's, so no
+ * value accepted here reaches it to be silently altered. Whoever widens this has to
+ * check the margin on the other side first.
  */
 export const PREFERENCE_RANGES: Readonly<Record<RangedPreference, SettingRange>> = {
   masterVolume: { min: 0, max: 1, step: 0.05 },
@@ -221,27 +223,27 @@ export const PREFERENCE_RANGES: Readonly<Record<RangedPreference, SettingRange>>
 const STORAGE_KEY = 'sea-of-opus:prefs';
 
 /**
- * Espera antes de gravar as preferências, em milissegundos.
+ * Wait before writing the preferences, in milliseconds.
  *
- * Um deslizante emite um `input` por pixel arrastado. Sem esta folga, atravessar
- * a barra de volume serializa e grava o objeto inteiro dezenas de vezes — e
- * `localStorage.setItem` é síncrono, então cada uma dessas gravações acontece
- * dentro do quadro. O jogador não perde nada com o atraso: o valor já está em
- * memória e já foi aplicado; o que espera é só a cópia em disco.
+ * A slider emits one `input` per pixel dragged. Without this margin, crossing the
+ * volume bar serializes and writes the whole object dozens of times — and
+ * `localStorage.setItem` is synchronous, so each of those writes happens inside the
+ * frame. The player loses nothing to the delay: the value is already in memory and
+ * has already been applied; what waits is only the copy on disk.
  */
 const PERSIST_DEBOUNCE_MS = 250;
 
 /**
- * Teto do apelido, em caracteres.
+ * Nickname ceiling, in characters.
  *
- * Dezesseis é o que cabe no cartão de oponente sem quebrar linha na menor largura
- * de tela suportada, e é o mesmo número que o servidor de sala grampeia — quem
- * cortar tem de cortar dos dois lados, ou o nome que aparece para o adversário
- * deixa de ser o nome que o dono digitou.
+ * Sixteen is what fits on the opponent card without wrapping at the smallest
+ * supported screen width, and it is the same number the room server clamps to —
+ * whoever trims it has to trim both sides, or the name the opponent sees stops being
+ * the name its owner typed.
  */
 export const NICKNAME_MAX_LENGTH = 16;
 
-/** Um apelido de estreia, para ninguém precisar inventar um antes de jogar. */
+/** A starter nickname, so nobody has to invent one before playing. */
 function defaultNickname(): string {
   return `Sailor${Math.floor(Math.random() * 900 + 100)}`;
 }
@@ -261,17 +263,16 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
 };
 
 /**
- * Estima um preset a partir da string de renderer da GPU.
+ * Guesses a preset from the GPU's renderer string.
  *
- * É uma heurística grosseira de propósito: erra para o lado seguro e o jogador
- * pode subir no menu. Só serve para a primeira execução.
+ * It is a crude heuristic on purpose: it errs on the safe side and the player can go
+ * up in the menu. It only serves the first run.
  *
- * A ordem dos testes é a correção mais importante daqui. Testar as integradas
- * primeiro parece razoável e está errado, porque as strings se sobrepõem: um
- * híbrido de notebook reporta algo como "Intel(R) UHD Graphics / NVIDIA GeForce
- * RTX 4060", e uma máquina com RTX travava em `medium` só por ter a palavra
- * "Intel" no nome. Dedicadas primeiro, integradas por último — o teste mais
- * específico vence.
+ * The order of the tests is the most important correction in here. Testing the
+ * integrated ones first seems reasonable and is wrong, because the strings overlap: a
+ * laptop hybrid reports something like "Intel(R) UHD Graphics / NVIDIA GeForce RTX
+ * 4060", and a machine with an RTX was locked to `medium` just for having the word
+ * "Intel" in its name. Discrete first, integrated last — the more specific test wins.
  */
 function detectPreset(): QualityPreset {
   try {
@@ -285,23 +286,24 @@ function detectPreset(): QualityPreset {
       : '';
     const gpu = renderer.toLowerCase();
 
-    // Placas dedicadas de topo.
+    // Top-end discrete cards.
     if (/(rtx (40|50)|rx (7[6-9]|9[0-9])00|apple m[2-9] (max|ultra))/.test(gpu)) {
       return 'ultra';
     }
-    // Dedicadas em geral (inclui a RX 6600 alvo e a Arc, que traz "intel" no nome).
+    // Discrete in general (includes the target RX 6600 and the Arc, which carries
+    // "intel" in its name).
     if (/(rtx|gtx|radeon rx|arc a\d)/.test(gpu)) {
       return 'high';
     }
-    // Integradas conhecidas: `low`, que é o que o comentário desta lista sempre
-    // disse e o código não fazia — devolvia `medium`, o mesmo do caso "não sei",
-    // o que tornava o teste inteiro decorativo. Uma UHD 630 não roda este oceano
-    // em `medium`, e subir de preset no menu custa dois cliques; descobrir por que
-    // o jogo abre a 12 fps custa a sessão.
+    // Known integrated ones: `low`, which is what this list's comment always said
+    // and the code did not do — it returned `medium`, the same as the "I do not know"
+    // case, which made the whole test decorative. A UHD 630 does not run this ocean
+    // at `medium`, and going up a preset in the menu costs two clicks; working out
+    // why the game opens at 12 fps costs the session.
     //
-    // O padrão perdeu o espaço solto que havia antes de `radeon graphics`: com
-    // ele, a marca só casava precedida de espaço, e uma string que **começasse**
-    // com "Radeon Graphics" escapava.
+    // The pattern lost the loose space that used to precede `radeon graphics`: with
+    // it, the brand only matched when preceded by a space, and a string that
+    // **started** with "Radeon Graphics" escaped.
     if (/(intel|uhd graphics|iris|vega \d|radeon graphics|adreno|mali|apple a\d)/.test(gpu)) {
       return 'low';
     }
@@ -311,14 +313,15 @@ function detectPreset(): QualityPreset {
   }
 }
 
-// --- validação do que vem do armazenamento -----------------------------------
+// --- validating what comes out of storage ------------------------------------
 //
-// O `localStorage` é entrada externa como qualquer outra: o jogador pode editá-lo
-// no console, uma extensão pode corrompê-lo e uma versão anterior do jogo pode ter
-// gravado um formato que não existe mais. Sem validação, um `quality: "potato"`
-// vira `QUALITY_PRESETS["potato"] === undefined` e o primeiro acesso a
-// `quality.shadowMapSize` no `Renderer` derruba o boot inteiro — tela preta, sem
-// menu para consertar. Cada campo cai no padrão quando não passa.
+// `localStorage` is external input like any other: the player can edit it in the
+// console, an extension can corrupt it and an earlier version of the game may have
+// written a format that no longer exists. Without validation, a `quality: "potato"`
+// becomes `QUALITY_PRESETS["potato"] === undefined` and the first access to
+// `quality.shadowMapSize` in the `Renderer` brings the whole boot down — a black
+// screen, with no menu to fix it from. Every field falls back to the default when it
+// does not pass.
 
 function readEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value)
@@ -331,34 +334,35 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
 }
 
 /**
- * Texto curto e apresentável, ou o padrão.
+ * Short, presentable text, or the default.
  *
- * Ao contrário de `readNumber`, aqui **saneia em vez de rejeitar**: um apelido com
- * um espaço a mais na ponta é o mesmo apelido, e devolver "Sailor427" a quem
- * digitou "  Barbanegra  " seria trocar a intenção do jogador por um erro de
- * digitação. O que não sobrevive são os caracteres de controle — inclusive os de
- * direção de texto, que reordenam visualmente o resto de uma linha e são a forma
- * clássica de um nome falsificar o que está escrito ao lado dele.
+ * Unlike `readNumber`, this **sanitizes instead of rejecting**: a nickname with one
+ * extra space at the end is the same nickname, and returning "Sailor427" to somebody
+ * who typed "  Blackbeard  " would trade the player's intent for a typo. What does
+ * not survive are the control characters — including the text-direction ones, which
+ * visually reorder the rest of a line and are the classic way for a name to falsify
+ * what is written beside it.
  */
 export function readString(value: unknown, maxLength: number, fallback: string): string {
   if (typeof value !== 'string') return fallback;
   const cleaned = value
-    // Controles C0/C1, largura zero, marcas e isolamentos bidirecionais, e o BOM.
+    // C0/C1 controls, zero width, bidirectional marks and isolates, and the BOM.
     .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2066-\u2069\uFEFF]/g, '')
-    // Espaços em série viram um só: "Barba      negra" é o mesmo nome, escrito
-    // para ocupar a largura de dois.
+    // Runs of spaces become one: "Black      beard" is the same name, written to take
+    // up the width of two.
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned.length > 0 ? cleaned.slice(0, maxLength) : fallback;
 }
 
 /**
- * Número dentro da faixa, ou o padrão.
+ * A number inside the range, or the default.
  *
- * Fora da faixa cai no padrão em vez de ser grampeado: um `fieldOfView: 5000` não
- * é um 100 exagerado, é um valor que não veio do menu, e adivinhar a intenção de
- * um dado corrompido é pior que voltar ao conhecido. `Number.isFinite` cobre
- * `NaN` e os infinitos, que sobrevivem a um `JSON.parse` vindo de string.
+ * Out of range it falls back to the default instead of being clamped: a
+ * `fieldOfView: 5000` is not an exaggerated 100, it is a value that did not come from
+ * the menu, and guessing the intent of corrupted data is worse than going back to
+ * what is known. `Number.isFinite` covers `NaN` and the infinities, which survive a
+ * `JSON.parse` from a string.
  */
 function readNumber(value: unknown, range: SettingRange, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
@@ -369,8 +373,8 @@ function sanitizePreferences(raw: unknown, defaults: PlayerPreferences): PlayerP
   const stored = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
   const ranges = PREFERENCE_RANGES;
 
-  // Campo a campo, e não `{ ...defaults, ...stored }`: o espalhamento deixaria
-  // passar tanto os valores inválidos quanto chaves que já não existem.
+  // Field by field, and not `{ ...defaults, ...stored }`: the spread would let
+  // through both the invalid values and keys that no longer exist.
   return {
     quality: readEnum(stored.quality, QUALITY_ORDER, defaults.quality),
     nickname: readString(stored.nickname, NICKNAME_MAX_LENGTH, defaults.nickname),
@@ -408,13 +412,14 @@ function loadPreferences(): PlayerPreferences {
     const text = localStorage.getItem(STORAGE_KEY);
     if (text) raw = JSON.parse(text);
   } catch {
-    // localStorage indisponível ou JSON corrompido: seguir com o padrão.
+    // localStorage unavailable or corrupted JSON: carry on with the default.
   }
 
   const defaults: PlayerPreferences = { ...DEFAULT_PREFERENCES };
 
-  // A GPU só opina quando não há preset gravado **válido**. Um preset inválido
-  // conta como ausente: é o mesmo caso de "não sei o que este jogador escolheu".
+  // The GPU only gets a say when there is no **valid** preset stored. An invalid
+  // preset counts as absent: it is the same case as "I do not know what this player
+  // chose".
   const stored = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
   const hasQuality =
     typeof stored.quality === 'string' &&
@@ -431,10 +436,10 @@ class SettingsStore {
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    // A gravação é adiada (ver `PERSIST_DEBOUNCE_MS`), então fechar a aba dentro
-    // da janela de espera perderia o último ajuste. `pagehide` cobre o fechamento
-    // e a navegação; `visibilitychange` cobre o celular indo para segundo plano,
-    // que em iOS costuma ser o último evento que a página vê.
+    // The write is deferred (see `PERSIST_DEBOUNCE_MS`), so closing the tab inside
+    // the wait window would lose the last change. `pagehide` covers closing and
+    // navigation; `visibilitychange` covers a phone going into the background, which
+    // on iOS is usually the last event the page ever sees.
     window.addEventListener('pagehide', () => this.flush());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.flush();
@@ -456,7 +461,7 @@ class SettingsStore {
     return () => this.listeners.delete(listener);
   }
 
-  /** Grava agora o que estiver pendente. Chamada ao sair da página. */
+  /** Writes whatever is pending right now. Called on leaving the page. */
   flush(): void {
     if (this.persistTimer === null) return;
     clearTimeout(this.persistTimer);
@@ -476,7 +481,7 @@ class SettingsStore {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.preferences));
     } catch {
-      // Modo privado do navegador pode bloquear a escrita: não é fatal.
+      // The browser's private mode can block the write: it is not fatal.
     }
   }
 }

@@ -9,10 +9,10 @@ export default defineConfig({
     target: 'es2022',
     rollupOptions: {
       output: {
-        // three e postprocessing quase nunca mudam; isolar cada um em seu chunk
-        // faz o cache do navegador sobreviver a cada deploy do código do jogo.
-        // API do Rolldown (bundler padrão do Vite 8) — o antigo `manualChunks`
-        // em forma de objeto foi substituído por `codeSplitting.groups`.
+        // three and postprocessing almost never change; isolating each one in its
+        // own chunk lets the browser's cache survive every deploy of the game's
+        // code. Rolldown's API (Vite 8's default bundler) — the old object-shaped
+        // `manualChunks` was replaced by `codeSplitting.groups`.
         codeSplitting: {
           groups: [
             { name: 'three', test: /node_modules[\\/]three[\\/]/ },

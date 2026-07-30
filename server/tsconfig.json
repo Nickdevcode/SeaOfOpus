@@ -4,13 +4,13 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
 
-    // Sem `DOM`, e é o ponto do arquivo existir.
+    // No `DOM`, and that is the whole point of this file existing.
     //
-    // O runtime dos Workers declara `WebSocket`, `Response` e `fetch` com
-    // formatos próprios, diferentes dos do navegador. Com as duas bibliotecas
-    // carregadas juntas, os nomes colidem e o compilador reclama de coisas que
-    // não têm nada a ver com o código escrito. É por isso que o servidor tem
-    // tsconfig próprio em vez de entrar no `include` do jogo.
+    // The Workers runtime declares `WebSocket`, `Response` and `fetch` with shapes of
+    // its own, different from the browser's. With both libraries loaded together the
+    // names collide and the compiler complains about things that have nothing to do
+    // with the code as written. That is why the server has a tsconfig of its own
+    // instead of entering the game's `include`.
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"],
 
@@ -25,6 +25,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  // O protocolo é compartilhado com o jogo: um formato, uma definição.
+  // The protocol is shared with the game: one format, one definition.
   "include": ["src", "../shared"]
 }

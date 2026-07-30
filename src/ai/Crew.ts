@@ -1,50 +1,52 @@
 /**
- * A tripulação inimiga: dois homens, e por isso um problema de escolha.
+ * The enemy crew: two men, and therefore a problem of choice.
  *
- * **A decisão de projeto mais importante da IA inteira mora aqui.** O caminho
- * fácil seria dar ao bot uma consciência única capaz de governar, apontar as duas
- * peças e pregar tábua ao mesmo tempo. Isso produz um inimigo que o jogador não
- * consegue combater: ele nunca para de atirar, nunca abaixa a guarda, e a única
- * coisa que o jogador aprende é que o jogo trapaceia.
+ * **The most important design decision in the whole AI lives here.** The easy path
+ * would be to give the bot a single mind able to steer, lay both guns and nail planks
+ * all at once. That produces an enemy the player cannot fight: it never stops firing,
+ * never lowers its guard, and the only thing the player learns is that the game
+ * cheats.
  *
- * Então a Chalupa inimiga é tripulada como a Chalupa do Sea of Thieves é: **por
- * dois**. Um fica no timão do começo ao fim. O outro é um homem só, e um homem só
- * está em **um** lugar: no canhão de boreste, no de bombordo, ou no porão. Nunca em
- * dois. E ir de um para outro custa o tempo de atravessar o convés ou de descer a
- * escada.
+ * So the enemy Sloop is crewed the way the Sea of Thieves Sloop is: **by two**. One
+ * stays at the helm from start to finish. The other is one man, and one man is in
+ * **one** place: at the starboard gun, at the port gun, or in the hold. Never in two.
+ * And going from one to another costs the time to cross the deck or go down the
+ * stair.
  *
- * Três coisas boas caem disso, e nenhuma precisou ser programada como regra:
+ * Three good things fall out of that, and none of them had to be programmed as a
+ * rule:
  *
- * - **O combate ganha respiro.** Quando o inimigo toma um rombo, o fogo dele para.
- *   O jogador *vê* isso acontecer e entende que acertou — sem número na tela.
- * - **Trocar de bordo tem preço.** Se o jogador cruza pela popa do inimigo e
- *   aparece do outro lado, o artilheiro tem de atravessar o convés, e há uma
- *   janela real de dois segundos em que só um dos navios atira.
- * - **A simetria fica honesta.** O jogador solo também não consegue mirar e
- *   bombear ao mesmo tempo. A diferença é que ele tem um timoneiro de graça — a
- *   roda fica onde foi deixada —, e o inimigo paga pelo dele com o segundo homem.
+ * - **The fight gets room to breathe.** When the enemy takes a breach, its fire
+ *   stops. The player *sees* that happen and understands they hit — with no number on
+ *   screen.
+ * - **Switching sides has a price.** If the player crosses the enemy's stern and
+ *   appears on the other side, the gunner has to cross the deck, and there is a real
+ *   two-second window where only one of the ships is firing.
+ * - **The symmetry stays honest.** A solo player cannot aim and pump at the same time
+ *   either. The difference is that they get a helmsman for free — the wheel stays
+ *   where it was left — and the enemy pays for its own with the second man.
  *
- * A dificuldade não acrescenta gente. Ela muda a rapidez do marujo, o quanto de
- * água ele deixa entrar antes de largar a peça, quanto tempo de porão ele julga que
- * a briga permite e o quanto ele acerta na escolha do buraco — ver `Difficulty`.
+ * Difficulty does not add people. It changes how quick the sailor is, how much water
+ * he lets in before leaving the gun, how much hold time he judges the fight allows
+ * and how well he picks the right hole — see `Difficulty`.
  *
- * ## O porão tem dezesseis metros, e ele os anda
+ * ## The hold is sixteen meters long, and he walks them
  *
- * A versão anterior deste arquivo tinha uma trapaça escondida em uma linha: o
- * marujo escolhia o rombo de maior vazão e **já começava a pregar**. Sem caminhar
- * até ele, sem procurar, sem largar a bomba. Medido contra oito rombos abertos na
- * linha d'água, o casco inteiro voltava a ser estanque em 25 s — e o jogador, que
- * precisa descer a escada, atravessar o porão agachado, achar o buraco no escuro e
- * mirar nele antes de segurar o botão, via aquilo e concluía com razão que não
- * havia como afundar aquele navio.
+ * The previous version of this file had a cheat hidden in one line: the sailor picked
+ * the breach with the highest inflow and **started nailing right away**. Without
+ * walking to it, without searching, without letting go of the pump. Measured against
+ * eight breaches opened at the waterline, the whole hull was watertight again in 25 s
+ * — and the player, who has to go down the stair, cross the hold stooped, find the
+ * hole in the dark and aim at it before holding the button, saw that and rightly
+ * concluded there was no way to sink that ship.
  *
- * Agora o marujo ocupa uma posição no porão e se desloca entre os serviços a
- * 1,15 m/s. Um rombo na proa custa oito segundos de caminhada antes da primeira
- * martelada, e voltar à bomba custa outros tantos. **A conta que decide o duelo
- * passou a ser a mesma dos dois lados: dá tempo de tapar aquele buraco antes que a
- * próxima salva chegue?**
+ * Now the sailor occupies a position in the hold and moves between jobs at 1.15 m/s.
+ * A breach in the bow costs eight seconds of walking before the first hammer blow,
+ * and going back to the pump costs as many again. **The arithmetic that decides the
+ * duel became the same on both sides: is there time to patch that hole before the
+ * next salvo arrives?**
  *
- * E ele erra o buraco. Ver `pickBreach`.
+ * And he picks the wrong hole. See `pickBreach`.
  */
 
 import * as THREE from 'three';
@@ -54,120 +56,122 @@ import type { Breach } from '../ship/ShipDamage';
 import type { Ship } from '../ship/Ship';
 import type { DifficultyPreset } from './Difficulty';
 
-/** Onde o único par de mãos livres pode estar. */
+/** Where the only free pair of hands can be. */
 export type CrewPost = 'starboard' | 'port' | 'hold';
 
 /**
- * Segundos para atravessar o convés de um canhão ao outro.
+ * Seconds to cross the deck from one gun to the other.
  *
- * As peças ficam a ~4 m uma da outra, com o mastro e a escotilha no meio do
- * caminho: não se corta reto. 2,2 s é o desvio a passo apressado.
+ * The guns sit ~4 m apart, with the mast and the hatch in the way: you do not cut
+ * straight across. 2.2 s is the detour at a hurried pace.
  */
 const CROSS_DECK = 2.2;
 
 /**
- * Segundos do convés ao porão, ou de volta.
+ * Seconds from the deck to the hold, or back.
  *
- * Andar até a escotilha e descer 1,85 m de escada a 1,9 m/s. É de propósito o
- * trânsito mais caro do navio: descer para tapar rombo é um compromisso, não uma
- * pausa.
+ * Walking to the hatch and going down 1.85 m of stair at 1.9 m/s. It is deliberately
+ * the most expensive transit on the ship: going below to patch a breach is a
+ * commitment, not a break.
  */
 const DECK_TO_HOLD = 4.2;
 
 /**
- * Velocidade de deslocamento **dentro** do porão, em m/s.
+ * Movement speed **inside** the hold, in m/s.
  *
- * Bem abaixo do passo de convés (2,8 m/s) e não por perícia: o pé-direito ali é de
- * 1,85 m, o piso tem cavername atravessado, e quem se move carrega uma tábua de
- * 1,15 m debaixo do braço com água pela canela. 1,15 m/s é o passo curto de quem
- * anda curvado — atravessar os 16 m do casco custa catorze segundos.
+ * Well below the deck's pace (2.8 m/s) and not for lack of skill: the headroom there
+ * is 1.85 m, the floor has framing across it, and whoever moves is carrying a 1.15 m
+ * plank under one arm with water up to their shins. 1.15 m/s is the short stride of
+ * somebody walking stooped — crossing the hull's 16 m costs fourteen seconds.
  */
 const HOLD_WALK_SPEED = 1.15;
 
 /**
- * Onde ele põe o pé ao descer — e onde estão as tábuas.
+ * Where he sets foot on the way down — and where the planks are.
  *
- * As duas coisas no mesmo ponto não é economia de constante: a madeira de reparo
- * desce pela escotilha e fica empilhada ao pé do lance, que é o único lugar do
- * porão onde ela cabe sem atravancar o corredor. É de lá que sai cada tábua, e é
- * por isso que ele volta aqui entre um rombo e o seguinte — ver `goToBreach`.
+ * The two things at the same point is not saving on a constant: the repair lumber
+ * comes down through the hatch and is stacked at the foot of the flight, which is the
+ * only place in the hold it fits without blocking the corridor. Every plank comes
+ * from there, and that is why he comes back here between one breach and the next —
+ * see `goToBreach`.
  */
 const HOLD_LANDING = new THREE.Vector3(0, HOLD_FLOOR_Y, STAIR_BOTTOM_Z);
 
-/** A alavanca da bomba, que também é um lugar a que se vai. */
+/** The pump's handle, which is also a place you go to. */
 const PUMP_STATION = new THREE.Vector3(BILGE_PUMP.x, HOLD_FLOOR_Y, BILGE_PUMP.z);
 
 /**
- * Peso mínimo de um rombo que ainda não está bebendo, na triagem.
+ * Minimum weight of a breach that is not drinking yet, in the triage.
  *
- * Um furo acima da linha d'água não esguicha, e é justamente por isso que ele entra
- * no sorteio: o marujo apressado o vê como buraco no casco e prega a tábua ali,
- * gastando cinco segundos numa avaria que não estava afundando ninguém. Zerar o
- * peso faria a IA acertar sempre — e acertar sempre é o defeito que esta função
- * veio consertar.
+ * A hole above the waterline does not spout, and that is exactly why it enters the
+ * draw: the hurried sailor sees it as a hole in the hull and nails the plank there,
+ * spending five seconds on damage that was sinking nobody. Zeroing the weight would
+ * make the AI right every time — and being right every time is the defect this
+ * function came to fix.
  */
 const DRY_BREACH_WEIGHT = 0.15;
 
 export class Crew {
-  /** Onde o marujo está (ou para onde está indo, se `transit > 0`). */
+  /** Where the sailor is (or where he is heading, if `transit > 0`). */
   post: CrewPost = 'starboard';
 
-  /** Segundos que faltam para ele chegar. Zero é "trabalhando". */
+  /** Seconds left for him to arrive. Zero is "working". */
   transit = 0;
 
   /**
-   * Rombo a que ele foi destacado, ou `null`.
+   * The breach he has been assigned to, or `null`.
    *
-   * Não quer dizer que a tábua já esteja na madeira: enquanto `reaching` for maior
-   * que zero ele ainda está atravessando o porão para chegar lá.
+   * It does not mean the plank is on the wood yet: while `reaching` is greater than
+   * zero he is still crossing the hold to get there.
    */
   patching: Breach | null = null;
 
-  /** `true` no passo em que ele está de fato na bomba. */
+  /** `true` on the step he is actually at the pump. */
   pumping = false;
 
   /**
-   * Onde ele está no porão, em coordenadas locais do navio.
+   * Where he is in the hold, in the ship's local coordinates.
    *
-   * Só tem sentido enquanto o posto é `hold`; ao descer, ele reaparece no pé do
-   * lance. É a partir daqui que sai o tempo de caminhada de cada serviço.
+   * It only means anything while the post is `hold`; on going down, he reappears at
+   * the foot of the flight. It is what each job's walking time comes from.
    */
   private readonly spot = new THREE.Vector3().copy(HOLD_LANDING);
-  /** Serviço para onde ele está indo, enquanto `walk > 0`. */
+  /** The job he is heading to, while `walk > 0`. */
   private readonly destination = new THREE.Vector3().copy(HOLD_LANDING);
-  /** Segundos que faltam para ele chegar ao serviço escolhido. */
+  /** Seconds left for him to reach the chosen job. */
   private walk = 0;
-  /** `true` quando o serviço escolhido é a bomba, e não um rombo. */
+  /** `true` when the chosen job is the pump, and not a breach. */
   private onPump = false;
 
   constructor(
     private readonly preset: DifficultyPreset,
     /**
-     * Sorteio da triagem de rombos. Vem de fora, e da mesma semente da partida,
-     * para um duelo continuar reproduzível de ponta a ponta — ver `ShipAI`.
+     * The breach triage's draw. It comes from outside, and from the match's own seed,
+     * so a duel stays reproducible end to end — see `ShipAI`.
      */
     private readonly random: () => number,
   ) {}
 
-  /** `true` quando ele chegou no posto e está produzindo trabalho. */
+  /** `true` when he has arrived at the post and is producing work. */
   get onStation(): boolean {
     return this.transit <= 0;
   }
 
   /**
-   * Segundos que faltam para ele chegar ao serviço **dentro** do porão. Telemetria.
+   * Seconds left for him to reach the job **inside** the hold. Telemetry.
    *
-   * Diferente de `transit`, que é o tempo de ir de um posto a outro: este é o
-   * caminho até a tábua e até o buraco, e é ele que faz o reparo do inimigo custar
-   * o mesmo tipo de tempo que custa ao jogador.
+   * Different from `transit`, which is the time to go from one post to another: this
+   * is the walk to the plank and to the hole, and it is what makes the enemy's repair
+   * cost the same kind of time it costs the player.
    */
   get reaching(): number {
     return Math.max(this.walk, 0);
   }
 
   /**
-   * Manda o marujo para um posto. Repetir a ordem do posto atual não faz nada —
-   * senão ele reiniciaria a caminhada a cada passo de física e nunca chegaria.
+   * Sends the sailor to a post. Repeating the order for the current post does
+   * nothing — otherwise he would restart the walk on every physics step and never
+   * arrive.
    */
   orderTo(post: CrewPost): void {
     if (post === this.post) return;
@@ -175,15 +179,16 @@ export class Crew {
     const below = post === 'hold' || this.post === 'hold';
     this.transit = (below ? DECK_TO_HOLD : CROSS_DECK) * this.preset.transitScale;
     this.post = post;
-    // Largou a tábua no meio do reparo: o progresso do rombo fica onde estava
-    // (é estado do rombo, não do marujo), mas ele perde a mira nele.
+    // He dropped the plank halfway through the repair: the breach's progress stays
+    // where it was (it is the breach's state, not the sailor's), but he loses his aim
+    // at it.
     this.patching = null;
     this.onPump = false;
 
-    // Quem desce reaparece no pé do lance, e o serviço do turno passado não conta:
-    // guardar a posição entre descidas daria ao inimigo um marujo que se
-    // teletransporta para onde parou, que é justamente o que este arquivo deixou
-    // de fazer.
+    // Whoever goes down reappears at the foot of the flight, and the last shift's job
+    // does not count: keeping the position between descents would give the enemy a
+    // sailor who teleports back to where he stopped, which is exactly what this file
+    // stopped doing.
     if (post === 'hold') {
       this.spot.copy(HOLD_LANDING);
       this.destination.copy(HOLD_LANDING);
@@ -191,18 +196,18 @@ export class Crew {
     }
   }
 
-  /** Índice em `ship.cannons` do posto atual, ou −1 se ele está no porão. */
+  /** Index in `ship.cannons` of the current post, or −1 if he is in the hold. */
   get cannonIndex(): number {
     if (!this.onStation) return -1;
-    // `[0]` é boreste e `[1]` bombordo — a ordem que `ShipBuilder` monta.
+    // `[0]` is starboard and `[1]` port — the order `ShipBuilder` assembles.
     if (this.post === 'starboard') return 0;
     if (this.post === 'port') return 1;
     return -1;
   }
 
   /**
-   * Um passo de trabalho. Só faz algo quando o posto é o porão: no canhão, quem
-   * trabalha é o `Gunner`.
+   * One step of work. It only does anything when the post is the hold: at the gun,
+   * what works is the `Gunner`.
    */
   fixedUpdate(dt: number, ship: Ship): void {
     this.pumping = false;
@@ -221,8 +226,8 @@ export class Crew {
 
     this.chooseWork(ship);
 
-    // Ainda atravessando o porão até o serviço escolhido: caminhar é trabalho, mas
-    // não é trabalho que feche buraco nenhum.
+    // Still crossing the hold to the chosen job: walking is work, but it is not work
+    // that closes any hole.
     if (this.walk > 0) {
       this.walk -= dt;
       if (this.walk > 0) return;
@@ -230,28 +235,30 @@ export class Crew {
     }
 
     if (this.patching) {
-      // Uma tábua por vez, no rombo que ele escolheu ao chegar aqui.
+      // One plank at a time, on the breach he chose when he got here.
       if (ship.patchBreach(this.patching, dt)) this.patching = null;
       return;
     }
 
-    // Casco fechado e ainda há água acima do que ele tolera: agora a bomba resolve.
-    // A ordem não é gosto, é conta: tapar um rombo custa 2,4 s e vale para sempre,
-    // enquanto bombear com furo aberto é trabalho que a água desfaz atrás — e a
-    // partir de seis furos submersos a entrada supera a vazão da bomba e o porão
-    // sobe enquanto se bombeia. Ver `PUMP_RATE` e `MAX_JET_SPEED` em `ShipDamage`.
+    // Hull closed and there is still water above what he tolerates: now the pump is
+    // the answer. The order is not taste, it is arithmetic: patching a breach costs
+    // 2.4 s and holds forever, while pumping with a hole open is work the water undoes
+    // behind you — and from six submerged holes on, the inflow beats the pump's rate
+    // and the hold rises while you pump. See `PUMP_RATE` and `MAX_JET_SPEED` in
+    // `ShipDamage`.
     //
-    // **O piso é o que faz o estrago acumular.** Ele larga a alavanca no nível que
-    // o capitão dele aceita levar de volta para o combate, e não com o porão
-    // enxuto: um navio que seca por completo entre duas salvas desfaz sozinho tudo
-    // que o jogador conseguiu pôr dentro dele. Ver `bilgeFloor` em `Difficulty`.
+    // **The floor is what makes the damage accumulate.** He lets go of the handle at
+    // the level his captain accepts taking back into the fight, and not with the hold
+    // dry: a ship that empties completely between two salvos undoes on its own
+    // everything the player managed to put inside it. See `bilgeFloor` in
+    // `Difficulty`.
     if (ship.damage.floodFraction > this.preset.bilgeFloor) {
       ship.controls.pumping = true;
       this.pumping = true;
     }
   }
 
-  /** Volta ao posto inicial para uma partida nova. */
+  /** Back to the starting post for a fresh match. */
   reset(): void {
     this.post = 'starboard';
     this.transit = 0;
@@ -264,27 +271,27 @@ export class Crew {
   }
 
   /**
-   * Decide o próximo serviço — e, quase sempre, decide **não decidir nada**.
+   * Decides the next job — and, almost always, decides **not to decide anything**.
    *
-   * A guarda de "só reavalia quando o serviço anterior acabou" é o que sustenta a
-   * triagem aleatória de `pickBreach`. Sorteando a cada passo de física, o marujo
-   * escolheria um rombo diferente sessenta vezes por segundo e passaria a partida
-   * inteira andando de um lado para o outro do porão sem pregar uma tábua — o
-   * sorteio precisa acontecer uma vez por serviço, como acontece uma decisão.
+   * The "only reevaluate when the previous job is over" guard is what holds
+   * `pickBreach`'s random triage up. Drawing on every physics step, the sailor would
+   * pick a different breach sixty times a second and spend the whole match walking
+   * back and forth across the hold without nailing a plank — the draw has to happen
+   * once per job, the way a decision happens.
    *
-   * As três portas de reavaliação são: o rombo alvo saiu da lista (fechou, ou uma
-   * bala nova o transformou noutra coisa), ele está na bomba e apareceu buraco novo
-   * para tapar, ou não há serviço nenhum em andamento.
+   * The three doors to reevaluation are: the target breach left the list (it closed,
+   * or a fresh ball turned it into something else), he is at the pump and a new hole
+   * has appeared to patch, or there is no job in progress at all.
    */
   private chooseWork(ship: Ship): void {
     if (this.patching) {
       if (ship.damage.breaches.includes(this.patching)) return;
       this.patching = null;
     } else if (this.onPump) {
-      // Bombear com o casco aberto é trabalho que a água desfaz atrás; buraco novo
-      // ganha da alavanca. Sem tábua no paiol, porém, a bomba é a única coisa que
-      // ainda funciona — e insistir no rombo deixaria o inimigo parado na frente
-      // de um buraco, afundando sozinho.
+      // Pumping with the hull open is work the water undoes behind you; a new hole
+      // beats the handle. With no plank in the magazine, though, the pump is the only
+      // thing that still works — and insisting on the breach would leave the enemy
+      // standing in front of a hole, sinking on its own.
       if (!ship.hasPlanks || ship.damage.breaches.length === 0) return;
       this.onPump = false;
     }
@@ -298,19 +305,20 @@ export class Crew {
   }
 
   /**
-   * Manda o marujo tapar um rombo — **passando pelo paiol para pegar a tábua**.
+   * Sends the sailor to patch a breach — **by way of the magazine to fetch the
+   * plank**.
    *
-   * É uma tábua por vez, e elas estão empilhadas ao pé do lance (`HOLD_LANDING`).
-   * Um homem curvado num porão de 1,85 m não carrega quatro peças de 1,15 m
-   * debaixo do braço, então cada buraco custa a ida à pilha mais a ida ao buraco —
-   * e a volta é a ida do rombo seguinte, que é por isso que este método não a
-   * cobra duas vezes.
+   * It is one plank at a time, and they are stacked at the foot of the flight
+   * (`HOLD_LANDING`). A man stooped in a 1.85 m hold does not carry four 1.15 m pieces
+   * under one arm, so every hole costs the trip to the pile plus the trip to the hole
+   * — and the way back is the next breach's way out, which is why this method does not
+   * charge for it twice.
    *
-   * **É o custo que fez a conta virar.** Sem ele, o marujo fechava cinco rombos por
-   * minuto e nenhuma taxa de acerto plausível do jogador conseguia ultrapassá-lo: o
-   * casco inimigo se recuperava sozinho de qualquer estrago que não fosse
-   * instantâneo. Com a ida ao paiol, cada rombo custa perto de nove segundos, e a
-   * balança passou a pender para quem está acertando.
+   * **It is the cost that turned the arithmetic around.** Without it, the sailor
+   * closed five breaches a minute and no plausible player hit rate could outrun him:
+   * the enemy hull recovered on its own from any damage that was not instantaneous.
+   * With the trip to the magazine, every breach costs close to nine seconds, and the
+   * balance started tipping toward whoever is hitting.
    */
   private goToBreach(breach: Breach): void {
     const toLocker = planarDistance(this.spot, HOLD_LANDING);
@@ -319,40 +327,40 @@ export class Crew {
     this.walk = (toLocker + toBreach) / HOLD_WALK_SPEED;
   }
 
-  /** Manda o marujo a um ponto do porão e cobra o tempo de chegar lá. */
+  /** Sends the sailor to a point in the hold and charges the time to get there. */
   private goTo(target: THREE.Vector3): void {
     this.destination.copy(target);
     this.walk = planarDistance(this.spot, target) / HOLD_WALK_SPEED;
   }
 
   /**
-   * O rombo que ganha a tábua — e ele **não** é sempre o certo.
+   * The breach that gets the plank — and it is **not** always the right one.
    *
-   * A versão anterior devolvia o de maior vazão, sempre, com desempate pelo mais
-   * fundo. É a escolha ótima, e é exatamente por isso que estava errada: nenhum
-   * marujo tem um relatório de vazão por furo. O que ele tem é um porão escuro,
-   * água até o joelho e vários buracos esguichando ao mesmo tempo — ele vai no que
-   * chama mais a atenção, e às vezes esse não é o que mais está afundando o navio.
+   * The previous version returned the one with the highest inflow, always, breaking
+   * ties by depth. It is the optimal choice, and that is exactly why it was wrong: no
+   * sailor has a per-hole inflow report. What he has is a dark hold, water up to his
+   * knees and several holes spouting at once — he goes for whatever draws the most
+   * attention, and sometimes that is not the one sinking the ship fastest.
    *
-   * O sorteio é ponderado pela vazão, e o expoente é a perícia (`triage`):
+   * The draw is weighted by inflow, and the exponent is the skill (`triage`):
    *
-   * | capitão  | triage | rombo afogado vs. rombo seco |
-   * |----------|--------|------------------------------|
-   * | grumete  | 0,6    | 3× mais provável             |
-   * | corsário | 2,0    | 59× mais provável            |
-   * | lenda    | 5,0    | 26 000× — quase sempre o pior|
+   * | captain  | triage | drowned breach vs. dry breach |
+   * |----------|--------|-------------------------------|
+   * | deckhand | 0.6    | 3× more likely                |
+   * | corsair  | 2.0    | 59× more likely               |
+   * | legend   | 5.0    | 26,000× — almost always the worst |
    *
-   * Ou seja: a Lenda continua acertando a triagem quase todas as vezes, e é isso
-   * que mantém a esperteza dela intacta. O Grumete gasta tábua em buraco de amurada
-   * com frequência, que é como se perde uma chalupa de verdade.
+   * In other words: the Legend still gets the triage right nearly every time, and that
+   * is what keeps its sharpness intact. The Deckhand regularly spends a plank on a
+   * bulwark hole, which is how a real sloop gets lost.
    */
   private pickBreach(ship: Ship): Breach | null {
     const breaches = ship.damage.breaches;
     if (breaches.length === 0) return null;
 
-    // A escala é o pior esguicho da sala, e não um teto absoluto. Um homem no porão
-    // não mede litros por segundo: ele compara os buracos que está vendo, e o que
-    // decide é qual grita mais alto entre eles.
+    // The scale is the worst jet in the room, and not an absolute ceiling. A man in
+    // the hold does not measure liters per second: he compares the holes he can see,
+    // and what decides is which of them shouts loudest.
     let strongest = 0;
     for (const breach of breaches) strongest = Math.max(strongest, breach.inflow);
 
@@ -360,23 +368,23 @@ export class Crew {
     for (const breach of breaches) total += this.attention(breach, strongest);
     if (total <= 0) return breaches[0] ?? null;
 
-    // Roleta: um sorteio no total e uma varredura acumulando até passar dele.
+    // Roulette: one draw over the total and a sweep accumulating until it passes.
     let ticket = this.random() * total;
     for (const breach of breaches) {
       ticket -= this.attention(breach, strongest);
       if (ticket <= 0) return breach;
     }
 
-    // Só chega aqui por arredondamento no último rombo da lista.
+    // It only gets here through rounding on the list's last breach.
     return breaches[breaches.length - 1] ?? null;
   }
 
   /**
-   * O quanto um rombo chama a atenção de quem está no porão.
+   * How much a breach draws the attention of whoever is in the hold.
    *
-   * @param strongest a maior vazão entre os rombos abertos, que é a escala. Com o
-   *   porão seco ela é zero e todos os buracos ficam com o mesmo peso — que é o
-   *   certo: sem esguicho nenhum para comparar, um furo é tão visível quanto outro.
+   * @param strongest the highest inflow among the open breaches, which is the scale.
+   *   With the hold dry it is zero and every hole ends up with the same weight — which
+   *   is right: with no jet at all to compare, one hole is as visible as another.
    */
   private attention(breach: Breach, strongest: number): number {
     const jet = strongest > 1e-9 ? breach.inflow / strongest : 0;
@@ -385,11 +393,11 @@ export class Crew {
 }
 
 /**
- * Distância entre dois pontos do porão medida **no assoalho**.
+ * Distance between two points in the hold measured **on the floor**.
  *
- * A vertical fica de fora de propósito: o rombo pode estar rente à quilha ou no alto
- * do costado, e a diferença entre agachar e esticar o braço não é o que custa tempo
- * a quem atravessa um porão de dezesseis metros.
+ * The vertical is deliberately left out: the breach can be down by the keel or high
+ * on the planking, and the difference between crouching and reaching up is not what
+ * costs time to somebody crossing a sixteen-meter hold.
  */
 function planarDistance(a: THREE.Vector3, b: THREE.Vector3): number {
   return Math.hypot(b.x - a.x, b.z - a.z);
