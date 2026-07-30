@@ -13,6 +13,9 @@ screenshots/
 .impeccable/
 **/.impeccable/
 *.local
+# The agent's own instructions: they describe how I work, not how the game works,
+# so they follow the machine and not the repository.
+.claude/
 
 # Byproducts of the character bench: the Blender scripts' bytecode and the backup
 # Blender itself writes on save. Both regenerable.
