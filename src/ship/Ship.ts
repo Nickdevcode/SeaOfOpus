@@ -1,16 +1,15 @@
 /**
- * A Chalupa completa: o modelo 3D, o corpo rígido e todos os subsistemas.
+ * The complete Sloop: the 3D model, the rigid body and every subsystem.
  *
- * Esta classe não faz física nenhuma — ela **compõe**. Cada subsistema sabe
- * aplicar uma família de forças ao corpo e mais nada, e aqui só se define a
- * ordem em que eles falam. Quem quiser um navio inimigo instancia outro `Ship`;
- * quem quiser trocar o modelo de vela troca `SailSim` sem tocar no resto.
+ * This class does no physics at all — it **composes**. Each subsystem knows how to
+ * apply one family of forces to the body and nothing else, and all that is defined here
+ * is the order they speak in. Whoever wants an enemy ship instantiates another `Ship`;
+ * whoever wants to change the sail model swaps `SailSim` without touching the rest.
  *
- * A separação entre `fixedUpdate` e `syncModel` é a que importa: a física roda a
- * 60 Hz cravados e o desenho roda na taxa do monitor, então o `alpha` do
- * `Engine` interpola entre o passo anterior e o atual. Sem isso o navio treme
- * visivelmente em telas de 144 Hz, e nenhuma quantidade de suavização de câmera
- * esconde isso.
+ * The separation between `fixedUpdate` and `syncModel` is the one that matters: the
+ * physics runs at a fixed 60 Hz and the render runs at the monitor's rate, so `Engine`'s
+ * `alpha` interpolates between the previous step and the current one. Without it the
+ * ship visibly shakes on 144 Hz screens, and no amount of camera smoothing hides that.
  */
 
 import * as THREE from 'three';
@@ -28,102 +27,101 @@ import { createShip, type ShipAssets, type ShipModel, type ShipOptions } from '.
 import type { WaveField } from '../world/WaveField';
 
 /**
- * Centro de massa, em coordenadas locais. **Os dois valores são medidos, não
- * escolhidos** — ver a bancada `__game` em `main.ts`.
+ * Center of mass, in local coordinates. **Both values are measured, not chosen** — see
+ * the `__game` bench in `main.ts`.
  *
- * O `z` iguala o centro de carena deste casco (+0,91 m, medido pelo torque que a
- * flutuabilidade produz com o navio a direito). É o que um construtor faz de
- * verdade ao distribuir o lastro: casar o centro de gravidade com o de carena
- * para o navio flutuar sem cair de proa nem de popa.
+ * The `z` matches this hull's center of buoyancy (+0.91 m, measured from the torque the
+ * buoyancy produces with the ship upright). It is what a builder really does when
+ * distributing the ballast: marrying the center of gravity to the center of buoyancy so
+ * the ship floats without falling by the head or by the stern.
  *
- * O `y` é a altura, e é ela que decide se o navio é rijo ou tenro. Com o centro
- * de massa na linha d'água este casco dá GM ≈ 0,54 m, tenro demais — jogaria com
- * um período de 5,3 s, lento e enjoativo. Descendo o lastro para −0,55 m o GM
- * sobe para ~0,89 m e o período cai para ~4,2 s, que é o balanço curto e vivo de
- * um barco de 16 m.
+ * The `y` is the height, and it is what decides whether the ship is stiff or tender.
+ * With the center of mass at the waterline this hull gives GM ≈ 0.54 m, far too tender
+ * — it would roll with a 5.3 s period, slow and sickening. Lowering the ballast to
+ * −0.55 m takes the GM up to ~0.89 m and the period down to ~4.2 s, which is the short,
+ * lively roll of a 16 m boat.
  */
 const CENTER_OF_MASS = new THREE.Vector3(0, -0.55, 0.91);
 
 /**
- * Balas que o paiol carrega no começo da partida.
+ * Cannonballs the magazine carries at the start of the match.
  *
- * **160, e o número existe para nunca ser alcançado num duelo honesto.** Esta é a
- * terceira afinação deste campo, e as duas primeiras erraram pelo mesmo motivo:
- * tratavam o paiol como uma peça de balanceamento. Ele não é. Um duelo tem de ser
- * decidido por quem manobra e mira melhor — se ele termina porque um dos dois ficou
- * sem bala, o que a partida mediu foi a contabilidade do paiol, e não a briga.
+ * **160, and the number exists in order never to be reached in an honest duel.** This
+ * is this field's third tuning, and the first two missed for the same reason: they
+ * treated the magazine as a balancing knob. It is not one. A duel has to be decided by
+ * who maneuvers and aims better — if it ends because one of the two ran out of shot,
+ * what the match measured was the magazine's bookkeeping, and not the fight.
  *
- * Em 40, o capitão Lenda gastava tudo num alvo parado e o deixava em 59% de porão.
- * Em 80, ele afundava aquele alvo — mas com o serviço da peça passando a custar
- * 2,4 s por tiro (ver `Cannon.beginLoad` e `Gunner`), 80 voltaram a ser pouco: a
- * telemetria mostra o paiol zerando aos 240 s com o alvo em 74%. O limite estava
- * decidindo a partida de novo, e da pior forma — pelo relógio.
+ * At 40, the Legend captain spent everything on a stationary target and left it at 59%
+ * of hold. At 80, it sank that target — but with the gun's service coming to cost 2.4 s
+ * per shot (see `Cannon.beginLoad` and `Gunner`), 80 became too few again: the telemetry
+ * shows the magazine emptying at 240 s with the target at 74%. The limit was deciding
+ * the match again, and in the worst way — by the clock.
  *
- * 160 dão à Lenda perto de sete minutos de fogo ininterrupto, e um duelo não é
- * ininterrupto: ela passa boa parte dele fechando distância, reparando ou rompendo
- * contato. Ao jogador, que atira num ritmo bem mais folgado, dão um quarto de hora.
+ * 160 gives the Legend close to seven minutes of uninterrupted fire, and a duel is not
+ * uninterrupted: it spends much of it closing distance, repairing or breaking contact.
+ * For the player, who fires at a far more relaxed rhythm, it gives a quarter of an hour.
  *
- * **O teto continua existindo, e continua tendo função.** Tiro a esmo a 150 m custa
- * bala, e o paiol é a única coisa que cobra por isso. O que ele deixou de ser é o
- * que termina o combate — que é o que se quer também para o duelo online, onde dois
- * jogadores humanos consomem munição bem mais devagar que um bot.
+ * **The ceiling still exists, and it still has a job.** Wild shooting at 150 m costs
+ * shot, and the magazine is the only thing that charges for it. What it stopped being is
+ * what ends the fight — which is also what we want for the online duel, where two human
+ * players consume ammunition far more slowly than a bot.
  */
 export const MAGAZINE_SIZE = 160;
 
 /**
- * Tábuas que o paiol carrega no começo da partida.
+ * Planks the magazine carries at the start of the match.
  *
- * **48, e o número sai do paiol do outro lado.** É a mesma ideia das balas — um
- * recurso finito que faz tiro a esmo e reparo a esmo custarem alguma coisa —, só
- * que a conta de quantas tem de ser feita contra o que o inimigo consegue abrir,
- * e não copiada de lá.
+ * **48, and the number comes from the magazine on the other side.** It is the same idea
+ * as the cannonballs — a finite resource that makes wild shooting and wild repairing
+ * cost something — except the arithmetic for how many has to be done against what the
+ * enemy can open, and not copied from there.
  *
- * As 160 balas do inimigo compram cerca de 40 rombos (nem toda bala acerta, e as
- * que batem acima da linha d'água não alagam). Um tiro novo em cima de uma tábua
- * **arranca a tábua** e devolve o rombo, então alguns pontos do casco são pagos
- * duas vezes. Quarenta e oito cobre os rombos do caso normal e ainda sobra para
- * uma dúzia de remendos arrancados — o suficiente para nunca perder um duelo por
- * contabilidade, e pouco o bastante para tapar rombo de amurada que não alaga
- * deixar de ser de graça.
+ * The enemy's 160 balls buy about 40 breaches (not every ball hits, and the ones that
+ * strike above the waterline do not flood). A fresh shot on top of a plank **tears the
+ * plank off** and gives the breach back, so some parts of the hull are paid for twice.
+ * Forty-eight covers the normal case's breaches and still leaves room for a dozen torn
+ * patches — enough never to lose a duel to bookkeeping, and few enough that patching a
+ * bulwark breach that does not flood stops being free.
  *
- * O mesmo valor das balas foi considerado e não serve: com 160 tábuas o paiol
- * nunca esvazia, o contador não morde nunca, e a única coisa que a feature entrega
- * é um número na tela. Um limite que não limita é pior que limite nenhum, porque
- * custa a atenção do jogador sem cobrar nada dele.
+ * The same value as the cannonballs was considered and does not work: with 160 planks
+ * the magazine never empties, the counter never bites, and the only thing the feature
+ * delivers is a number on screen. A limit that does not limit is worse than no limit,
+ * because it costs the player's attention without charging them anything.
  */
 export const PLANK_LOCKER_SIZE = 48;
 
 /**
- * Raios de giração, em metros.
+ * Radii of gyration, in meters.
  *
- * Caturro e guinada usam 0,26 do comprimento e balanço 0,39 da boca — as regras
- * de bolso de arquitetura naval. O balanço pequeno é o que faz a chalupa rolar
- * rápido e curto nas ondas em vez de gingar como um navio grande.
+ * Pitch and yaw use 0.26 of the length and roll 0.39 of the beam — naval architecture's
+ * rules of thumb. The small roll radius is what makes the sloop roll fast and short on
+ * the waves instead of swaying like a big ship.
  */
 const GYRATION = new THREE.Vector3(4.16, 4.16, 1.95);
 
 /**
- * Massa adicionada por eixo local.
+ * Added mass per local axis.
  *
- * Deriva e arfagem empurram uma parede de água à frente e quase dobram a massa
- * efetiva; avanço mal chega a 5% porque o casco é afilado justamente nessa
- * direção. Ver a explicação longa em `ShipBody`.
+ * Sway and heave push a wall of water ahead of them and nearly double the effective
+ * mass; surge barely reaches 5% because the hull is fine in exactly that direction. See
+ * the long explanation in `ShipBody`.
  */
 const ADDED_MASS = new THREE.Vector3(1.9, 2.0, 1.06);
 
-/** O que pilota o navio. O jogador e a IA preenchem a mesma estrutura. */
+/** What flies the ship. The player and the AI fill in the same structure. */
 export interface ShipControls {
-  /** Taxa de giro do timão: -1 todo a bombordo, +1 todo a boreste. */
+  /** Rate of turn of the wheel: -1 hard to port, +1 hard to starboard. */
   wheel: number;
   /**
-   * Voltas de barra empurradas no cabrestante neste passo, em fração de volta.
+   * Turns of the bar pushed on the capstan this step, as a fraction of a turn.
    *
-   * Número, e não bandeira, porque suspender o ferro deixou de ser um botão
-   * segurado: quem recolhe **anda** em volta do cabrestante, e o que chega aqui
-   * é o quanto ele andou. Ver `Anchor.heave`.
+   * A number, and not a flag, because weighing the anchor stopped being a held button:
+   * whoever hauls **walks** around the capstan, and what arrives here is how far they
+   * walked. See `Anchor.heave`.
    */
   capstanTurns: number;
-  /** `true` enquanto alguém estiver na alavanca da bomba de porão. */
+  /** `true` while somebody is on the bilge pump's handle. */
   pumping: boolean;
 }
 
@@ -134,7 +132,7 @@ const _euler = new THREE.Euler();
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class Ship {
-  /** Nome do navio. É o mesmo `owner` que os tiros dele carregam. */
+  /** The ship's name. It is the same `owner` its shots carry. */
   readonly name: string;
   readonly model: ShipModel;
   readonly body: ShipBody;
@@ -142,45 +140,46 @@ export class Ship {
   readonly hullDrag: HullDrag;
   readonly rudder: Rudder;
   readonly sail: SailSim;
-  /** A bandeira do tope. Não faz força — é leitura de vento para quem olha. */
+  /** The masthead ensign. It applies no force — it is a wind reading for whoever looks. */
   readonly ensign: EnsignSim;
   readonly anchor: Anchor;
   readonly damage: ShipDamage;
-  /** `[0]` boreste, `[1]` bombordo — a mesma ordem do modelo. */
+  /** `[0]` starboard, `[1]` port — the same order as the model. */
   readonly cannons: readonly Cannon[];
 
   readonly controls: ShipControls = { wheel: 0, capstanTurns: 0, pumping: false };
 
   /**
-   * Balas no paiol. Carregar um canhão consome uma.
+   * Cannonballs in the magazine. Loading a cannon consumes one.
    *
-   * Não reabastece: o que o navio leva é a partida inteira, e é o que impede os
-   * dois lados de resolverem o duelo por volume de fogo. Com os ~2,4 s que o
-   * serviço completo de uma peça custa, dá para mais de seis minutos de fogo
-   * ininterrupto — folga suficiente para nunca ser o que decide, e teto suficiente
-   * para tiro a esmo custar. Ver `MAGAZINE_SIZE`.
+   * It does not resupply: what the ship carries is for the whole match, and it is what
+   * keeps the two sides from settling the duel by volume of fire. With the ~2.4 s a
+   * gun's full service costs, it is enough for over six minutes of uninterrupted fire —
+   * enough slack never to be what decides, and enough of a ceiling for wild shooting to
+   * cost. See `MAGAZINE_SIZE`.
    */
   cannonballs = MAGAZINE_SIZE;
 
   /**
-   * Tábuas no paiol. Fechar um rombo consome uma.
+   * Planks in the magazine. Closing a breach consumes one.
    *
-   * Como as balas, não reabastece: o que o navio leva é o que ele tem para a
-   * partida inteira. É o que dá peso à escolha de **qual** rombo tapar quando o
-   * casco está furado em cinco lugares e três deles estão acima da linha d'água.
+   * Like the cannonballs, it does not resupply: what the ship carries is what it has
+   * for the whole match. It is what gives weight to the choice of **which** breach to
+   * patch when the hull is holed in five places and three of them are above the
+   * waterline.
    */
   planks = PLANK_LOCKER_SIZE;
 
   /**
-   * Tiros disparados neste passo, à espera de quem os transforme em projétil.
-   * Quem consome esvazia a fila — o navio não guarda histórico.
+   * Shots fired this step, waiting for somebody to turn them into projectiles.
+   * Whoever consumes them empties the queue — the ship keeps no history.
    */
   readonly pendingShots: FireSolution[] = [];
 
-  /** Fração do volume de projeto submersa. 1 é o calado desenhado. */
+  /** Fraction of the design volume submerged. 1 is the drawn draft. */
   submersion = 1;
 
-  /** Peso, constante. Guardado pronto para não recalcular 60 vezes por segundo. */
+  /** Weight, constant. Kept ready so it is not recomputed 60 times a second. */
   private readonly weight = new THREE.Vector3();
 
   constructor(assets: ShipAssets, name = 'ship', options: ShipOptions = {}) {
@@ -189,7 +188,8 @@ export class Ship {
 
     this.buoyancy = new Buoyancy();
     this.body = new ShipBody({
-      // A massa vem da mesma tabela que gera o empuxo — ver `getDesignMass`.
+      // The mass comes from the same table that generates the buoyancy — see
+      // `getDesignMass`.
       mass: this.buoyancy.getDesignMass(),
       centerOfMass: CENTER_OF_MASS,
       gyration: GYRATION,
@@ -208,8 +208,8 @@ export class Ship {
   }
 
   /**
-   * Manda socar uma bala neste canhão. Devolve `false` se o paiol estiver vazio
-   * ou se a peça já tiver carga — quem chama usa isso para o retorno sonoro.
+   * Orders a ball rammed home in this cannon. Returns `false` if the magazine is empty
+   * or the gun already has a charge — the caller uses that for the audio feedback.
    */
   loadCannon(index: number): boolean {
     const cannon = this.cannons[index];
@@ -219,26 +219,26 @@ export class Ship {
     return true;
   }
 
-  /** `true` enquanto ainda houver tábua no paiol para pregar. */
+  /** `true` while there is still a plank in the magazine to nail. */
   get hasPlanks(): boolean {
     return this.planks > 0;
   }
 
   /**
-   * Prega tábua num rombo por `dt` segundos. Devolve `true` **no quadro em que o
-   * rombo fecha**, que é quando a tábua sai do paiol.
+   * Nails a plank over a breach for `dt` seconds. Returns `true` **on the frame the
+   * breach closes**, which is when the plank leaves the magazine.
    *
-   * O consumo acontece no fim, e não no começo, por dois motivos. O justo: quem
-   * solta o botão no meio do trabalho não perde a peça, e o progresso parcial que
-   * `ShipDamage` guarda continua valendo para a próxima tentativa. O prático: o
-   * reparo é interrompido o tempo todo — pela onda, pelo tiro que chega, pela
-   * bomba que precisa de alguém —, e cobrar adiantado transformaria cada
-   * interrupção numa multa.
+   * The consumption happens at the end, and not at the start, for two reasons. The fair
+   * one: whoever releases the button mid-work does not lose the piece, and the partial
+   * progress `ShipDamage` keeps still counts for the next attempt. The practical one:
+   * the repair is interrupted constantly — by the wave, by the incoming shot, by the
+   * pump that needs somebody — and charging up front would turn every interruption into
+   * a fine.
    *
-   * Existe aqui, e não em `ShipDamage`, porque o paiol é do navio e não do
-   * estrago: `ShipDamage` responde por rombos, alagamento e vazão, e não tem por
-   * que saber de logística. É o mesmo desenho de `loadCannon` — o subsistema faz
-   * o trabalho, o navio decide se há material para ele.
+   * It lives here, and not in `ShipDamage`, because the magazine belongs to the ship and
+   * not to the damage: `ShipDamage` answers for breaches, flooding and inflow, and has
+   * no business knowing about logistics. It is the same design as `loadCannon` — the
+   * subsystem does the work, the ship decides whether there is material for it.
    */
   patchBreach(breach: Breach, dt: number): boolean {
     if (!this.hasPlanks) return false;
@@ -247,33 +247,33 @@ export class Ship {
     return true;
   }
 
-  /** Velocidade sobre o fundo, em nós. */
+  /** Speed over the ground, in knots. */
   get knots(): number {
     return msToKnots(this.body.velocity.length());
   }
 
-  /** Avanço no referencial do navio, em m/s. Negativo é dar de ré. */
+  /** Surge in the ship's frame, in m/s. Negative is going astern. */
   get surge(): number {
     this.body.worldDirToLocal(this.body.velocity, _localVelocity);
     return -_localVelocity.z;
   }
 
-  /** Rumo em radianos, 0 = -Z do mundo. É para onde a proa aponta. */
+  /** Heading in radians, 0 = world -Z. It is where the bow points. */
   get heading(): number {
     _euler.setFromQuaternion(this.body.orientation, 'YXZ');
     return _euler.y;
   }
 
-  /** Posição da roda do timão, -1 a +1. O HUD desenha a partir disto. */
+  /** Position of the wheel, -1 to +1. The HUD draws from this. */
   get wheelPosition(): number {
     return this.rudder.wheelAngle / MAX_WHEEL;
   }
 
   /**
-   * Põe o navio n'água. `heading` em radianos, medido como `Ship.heading`.
+   * Puts the ship in the water. `heading` in radians, measured as `Ship.heading`.
    *
-   * A altura vem da própria onda naquele ponto, e não de `y = 0`: nascer no
-   * calado certo mas dentro de uma cava faria o navio quicar no primeiro passo.
+   * The height comes from the wave at that point, and not from `y = 0`: being born at
+   * the right draft but inside a trough would make the ship bounce on the first step.
    */
   spawn(x: number, z: number, heading: number, waves: WaveField): void {
     this.body.velocity.set(0, 0, 0);
@@ -301,17 +301,18 @@ export class Ship {
   }
 
   /**
-   * Um passo de física. A ordem é deliberada: primeiro os comandos, depois as
-   * forças (que só acumulam), e a integração por último — assim tudo que age
-   * neste passo enxerga exatamente o mesmo estado, sem um subsistema colher a
-   * velocidade que o anterior acabou de mudar.
+   * One physics step. The order is deliberate: the commands first, then the forces
+   * (which only accumulate), and the integration last — that way everything acting on
+   * this step sees exactly the same state, with no subsystem picking up the velocity the
+   * previous one has just changed.
    */
   /**
-   * Guarda a pose das peças móveis antes que alguém as mexa neste passo.
+   * Saves the moving parts' pose before anybody touches them on this step.
    *
-   * Roda no topo de `Match.fixedUpdate`, **antes** dos marujos, porque é o marujo
-   * (ou o artilheiro da máquina) quem mira e quem gira a roda — deixar a captura
-   * para `fixedUpdate` daria uma pose "anterior" já alterada. Ver `Cannon.beginStep`.
+   * It runs at the top of `Match.fixedUpdate`, **before** the sailors, because it is the
+   * sailor (or the machine's gunner) who aims and who turns the wheel — leaving the
+   * capture to `fixedUpdate` would give a "previous" pose that has already changed. See
+   * `Cannon.beginStep`.
    */
   beginStep(): void {
     this.rudder.beginStep();
@@ -319,39 +320,39 @@ export class Ship {
   }
 
   /**
-   * O passo do navio no lado que **não** simula.
+   * The ship's step on the side that does **not** simulate.
    *
-   * ⚠️ **Sem isto, a roda do timão não gira — e essa foi a queixa mais insistente
-   * do primeiro duelo em rede: "não consigo controlar o barco".** O caminho do
-   * comando tem três etapas, e só duas rodavam no cliente: o marujo assume o
-   * posto (roda), o marujo escreve `controls.wheel` (roda), e **alguém tem de
-   * integrar esse comando em ângulo de roda** — que é a primeira linha de
-   * `fixedUpdate`, e `fixedUpdate` é o caminho de quem simula. O comando era
-   * escrito e apagado no passo seguinte sem nunca virar movimento.
+   * ⚠️ **Without this, the wheel does not turn — and that was the most insistent
+   * complaint from the first networked duel: "I cannot control the boat".** The
+   * command's path has three stages, and only two ran on the client: the sailor takes
+   * the station (runs), the sailor writes `controls.wheel` (runs), and **somebody has to
+   * integrate that command into a wheel angle** — which is the first line of
+   * `fixedUpdate`, and `fixedUpdate` is the simulating side's path. The command was
+   * written and erased on the next step without ever becoming movement.
    *
-   * O efeito era pior do que "a roda não anda": o navio **virava**, porque o
-   * host recebia o comando e girava o leme de lá. Mas do lado de cá a roda ficava
-   * imóvel, as mãos do marujo ficavam imóveis (a pose delas é indexada pelo
-   * ângulo da roda) e o painel dizia `wheel 0%`. Todo o retorno imediato que
-   * existe para o jogador acreditar que ele está no comando estava desligado, e
-   * o único sinal que sobrava era o casco começando a guinar segundos depois —
-   * que é justamente o que se lê como "não respondeu".
+   * The effect was worse than "the wheel does not move": the ship **did turn**, because
+   * the host received the command and turned the rudder over there. But on this side the
+   * wheel stood still, the sailor's hands stood still (their pose is indexed by the
+   * wheel's angle) and the panel said `wheel 0%`. Every bit of immediate feedback that
+   * exists for the player to believe they are in command was switched off, and the only
+   * signal left was the hull starting to yaw seconds later — which is exactly what reads
+   * as "it did not respond".
    *
-   * O que roda aqui é só o que o cliente **prevê** ou **anima**: o leme, o
-   * cabrestante, a vela e a bandeira. Nada de empuxo, arrasto, contato ou
-   * alagamento — essas coisas chegam prontas no instantâneo, e simulá-las aqui
-   * seria abrir uma segunda verdade sobre o mesmo casco.
+   * What runs here is only what the client **predicts** or **animates**: the rudder, the
+   * capstan, the sail and the ensign. No buoyancy, drag, contact or flooding — those
+   * things arrive ready in the snapshot, and simulating them here would open a second
+   * truth about the same hull.
    */
   fixedUpdateRemote(dt: number, waves: WaveField): void {
-    // Integração pura de um comando grampeado: o host chega ao mesmo ângulo com
-    // a mesma entrada, e é isso que torna a predição do leme correta em vez de
-    // otimista.
+    // Pure integration of a clamped command: the host reaches the same angle with the
+    // same input, and that is what makes the rudder's prediction correct instead of
+    // optimistic.
     this.rudder.update(this.controls.wheel, dt);
     if (this.controls.capstanTurns > 0) this.anchor.heave(this.controls.capstanTurns);
 
-    // Pano: a vela e a bandeira leem a pose e o vento que a rede escreveu. A
-    // vela empurra o casco ao passar, e essa força não vai a lugar nenhum aqui —
-    // ver `ShipBody.clearForces`.
+    // Canvas: the sail and the ensign read the pose and the wind the network wrote.
+    // The sail pushes the hull as it passes, and that force goes nowhere here — see
+    // `ShipBody.clearForces`.
     this.sail.update(dt, this.body, waves);
     this.ensign.update(dt, this.sail.localWind);
     this.body.clearForces();
@@ -361,7 +362,7 @@ export class Ship {
     this.rudder.update(this.controls.wheel, dt);
     if (this.controls.capstanTurns > 0) this.anchor.heave(this.controls.capstanTurns);
 
-    // Gravidade primeiro, para o empuxo ter contra o que trabalhar.
+    // Gravity first, so the buoyancy has something to work against.
     this.body.applyForce(this.weight);
 
     const report = this.buoyancy.apply(this.body, waves);
@@ -370,17 +371,17 @@ export class Ship {
     this.hullDrag.apply(this.body, this.submersion);
     this.rudder.apply(this.body, this.submersion);
     this.sail.update(dt, this.body, waves);
-    // Depois da vela, e lendo o vento que ela acabou de medir: a bandeira não
-    // faz força nenhuma, mas tem de contar a mesma história sobre o vento.
+    // After the sail, and reading the wind it has just measured: the ensign applies no
+    // force at all, but it has to tell the same story about the wind.
     this.ensign.update(dt, this.sail.localWind);
     this.anchor.fixedUpdate(dt, this.body);
-    // O comando é por *quadro* e o alagamento roda por *passo*: repassar aqui é
-    // o que garante que a bomba tire o mesmo tanto de água a 30 ou a 144 fps.
+    // The command is per *frame* and the flooding runs per *step*: passing it on here
+    // is what guarantees the pump takes out the same amount of water at 30 or 144 fps.
     this.damage.pumping = this.controls.pumping;
     this.damage.fixedUpdate(dt, this.body, waves);
 
-    // Os canhões entram antes da integração porque o recuo é força como
-    // qualquer outra: quem dispara neste passo empurra o casco neste passo.
+    // The cannons come in before the integration because the recoil is force like any
+    // other: whoever fires on this step pushes the hull on this step.
     for (const cannon of this.cannons) {
       const shot = cannon.fixedUpdate(dt, this.body);
       if (shot) this.pendingShots.push(shot);
@@ -389,21 +390,22 @@ export class Ship {
     this.body.integrate(dt);
   }
 
-  /** Escreve a pose interpolada e a das peças móveis no modelo 3D. */
+  /** Writes the interpolated pose and the moving parts' into the 3D model. */
   syncModel(alpha: number): void {
     this.body.sampleOrigin(alpha, _origin, _rotation);
     this.model.root.position.copy(_origin);
     this.model.root.quaternion.copy(_rotation);
 
-    // A roda gira no próprio Z; o sinal negativo é o que faz "virar para a
-    // direita" ser sentido horário na visão de quem está ao leme.
+    // The wheel turns about its own Z; the negative sign is what makes "turning right"
+    // clockwise from the point of view of whoever is at the helm.
     const { previousWheelAngle, wheelAngle, previousRudderAngle, rudderAngle } = this.rudder;
     this.model.wheel.rotation.z =
       -(previousWheelAngle + (wheelAngle - previousWheelAngle) * alpha);
-    // A pá acompanha o leme direto: bordo de fuga a boreste desvia água para
-    // boreste, empurra a popa para bombordo e a proa vai para boreste. Estava
-    // negativo aqui, o que desenhava a pá apontando para o lado oposto ao da
-    // curva — errado no olho de quem sabe olhar, e invisível no de quem não.
+    // The blade follows the rudder directly: a trailing edge to starboard deflects
+    // water to starboard, pushes the stern to port and the bow goes to starboard. It
+    // was negative here, which drew the blade pointing to the opposite side of the turn
+    // — wrong to the eye of somebody who knows how to look, and invisible to everyone
+    // else.
     this.model.rudder.rotation.y =
       previousRudderAngle + (rudderAngle - previousRudderAngle) * alpha;
 
