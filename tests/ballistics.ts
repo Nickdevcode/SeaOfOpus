@@ -25,17 +25,17 @@ import { dragFactor, maxRange, solveElevation, stepBallistic } from '../src/comb
 import { BALL_MASS, BALL_RADIUS, MUZZLE_SPEED } from '../src/ship/Cannon';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -72,14 +72,14 @@ function integrateRange(speed: number, elevation: number, dragK: number, dt: num
 export function runBallisticsTests(): TestReport {
   const cases: TestCase[] = [];
 
-  function check(nome: string, medido: number, esperado: number, tolerancia: number, unidade: string): void {
-    const erro = medido - esperado;
+  function check(name: string, measured: number, expected: number, tolerance: number, unidade: string): void {
+    const error = measured - expected;
     cases.push({
-      nome,
-      medido: `${medido.toFixed(3)} ${unidade}`,
-      esperado: `${esperado.toFixed(3)} ${unidade}`,
-      erro: `${erro >= 0 ? '+' : ''}${erro.toFixed(3)} ${unidade} (tol. ±${tolerancia} ${unidade})`,
-      passou: Math.abs(erro) <= tolerancia,
+      name,
+      measured: `${measured.toFixed(3)} ${unidade}`,
+      expected: `${expected.toFixed(3)} ${unidade}`,
+      error: `${error >= 0 ? '+' : ''}${error.toFixed(3)} ${unidade} (tol. ±${tolerance} ${unidade})`,
+      passed: Math.abs(error) <= tolerance,
     });
   }
 
@@ -131,13 +131,13 @@ export function runBallisticsTests(): TestReport {
   const vacuumBest = vacuumRange(MUZZLE_SPEED, 45 * DEG);
   const dragBest = maxRange(MUZZLE_SPEED, dragK);
   cases.push({
-    nome: 'drag · maximum range < vacuum',
-    medido: `${dragBest.toFixed(1)} m`,
-    esperado: `< ${(vacuumBest * 0.75).toFixed(1)} m`,
-    erro: `${((1 - dragBest / vacuumBest) * 100).toFixed(1)}% lost`,
-    passou: dragBest < vacuumBest * 0.75 && dragBest > 100,
+    name: 'drag · maximum range < vacuum',
+    measured: `${dragBest.toFixed(1)} m`,
+    expected: `< ${(vacuumBest * 0.75).toFixed(1)} m`,
+    error: `${((1 - dragBest / vacuumBest) * 100).toFixed(1)}% lost`,
+    passed: dragBest < vacuumBest * 0.75 && dragBest > 100,
   });
 
-  const falhas = cases.filter((c) => !c.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((c) => !c.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }

@@ -38,17 +38,17 @@ import {
 } from '../src/ship/Cannon';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -84,14 +84,14 @@ function solveAim(sideYaw: number, direction: THREE.Vector3, out: AimAngles): Ai
 export function runAiTests(): TestReport {
   const cases: TestCase[] = [];
 
-  function check(nome: string, medido: number, esperado: number, tolerancia: number, unidade: string): void {
-    const erro = medido - esperado;
+  function check(name: string, measured: number, expected: number, tolerance: number, unidade: string): void {
+    const error = measured - expected;
     cases.push({
-      nome,
-      medido: `${medido.toFixed(4)} ${unidade}`,
-      esperado: `${esperado.toFixed(4)} ${unidade}`,
-      erro: `${erro >= 0 ? '+' : ''}${erro.toFixed(4)} ${unidade} (tol. ±${tolerancia} ${unidade})`,
-      passou: Math.abs(erro) <= tolerancia,
+      name,
+      measured: `${measured.toFixed(4)} ${unidade}`,
+      expected: `${expected.toFixed(4)} ${unidade}`,
+      error: `${error >= 0 ? '+' : ''}${error.toFixed(4)} ${unidade} (tol. ±${tolerance} ${unidade})`,
+      passed: Math.abs(error) <= tolerance,
     });
   }
 
@@ -144,11 +144,11 @@ export function runAiTests(): TestReport {
   const bearsAbeam = angles.bears;
 
   cases.push({
-    nome: 'arc · beam yes, bow no',
-    medido: `bow ${bearsAhead ? 'bears' : 'out'} · beam ${bearsAbeam ? 'bears' : 'out'}`,
-    esperado: 'bow out · beam bears',
-    erro: `stop ±${(TRAVERSE_LIMIT * RAD).toFixed(1)}°`,
-    passou: !bearsAhead && bearsAbeam,
+    name: 'arc · beam yes, bow no',
+    measured: `bow ${bearsAhead ? 'bears' : 'out'} · beam ${bearsAbeam ? 'bears' : 'out'}`,
+    expected: 'bow out · beam bears',
+    error: `stop ±${(TRAVERSE_LIMIT * RAD).toFixed(1)}°`,
+    passed: !bearsAhead && bearsAbeam,
   });
 
   // --- 4. the helmsman closes the loop with the right sign --------------------
@@ -215,16 +215,16 @@ export function runAiTests(): TestReport {
   ];
 
   for (const axis of axes) {
-    const valores = DIFFICULTY_ORDER.map(axis.read);
-    const inOrder = valores.every(
-      (v, i) => i === 0 || (axis.rises ? v > valores[i - 1]! : v < valores[i - 1]!),
+    const values = DIFFICULTY_ORDER.map(axis.read);
+    const inOrder = values.every(
+      (v, i) => i === 0 || (axis.rises ? v > values[i - 1]! : v < values[i - 1]!),
     );
     cases.push({
-      nome: `preset · ${axis.name} ${axis.rises ? 'rises' : 'falls'} with skill`,
-      medido: valores.join(' → '),
-      esperado: axis.rises ? 'strictly increasing' : 'strictly decreasing',
-      erro: inOrder ? '—' : 'out of order',
-      passou: inOrder,
+      name: `preset · ${axis.name} ${axis.rises ? 'rises' : 'falls'} with skill`,
+      measured: values.join(' → '),
+      expected: axis.rises ? 'strictly increasing' : 'strictly decreasing',
+      error: inOrder ? '—' : 'out of order',
+      passed: inOrder,
     });
   }
 
@@ -235,11 +235,11 @@ export function runAiTests(): TestReport {
   const MIN_SHIFT = 7;
   const shortestShift = Math.min(...DIFFICULTY_ORDER.map((id) => DIFFICULTIES[id].holdShift));
   cases.push({
-    nome: 'rotation · the hold shift fits one plank',
-    medido: `${shortestShift.toFixed(1)} s`,
-    esperado: `≥ ${MIN_SHIFT} s`,
-    erro: shortestShift >= MIN_SHIFT ? '—' : `${(MIN_SHIFT - shortestShift).toFixed(1)} s short`,
-    passou: shortestShift >= MIN_SHIFT,
+    name: 'rotation · the hold shift fits one plank',
+    measured: `${shortestShift.toFixed(1)} s`,
+    expected: `≥ ${MIN_SHIFT} s`,
+    error: shortestShift >= MIN_SHIFT ? '—' : `${(MIN_SHIFT - shortestShift).toFixed(1)} s short`,
+    passed: shortestShift >= MIN_SHIFT,
   });
 
   // The pump's floor has to sit **below** the alarm that sends the sailor down, with room
@@ -253,14 +253,14 @@ export function runAiTests(): TestReport {
     const { bilgeFloor, floodAlarm, label } = DIFFICULTIES[id];
     const margin = floodAlarm - bilgeFloor;
     cases.push({
-      nome: `hold · ${label} leaves the pump before their own alarm`,
-      medido: `floor ${(bilgeFloor * 100).toFixed(0)}% · alarm ${(floodAlarm * 100).toFixed(0)}%`,
-      esperado: `margin ≥ ${(MARGIN * 100).toFixed(0)} points`,
-      erro: margin >= MARGIN ? '—' : `${(margin * 100).toFixed(1)} points of margin`,
-      passou: margin >= MARGIN,
+      name: `hold · ${label} leaves the pump before their own alarm`,
+      measured: `floor ${(bilgeFloor * 100).toFixed(0)}% · alarm ${(floodAlarm * 100).toFixed(0)}%`,
+      expected: `margin ≥ ${(MARGIN * 100).toFixed(0)} points`,
+      error: margin >= MARGIN ? '—' : `${(margin * 100).toFixed(1)} points of margin`,
+      passed: margin >= MARGIN,
     });
   }
 
-  const falhas = cases.filter((c) => !c.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((c) => !c.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }

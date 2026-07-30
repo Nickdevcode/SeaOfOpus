@@ -44,17 +44,17 @@ import { encodeSnapshot } from '../src/net/snapshotCodec';
 import { createWorldState, decodeSnapshot } from '../src/net/WorldState';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -219,8 +219,8 @@ function makeMatch(breaches: number): Match {
 export function runSnapshotTests(): TestReport {
   const cases: TestCase[] = [];
 
-  const check = (nome: string, medido: string, esperado: string, ok: boolean, erro: string) => {
-    cases.push({ nome, medido, esperado, erro: ok ? '—' : erro, passou: ok });
+  const check = (name: string, measured: string, expected: string, ok: boolean, error: string) => {
+    cases.push({ name, measured, expected, error: ok ? '—' : error, passed: ok });
   };
 
   // --- 1. o mundo inteiro sobrevive à ida e volta ------------------------------
@@ -407,8 +407,8 @@ export function runSnapshotTests(): TestReport {
     );
   }
 
-  const falhas = cases.filter((entry) => !entry.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((entry) => !entry.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }
 
 /** Every field of every hull, measured against its quantity's tolerance. */
@@ -426,11 +426,11 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
       read.angularVelocity.distanceTo(source.body.angularVelocity) < TOLERANCE.angular;
 
     out.push({
-      nome: `hull ${slot} · pose, velocity and spin`,
-      medido: `pos ±${read.position.distanceTo(source.body.comPosition).toExponential(1)} m · vel ±${read.velocity.distanceTo(source.body.velocity).toExponential(1)} m/s`,
-      esperado: 'position ±1 mm · velocity ±5 mm/s',
-      erro: pose ? '—' : 'the hull arrives in a pose different from the one written',
-      passou: pose,
+      name: `hull ${slot} · pose, velocity and spin`,
+      measured: `pos ±${read.position.distanceTo(source.body.comPosition).toExponential(1)} m · vel ±${read.velocity.distanceTo(source.body.velocity).toExponential(1)} m/s`,
+      expected: 'position ±1 mm · velocity ±5 mm/s',
+      error: pose ? '—' : 'the hull arrives in a pose different from the one written',
+      passed: pose,
     });
 
     const gear =
@@ -443,11 +443,11 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
       Math.abs(read.sinkTime - source.damage.sinkTime) < 1e-3;
 
     out.push({
-      nome: `hull ${slot} · wheel, lockers, anchor and flooding`,
-      medido: `shot ${read.cannonballs} · plank ${read.planks} · anchor ${read.anchorState} ${read.anchorDeploy.toFixed(2)} · hold ${read.floodFraction.toFixed(3)}`,
-      esperado: `${source.cannonballs} · ${source.planks} · ${source.anchor.state} ${source.anchor.deploy} · ${source.damage.floodFraction}`,
-      erro: gear ? '—' : 'one of the ship states arrives wrong on the other side',
-      passou: gear,
+      name: `hull ${slot} · wheel, lockers, anchor and flooding`,
+      measured: `shot ${read.cannonballs} · plank ${read.planks} · anchor ${read.anchorState} ${read.anchorDeploy.toFixed(2)} · hold ${read.floodFraction.toFixed(3)}`,
+      expected: `${source.cannonballs} · ${source.planks} · ${source.anchor.state} ${source.anchor.deploy} · ${source.damage.floodFraction}`,
+      error: gear ? '—' : 'one of the ship states arrives wrong on the other side',
+      passed: gear,
     });
 
     let guns = true;
@@ -462,11 +462,11 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
         Math.abs(b.recoil - a.recoil) < TOLERANCE.byte;
     }
     out.push({
-      nome: `hull ${slot} · both guns (aim, charge and recoil)`,
-      medido: `${read.cannons.map((c) => `${c.state} ${c.traverse.toFixed(4)}`).join(' | ')}`,
-      esperado: `${source.cannons.map((c) => `${c.state} ${c.traverse.toFixed(4)}`).join(' | ')}`,
-      erro: guns ? '—' : 'the gun on the other side points where it is not pointing',
-      passou: guns,
+      name: `hull ${slot} · both guns (aim, charge and recoil)`,
+      measured: `${read.cannons.map((c) => `${c.state} ${c.traverse.toFixed(4)}`).join(' | ')}`,
+      expected: `${source.cannons.map((c) => `${c.state} ${c.traverse.toFixed(4)}`).join(' | ')}`,
+      error: guns ? '—' : 'the gun on the other side points where it is not pointing',
+      passed: guns,
     });
 
     let damage = read.breaches?.length === source.damage.breaches.length;
@@ -492,11 +492,11 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
     }
 
     out.push({
-      nome: `hull ${slot} · open breaches and nailed planks`,
-      medido: `${read.breaches?.length} breaches · ${read.patches?.length} planks`,
-      esperado: `${source.damage.breaches.length} · ${source.damage.patches.length}, with position, area and repair`,
-      erro: damage ? '—' : 'the enemy hull tells a different story from the true one',
-      passou: damage,
+      name: `hull ${slot} · open breaches and nailed planks`,
+      measured: `${read.breaches?.length} breaches · ${read.patches?.length} planks`,
+      expected: `${source.damage.breaches.length} · ${source.damage.patches.length}, with position, area and repair`,
+      error: damage ? '—' : 'the enemy hull tells a different story from the true one',
+      passed: damage,
     });
   }
 
@@ -533,11 +533,11 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
       read.inWater === source.inWater;
 
     out.push({
-      nome: `sailor ${slot} · position, gaze, station and body state`,
-      medido: `"${read.station}" gun ${read.cannonIndex} · ground ${read.grounded} ladder ${read.onLadder} capstan ${read.atCapstan} plank ${read.patching} sea ${read.inWater}`,
-      esperado: `"${source.station}" gun ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan} ${crewman.interaction.patching} ${source.inWater}`,
-      erro: ok ? '—' : 'the sailor on the other side is in a different place, station or pose',
-      passou: ok,
+      name: `sailor ${slot} · position, gaze, station and body state`,
+      measured: `"${read.station}" gun ${read.cannonIndex} · ground ${read.grounded} ladder ${read.onLadder} capstan ${read.atCapstan} plank ${read.patching} sea ${read.inWater}`,
+      expected: `"${source.station}" gun ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan} ${crewman.interaction.patching} ${source.inWater}`,
+      error: ok ? '—' : 'the sailor on the other side is in a different place, station or pose',
+      passed: ok,
     });
 
     // And one case just for the heading, because the defect it covers is invisible inside
@@ -546,11 +546,11 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
     // the opponent with his head stuck at 187.7° while weighing the anchor — and nothing,
     // not a `NaN` nor an overflow, would say that was what happened.
     out.push({
-      nome: `sailor ${slot} · a heading out of range survives as the equivalent angle`,
-      medido: `${source.yaw.toFixed(4)} rad → ${read.yaw.toFixed(4)} rad · error ${yawError.toExponential(1)}`,
-      esperado: `${wrapAngle(source.yaw).toFixed(4)} rad (±${TOLERANCE.angle})`,
-      erro: yawError < TOLERANCE.angle ? '—' : 'the heading saturated on the wire: more than one turn does not fit the `i16` at this scale',
-      passou: yawError < TOLERANCE.angle,
+      name: `sailor ${slot} · a heading out of range survives as the equivalent angle`,
+      measured: `${source.yaw.toFixed(4)} rad → ${read.yaw.toFixed(4)} rad · error ${yawError.toExponential(1)}`,
+      expected: `${wrapAngle(source.yaw).toFixed(4)} rad (±${TOLERANCE.angle})`,
+      error: yawError < TOLERANCE.angle ? '—' : 'the heading saturated on the wire: more than one turn does not fit the `i16` at this scale',
+      passed: yawError < TOLERANCE.angle,
     });
   }
 
@@ -587,11 +587,11 @@ function eventCases(match: Match, world: ReturnType<typeof createWorldState>): T
 
   return [
     {
-      nome: 'events · all five types, in order and with their fields',
-      medido: `${read.length} events: ${read.map((e) => e.kind).join(', ')}`,
-      esperado: `${source.length}: ${source.map((e) => e.kind).join(', ')}`,
-      erro: ok ? '—' : 'one event type does not cross, and takes the following ones with it',
-      passou: ok,
+      name: 'events · all five types, in order and with their fields',
+      measured: `${read.length} events: ${read.map((e) => e.kind).join(', ')}`,
+      expected: `${source.length}: ${source.map((e) => e.kind).join(', ')}`,
+      error: ok ? '—' : 'one event type does not cross, and takes the following ones with it',
+      passed: ok,
     },
   ];
 }

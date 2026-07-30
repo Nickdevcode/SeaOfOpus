@@ -35,17 +35,17 @@ import {
 import { decodeInput, encodeInput } from '../src/net/snapshotCodec';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -328,11 +328,11 @@ export function runNetClockTests(): TestReport {
     const run = simulate(new GuestClock(), latency);
     const rate = run.lateStarves / run.lateConsumed;
     cases.push({
-      nome: `corrected clock · ${latency} steps of network`,
-      medido: `${run.lateStarves} starvations in ${run.lateConsumed} steps (${(rate * 100).toFixed(1)}%)`,
-      esperado: '< 5% after settling',
-      erro: rate < 0.05 ? '—' : 'the host goes on simulating with no command from the other side',
-      passou: rate < 0.05,
+      name: `corrected clock · ${latency} steps of network`,
+      measured: `${run.lateStarves} starvations in ${run.lateConsumed} steps (${(rate * 100).toFixed(1)}%)`,
+      expected: '< 5% after settling',
+      error: rate < 0.05 ? '—' : 'the host goes on simulating with no command from the other side',
+      passed: rate < 0.05,
     });
   }
 
@@ -353,20 +353,20 @@ export function runNetClockTests(): TestReport {
     const run = simulate(new DriftingClock(), 3);
     const lost = run.stamped - run.delivered;
     cases.push({
-      nome: 'stitching · a correcting clock eats no command',
-      medido: `${lost} presses lost out of ${run.stamped}`,
-      esperado: '0 — the window stitches gap and duplicate',
-      erro: lost === 0 ? '—' : 'every clock correction costs the player one command',
-      passou: lost === 0,
+      name: 'stitching · a correcting clock eats no command',
+      measured: `${lost} presses lost out of ${run.stamped}`,
+      expected: '0 — the window stitches gap and duplicate',
+      error: lost === 0 ? '—' : 'every clock correction costs the player one command',
+      passed: lost === 0,
     });
 
     const rate = run.lateStarves / run.lateConsumed;
     cases.push({
-      nome: 'stitching · a correcting clock causes no starvation',
-      medido: `${run.lateStarves} starvations in ${run.lateConsumed} steps (${(rate * 100).toFixed(1)}%)`,
-      esperado: '< 2% — with no gap there is nothing to be missing',
-      erro: rate < 0.02 ? '—' : 'the clock gap became starvation, and starvation pushes the lead up',
-      passou: rate < 0.02,
+      name: 'stitching · a correcting clock causes no starvation',
+      measured: `${run.lateStarves} starvations in ${run.lateConsumed} steps (${(rate * 100).toFixed(1)}%)`,
+      expected: '< 2% — with no gap there is nothing to be missing',
+      error: rate < 0.02 ? '—' : 'the clock gap became starvation, and starvation pushes the lead up',
+      passed: rate < 0.02,
     });
   }
 
@@ -398,11 +398,11 @@ export function runNetClockTests(): TestReport {
       inTheGap.pressed === InputBit.Fire;
 
     cases.push({
-      nome: 'queue · a one-step gap uses the next command',
-      medido: `starvations ${gap.starves} · applied tick ${gap.appliedTick} · pressed ${inTheGap.pressed}`,
-      esperado: 'starvations 0 · tick 3 · the edge preserved',
-      erro: closed ? '—' : 'the right command was in the queue and got swapped for a repeat',
-      passou: closed,
+      name: 'queue · a one-step gap uses the next command',
+      measured: `starvations ${gap.starves} · applied tick ${gap.appliedTick} · pressed ${inTheGap.pressed}`,
+      expected: 'starvations 0 · tick 3 · the edge preserved',
+      error: closed ? '—' : 'the right command was in the queue and got swapped for a repeat',
+      passed: closed,
     });
   }
 
@@ -420,14 +420,14 @@ export function runNetClockTests(): TestReport {
     jump.consume(1);
 
     cases.push({
-      nome: 'queue · a command from a distant future waits its turn',
-      medido: `starvations ${jump.starves} · applied ${jump.appliedTick}`,
-      esperado: 'starvations 1 · applied -1 (repeated)',
-      erro:
+      name: 'queue · a command from a distant future waits its turn',
+      measured: `starvations ${jump.starves} · applied ${jump.appliedTick}`,
+      expected: 'starvations 1 · applied -1 (repeated)',
+      error:
         jump.starves === 1 && jump.appliedTick === -1
           ? '—'
           : 'a command half a second ahead was applied now',
-      passou: jump.starves === 1 && jump.appliedTick === -1,
+      passed: jump.starves === 1 && jump.appliedTick === -1,
     });
   }
 
@@ -436,11 +436,11 @@ export function runNetClockTests(): TestReport {
   const broken = simulate(new BrokenClock(), 3);
   const brokenRate = broken.starves / broken.consumed;
   cases.push({
-    nome: 'drifting clock · reproduces the bug',
-    medido: `${broken.starves} starvations (${(brokenRate * 100).toFixed(1)}%)`,
-    esperado: '> 50% — it really does have to fail',
-    erro: brokenRate > 0.5 ? '—' : 'the test is no longer reproducing the defect',
-    passou: brokenRate > 0.5,
+    name: 'drifting clock · reproduces the bug',
+    measured: `${broken.starves} starvations (${(brokenRate * 100).toFixed(1)}%)`,
+    expected: '> 50% — it really does have to fail',
+    error: brokenRate > 0.5 ? '—' : 'the test is no longer reproducing the defect',
+    passed: brokenRate > 0.5,
   });
 
   // --- 3. the codec preserves the frame ---------------------------------------
@@ -479,14 +479,14 @@ export function runNetClockTests(): TestReport {
     Math.abs(back.moveY - original.moveY) < 0.01;
 
   cases.push({
-    nome: 'codec · the round trip preserves the command',
-    medido: `bits ${exact ? 'exact' : 'WRONG'} · delta ±${lookError.toExponential(1)} · gaze ±${viewError.toExponential(1)} rad`,
-    esperado: 'exact bits · both ±1e-4 rad',
-    erro:
+    name: 'codec · the round trip preserves the command',
+    measured: `bits ${exact ? 'exact' : 'WRONG'} · delta ±${lookError.toExponential(1)} · gaze ±${viewError.toExponential(1)} rad`,
+    expected: 'exact bits · both ±1e-4 rad',
+    error:
       exact && lookError < 1e-4 && viewError < 1e-4
         ? '—'
         : 'the command arrives different from how it left',
-    passou: exact && lookError < 1e-4 && viewError < 1e-4,
+    passed: exact && lookError < 1e-4 && viewError < 1e-4,
   });
 
   // --- 4b. a whole turn does not overflow the scale ----------------------------
@@ -502,11 +502,11 @@ export function runNetClockTests(): TestReport {
     Math.atan2(Math.sin(turns[0]!.yaw - spun.yaw), Math.cos(turns[0]!.yaw - spun.yaw)),
   );
   cases.push({
-    nome: 'codec · a heading past one turn points the same way',
-    medido: `${spun.yaw} rad → ${turns[0]!.yaw.toFixed(4)} rad (${equivalent.toExponential(1)} of angular difference)`,
-    esperado: '< 1e-4 rad',
-    erro: equivalent < 1e-4 ? '—' : 'the heading saturates and the head of the opponent sticks in a corner',
-    passou: equivalent < 1e-4,
+    name: 'codec · a heading past one turn points the same way',
+    measured: `${spun.yaw} rad → ${turns[0]!.yaw.toFixed(4)} rad (${equivalent.toExponential(1)} of angular difference)`,
+    expected: '< 1e-4 rad',
+    error: equivalent < 1e-4 ? '—' : 'the heading saturates and the head of the opponent sticks in a corner',
+    passed: equivalent < 1e-4,
   });
 
   // --- 4. starvation repeats properly ------------------------------------------
@@ -529,17 +529,17 @@ export function runNetClockTests(): TestReport {
     repeated.pressed === 0 &&
     repeated.lookX === 0;
   cases.push({
-    nome: 'starvation · repeats the held, forgets the edge',
-    medido: `held ${repeated.held} · pressed ${repeated.pressed} · look ${repeated.lookX}`,
-    esperado: 'held kept · pressed 0 · look 0',
-    erro: policyOk ? '—' : 'a repeated edge becomes a phantom command',
-    passou: policyOk,
+    name: 'starvation · repeats the held, forgets the edge',
+    measured: `held ${repeated.held} · pressed ${repeated.pressed} · look ${repeated.lookX}`,
+    expected: 'held kept · pressed 0 · look 0',
+    error: policyOk ? '—' : 'a repeated edge becomes a phantom command',
+    passed: policyOk,
   });
 
   cases.push(...renderClockCases());
 
-  const falhas = cases.filter((c) => !c.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((c) => !c.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }
 
 // --- the render clock ----------------------------------------------------------
@@ -555,9 +555,9 @@ export function runNetClockTests(): TestReport {
  * @param delay render delay in steps, counted from the newest snapshot.
  */
 function simulateRender(delay: number): {
-  congelados: number;
-  maiorAvanco: number;
-  menorAvanco: number;
+  frozenSteps: number;
+  maxAdvance: number;
+  minAdvance: number;
   total: number;
 } {
   const TICKS = 600;
@@ -567,13 +567,13 @@ function simulateRender(delay: number): {
   let fromTick = 0;
   let toTick = 0;
   let hostTick = 0;
-  let temPar = false;
-  let comecou = false;
-  let anterior = -1;
+  let hasPair = false;
+  let started = false;
+  let previousFactor = -1;
 
-  let congelados = 0;
-  let maiorAvanco = 0;
-  let menorAvanco = Number.POSITIVE_INFINITY;
+  let frozenSteps = 0;
+  let maxAdvance = 0;
+  let minAdvance = Number.POSITIVE_INFINITY;
   let total = 0;
 
   for (let step = 0; step < TICKS; step++) {
@@ -584,23 +584,23 @@ function simulateRender(delay: number): {
     if (hostTick % SNAPSHOT_EVERY === 0) {
       if (toTick > 0) {
         fromTick = toTick;
-        temPar = true;
+        hasPair = true;
       }
       toTick = hostTick;
-      if (!comecou) {
-        comecou = true;
+      if (!started) {
+        started = true;
         hostEstimate = hostTick;
       } else {
         hostEstimate = correctHostEstimate(hostEstimate, hostTick);
       }
     }
-    if (!comecou) continue;
+    if (!started) continue;
 
     hostEstimate = advanceHostEstimate(hostEstimate);
-    const t = temPar ? interpolationFactor(hostEstimate - delay, fromTick, toTick) : 1;
+    const t = hasPair ? interpolationFactor(hostEstimate - delay, fromTick, toTick) : 1;
 
     if (step < WARMUP) {
-      anterior = t;
+      previousFactor = t;
       continue;
     }
 
@@ -609,16 +609,16 @@ function simulateRender(delay: number): {
     // goes back to the start of the new interval), and that is normal — what counts as a
     // freeze is it not moving from one step to the next, and what counts as advance is
     // only what happens within one pair.
-    const avanco = t - anterior;
-    if (Math.abs(avanco) < 1e-9) congelados++;
-    else if (avanco > 0) {
-      maiorAvanco = Math.max(maiorAvanco, avanco);
-      menorAvanco = Math.min(menorAvanco, avanco);
+    const advance = t - previousFactor;
+    if (Math.abs(advance) < 1e-9) frozenSteps++;
+    else if (advance > 0) {
+      maxAdvance = Math.max(maxAdvance, advance);
+      minAdvance = Math.min(minAdvance, advance);
     }
-    anterior = t;
+    previousFactor = t;
   }
 
-  return { congelados, maiorAvanco, menorAvanco, total };
+  return { frozenSteps, maxAdvance, minAdvance, total };
 }
 
 function renderClockCases(): TestCase[] {
@@ -629,14 +629,14 @@ function renderClockCases(): TestCase[] {
   // snapshots, the render target falls **before** the older of the two you have in hand,
   // the factor lives clamped at zero and the pose only changes when a packet arrives. The
   // client's world starts running at fifteen frames per second.
-  const corrigido = simulateRender(SNAPSHOT_EVERY);
-  const taxaCongelada = corrigido.congelados / corrigido.total;
+  const corrected = simulateRender(SNAPSHOT_EVERY);
+  const frozenRate = corrected.frozenSteps / corrected.total;
   cases.push({
-    nome: 'render · the pose advances on every step',
-    medido: `${corrigido.congelados} frozen steps out of ${corrigido.total} (${(taxaCongelada * 100).toFixed(1)}%)`,
-    esperado: '< 5% — the picture does not freeze between snapshots',
-    erro: taxaCongelada < 0.05 ? '—' : 'the world of the client runs at the packet rate, in lurches',
-    passou: taxaCongelada < 0.05,
+    name: 'render · the pose advances on every step',
+    measured: `${corrected.frozenSteps} frozen steps out of ${corrected.total} (${(frozenRate * 100).toFixed(1)}%)`,
+    expected: '< 5% — the picture does not freeze between snapshots',
+    error: frozenRate < 0.05 ? '—' : 'the world of the client runs at the packet rate, in lurches',
+    passed: frozenRate < 0.05,
   });
 
   // --- 6. the old delay has to fail --------------------------------------------
@@ -654,14 +654,14 @@ function renderClockCases(): TestCase[] {
   // exactly what happened when it sat glued to the measured value, first at 50% and then at
   // 25%, and the case started breaking on every tweak to the correction constant without
   // anything real having changed.
-  const antigo = simulateRender(6);
-  const taxaAntiga = antigo.congelados / antigo.total;
+  const old = simulateRender(6);
+  const oldRate = old.frozenSteps / old.total;
   cases.push({
-    nome: 'render · a six-step delay reproduces the bug',
-    medido: `${antigo.congelados} frozen steps (${(taxaAntiga * 100).toFixed(1)}%)`,
-    esperado: '> 10% — it really does have to fail',
-    erro: taxaAntiga > 0.1 ? '—' : 'the test is no longer reproducing the defect',
-    passou: taxaAntiga > 0.1,
+    name: 'render · a six-step delay reproduces the bug',
+    measured: `${old.frozenSteps} frozen steps (${(oldRate * 100).toFixed(1)}%)`,
+    expected: '> 10% — it really does have to fail',
+    error: oldRate > 0.1 ? '—' : 'the test is no longer reproducing the defect',
+    passed: oldRate > 0.1,
   });
 
   // --- 7. and it advances at a constant speed ----------------------------------
@@ -675,28 +675,28 @@ function renderClockCases(): TestCase[] {
   //
   // What gets measured is the ratio between the largest and the smallest advance of the
   // factor within one pair. In steady state it has to be practically 1.
-  const variacao = corrigido.maiorAvanco / corrigido.menorAvanco;
+  const variation = corrected.maxAdvance / corrected.minAdvance;
   cases.push({
-    nome: 'render · the speed of the world does not oscillate',
-    medido: `advance between ${corrigido.menorAvanco.toFixed(4)} and ${corrigido.maiorAvanco.toFixed(4)} (${((variacao - 1) * 100).toFixed(1)}% of oscillation)`,
-    esperado: '< 2% — constant speed between packets',
-    erro: variacao < 1.02 ? '—' : 'the world speeds up and slows down on every packet: that is the judder',
-    passou: variacao < 1.02,
+    name: 'render · the speed of the world does not oscillate',
+    measured: `advance between ${corrected.minAdvance.toFixed(4)} and ${corrected.maxAdvance.toFixed(4)} (${((variation - 1) * 100).toFixed(1)}% of oscillation)`,
+    expected: '< 2% — constant speed between packets',
+    error: variation < 1.02 ? '—' : 'the world speeds up and slows down on every packet: that is the judder',
+    passed: variation < 1.02,
   });
 
   // --- 8. the estimate chases the host without jumping -------------------------
   // A late packet cannot pull the phase all at once: the jump would come in as a lurch in
   // the world's time. And too large a deviation is not drift — there jumping is right,
   // because catching up a fifth at a time would take minutes.
-  const suave = correctHostEstimate(1000, 1002);
-  const salto = correctHostEstimate(1000, 1200);
-  const suaveOk = suave > 1000 && suave < 1000.5;
+  const gentle = correctHostEstimate(1000, 1002);
+  const jumped = correctHostEstimate(1000, 1200);
+  const gentleOk = gentle > 1000 && gentle < 1000.5;
   cases.push({
-    nome: 'render · the phase corrects gradually, and jumps only on the absurd',
-    medido: `deviation of 2 → +${(suave - 1000).toFixed(2)} · deviation of 200 → ${salto}`,
-    esperado: 'partial on the small · direct on the large',
-    erro: suaveOk && salto === 1200 ? '—' : 'the phase correction is not graduated',
-    passou: suaveOk && salto === 1200,
+    name: 'render · the phase corrects gradually, and jumps only on the absurd',
+    measured: `deviation of 2 → +${(gentle - 1000).toFixed(2)} · deviation of 200 → ${jumped}`,
+    expected: 'partial on the small · direct on the large',
+    error: gentleOk && jumped === 1200 ? '—' : 'the phase correction is not graduated',
+    passed: gentleOk && jumped === 1200,
   });
 
   return cases;

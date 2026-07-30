@@ -125,17 +125,17 @@ import { MAST_LADDER } from '../src/ship/ShipParts';
 import type { WaveField } from '../src/world/WaveField';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -517,15 +517,15 @@ function remoteWalkCycle(speed: number, seconds: number, dt = 1 / 240): number {
 export function runLocomotionTests(): TestReport {
   const cases: TestCase[] = [];
 
-  function check(nome: string, medido: number, esperado: number, tolerancia: number,
+  function check(name: string, measured: number, expected: number, tolerance: number,
                  unidade: string): void {
-    const erro = Math.abs(medido - esperado);
+    const error = Math.abs(measured - expected);
     cases.push({
-      nome,
-      medido: `${medido.toFixed(4)} ${unidade}`,
-      esperado: `${esperado.toFixed(4)} ${unidade}`,
-      erro: erro.toFixed(5),
-      passou: erro <= tolerancia,
+      name,
+      measured: `${measured.toFixed(4)} ${unidade}`,
+      expected: `${expected.toFixed(4)} ${unidade}`,
+      error: error.toFixed(5),
+      passed: error <= tolerance,
     });
   }
 
@@ -638,9 +638,9 @@ export function runLocomotionTests(): TestReport {
   check('the landing starts at full weight', firstFrame, 1, 0.05, '');
   check('the landing ends together with the clip', landing.land, 0, 1e-9, '');
 
-  // 13. Agarrar a escada tira os pés do chão sem que ninguém esteja voando. É o
-  //     caso que `settle` cobre: alimentar `update` com `grounded` ali faria o
-  //     personagem aterrissar no ar, a nove metros do convés.
+  // 13. Grabbing the ladder takes the feet off the floor without anyone flying. It is the
+  //     case `settle` covers: feeding `update` with `grounded` there would make the
+  //     character land in mid-air, nine meters above the deck.
   const ladder = new JumpClock();
   for (let t = 0; t < 0.3; t += 1 / 60) ladder.update(1 / 60, -JUMP_SPEED, false);
   for (let t = 0; t < 0.5; t += 1 / 60) ladder.settle(1 / 60);
@@ -1289,100 +1289,100 @@ export function runLocomotionTests(): TestReport {
       straight > ERROR_IGNORE ? 1 : 0, 1, 0, '');
     check('how many times above', straight / ERROR_IGNORE, 7.042, 0.01, '×');
 
-    // Guinando, ele cresce com o raio — que é o que o cenário produz sozinho: a
-    // 2,6 m/s o náufrago está 26 m atrás em dez segundos, e o resgate só abre aos
-    // cinco.
-    check('a 26 m e meia guinada, o viés passa do teleporte legítimo',
+    // Yawing, it grows with the radius — which is what the scenario produces on its own:
+    // at 2.6 m/s the castaway is 26 m behind in ten seconds, and the rescue only opens at
+    // five.
+    check('at 26 m and half a yaw, the bias passes the legitimate teleport',
       bias(26, 0.4, 13) > ERROR_SNAP ? 1 : 0, 1, 0, '');
-    check('e passa cedo: segundos de deriva até cruzar esse limiar',
-      // Raio em que o viés cruza `ERROR_SNAP`, dividido pela velocidade do navio.
+    check('and it passes early: seconds of drift before crossing that threshold',
+      // The radius at which the bias crosses `ERROR_SNAP`, divided by the ship's speed.
       (() => {
         for (let r = 0; r <= 200; r += 0.05) if (bias(r, 0.4, 13) >= ERROR_SNAP) return r;
         return Infinity;
       })() / SHIP_SPEED,
       6.31, 0.05, ' s');
 
-    // ⚠️ **E a conta em mundo não tem viés nenhum — é essa a correção.** A posição
-    // do host é reconstruída com a pose do casco que veio **no mesmo pacote**, que
-    // é a mesma que ele usou; a pose atrasada que o guest tem em mãos não entra na
-    // conta e por isso não pode contaminá-la. Zero exato, em qualquer guinada e a
-    // qualquer distância. Ver `GuestSession.authoritativePosition`.
+    // ⚠️ **And the computation in world space has no bias at all — that is the fix.** The
+    // host's position is rebuilt with the hull pose that came **in the same packet**, which
+    // is the same one it used; the delayed pose the guest has in hand does not enter the
+    // computation and therefore cannot contaminate it. Exactly zero, at any yaw and any
+    // distance. See `GuestSession.authoritativePosition`.
     let worstWorld = 0;
     for (const omega of [0, 0.1, 0.2, 0.4]) {
       for (const distance of [0, 5, 26, 52, 120]) {
         const swimmer = new THREE.Vector3(0, 0, distance);
         const local = new THREE.Vector3();
-        // O host deriva o `local` com a pose dele...
+        // The host derives the `local` with its own pose...
         poseAt(0, omega);
         body.worldToLocal(swimmer, local);
-        // ...e o guest o traz de volta para mundo com **a mesma** pose, que chegou
-        // no instantâneo. O que ele tem em `ship.body` fica de fora de propósito.
+        // ...and the guest brings it back to world space with **the same** pose, which
+        // arrived in the snapshot. What it has in `ship.body` is left out on purpose.
         const rebuilt = new THREE.Vector3();
         body.localToWorld(local, rebuilt);
         worstWorld = Math.max(worstWorld, rebuilt.distanceTo(swimmer));
       }
     }
-    check('comparando em mundo, o viés desaparece por completo',
+    check('comparing in world space, the bias disappears entirely',
       worstWorld, 0, 1e-9, ' m');
   }
 
-  // 40. **O desvio de reconciliação chega à tela.**
+  // 40. **The reconciliation offset reaches the screen.**
   //
-  //     Este caso existe por causa de um defeito que só um `grep` revelava: o
-  //     desvio era calculado, acumulado e decaído dentro do `GuestSession`, com um
-  //     getter público jurando que "o desenho soma à posição" — e **nenhum arquivo
-  //     do projeto lia aquele getter**. A faixa do meio da reconciliação (de 8 cm a
-  //     1,5 m, onde mora quase toda correção real) não era suavizada por nada: a
-  //     posição era reescrita crua, quinze vezes por segundo, no convés e na água.
-  //     Não dava erro, não sumia do código, e o comentário garantia o contrário.
+  //     This case exists because of a defect only a `grep` revealed: the offset was
+  //     computed, accumulated and decayed inside `GuestSession`, with a public getter
+  //     swearing that "the drawing adds it to the position" — and **no file in the project
+  //     read that getter**. The reconciliation's middle band (from 8 cm to 1.5 m, where
+  //     nearly every real correction lives) was smoothed by nothing: the position was
+  //     rewritten raw, fifteen times a second, on deck and in the water. It gave no error,
+  //     it did not disappear from the code, and the comment guaranteed the opposite.
   //
-  //     O que se prova aqui é a ligação: a correção vira **deslocamento visual**
-  //     sem mexer na posição simulada, e ela some sozinha.
+  //     What gets proved here is the link: the correction becomes a **visual displacement**
+  //     without touching the simulated position, and it fades on its own.
   {
     const controller = new PlayerController();
     controller.spawn();
     const ship = fakeShip();
 
-    // Um erro típico da faixa do meio: seis centímetros de lado e três de vante.
+    // A typical error from the middle band: six centimeters sideways and three forward.
     const correction = new THREE.Vector3(0.06, 0, 0.03);
     const simulated = controller.local.clone();
     controller.absorbViewOffset(correction);
 
-    // A simulação não se mexeu — é o ponto inteiro do desvio.
-    check('absorver um desvio não move a posição simulada',
+    // The simulation did not move — that is the whole point of the offset.
+    check('absorbing an offset does not move the simulated position',
       controller.local.distanceTo(simulated), 0, 1e-12, ' m');
 
-    // Mas a pose do quadro, sim: nos **dois** consumidores, o corpo e o olho.
+    // But the frame's pose does: on **both** consumers, the body and the eye.
     controller.syncView(1, 0, 0, ship);
-    check('mas move o corpo desenhado',
+    check('but it does move the drawn body',
       controller.visualLocal.distanceTo(simulated), correction.length(), 1e-9, ' m');
-    check('e o olho da câmera junto com ele',
+    check('and the eye of the camera along with it',
       controller.eyeLocal.y - (controller.visualLocal.y + 1.66), 0, 1e-9, ' m');
-    check('na direção certa, e não só na distância certa',
+    check('in the right direction, and not only at the right distance',
       controller.visualLocal.x - simulated.x, correction.x, 1e-9, ' m');
 
-    // E some sozinho. λ = 16 → sobra `e^(-3,2)` = 4,1% depois de 200 ms; o teste
-    // integra quadro a quadro a 60 Hz, que é como o laço de verdade o chama.
+    // And it fades on its own. λ = 16 → `e^(-3.2)` = 4.1% left after 200 ms; the test
+    // integrates frame by frame at 60 Hz, which is how the real loop calls it.
     for (let i = 0; i < 12; i++) controller.decayViewOffset(1 / 60);
-    check('e o desvio some em dois décimos de segundo',
+    check('and the offset fades in two tenths of a second',
       controller.viewOffset.length() / correction.length(), Math.exp(-3.2), 1e-3, '');
-    check('sobrando menos de 5% do que entrou',
+    check('leaving less than 5% of what came in',
       controller.viewOffset.length() / correction.length() < 0.05 ? 1 : 0, 1, 0, '');
 
-    // Depois de um segundo não sobra nada que um pixel enxergue.
+    // After a second nothing is left that a pixel can see.
     for (let i = 0; i < 48; i++) controller.decayViewOffset(1 / 60);
     controller.syncView(1, 0, 0, ship);
-    check('e um segundo depois a pose voltou a ser a simulada',
+    check('and a second later the pose is the simulated one again',
       controller.visualLocal.distanceTo(simulated), 0, 1e-4, ' m');
   }
 
-  // 41. **O teto de enjoo do desvio.**
+  // 41. **The offset's motion-sickness ceiling.**
   //
-  //     Um desvio que decai exponencialmente arranca a `λ·|desvio|`: sem teto, uma
-  //     correção de 1,4 m — que **cabe** na faixa suavizada — poria a câmera de
-  //     primeira pessoa a 22 m/s por algumas dezenas de milissegundos, que é pior
-  //     que o solavanco que se está escondendo. O teto é derivado da única
-  //     velocidade que o jogador já conhece do próprio corpo: a corrida.
+  //     An offset that decays exponentially starts off at `λ·|offset|`: with no ceiling, a
+  //     1.4 m correction — which **fits** in the smoothed band — would put the first-person
+  //     camera at 22 m/s for a few tens of milliseconds, which is worse than the lurch it
+  //     is hiding. The ceiling is derived from the one speed the player already knows from
+  //     their own body: running.
   {
     const controller = new PlayerController();
     controller.spawn();
@@ -1390,53 +1390,54 @@ export function runLocomotionTests(): TestReport {
     const OFFSET_LAMBDA = 16;
 
     controller.absorbViewOffset(new THREE.Vector3(1.4, 0, 0));
-    check('um desvio grande é grampeado antes de virar deslize',
+    check('a large offset is clamped before it becomes a slide',
       controller.viewOffset.length(), RUN_SPEED / OFFSET_LAMBDA, 1e-9, ' m');
 
-    // A velocidade de partida do deslize, medida como o laço a produz: um quadro
-    // de decaimento dividido pelo tempo dele.
+    // The slide's starting speed, measured the way the loop produces it: one frame of
+    // decay divided by its duration.
     //
-    // O teto é derivado do valor **instantâneo** em t = 0, que é `λ·|desvio|` =
-    // 4,70 m/s exatos. O que um quadro mede é a *média* dele, que é menor porque a
-    // exponencial já começou a cair dentro do próprio quadro: `(1 − e^(−λ/60))·60`
-    // dá 14,04 por metro de desvio. Cobrar a média contra o teto instantâneo seria
-    // afrouxar o teste; a desigualdade abaixo é a que importa, e este número está
-    // aqui para a folga entre os dois ficar registrada.
+    // The ceiling is derived from the **instantaneous** value at t = 0, which is
+    // `λ·|offset|` = exactly 4.70 m/s. What one frame measures is its *average*, which is
+    // smaller because the exponential has already started falling within the frame
+    // itself: `(1 − e^(−λ/60))·60` gives 14.04 per meter of offset. Demanding the average
+    // against the instantaneous ceiling would loosen the test; the inequality below is the
+    // one that matters, and this number is here so the slack between the two is on
+    // record.
     const before = controller.viewOffset.length();
     controller.decayViewOffset(1 / 60);
     const speed = (before - controller.viewOffset.length()) * 60;
-    check('e a câmera nunca desliza mais rápido que o jogador corre',
+    check('and the camera never slides faster than the player runs',
       speed <= RUN_SPEED ? 1 : 0, 1, 0, '');
-    check('velocidade média do primeiro quadro do deslize', speed, 4.1255, 1e-3, ' m/s');
-    check('e o pico instantâneo é a corrida, por construção',
+    check('average speed of the first frame of the slide', speed, 4.1255, 1e-3, ' m/s');
+    check('and the instantaneous peak is running, by construction',
       before * OFFSET_LAMBDA, RUN_SPEED, 1e-9, ' m/s');
 
-    // Um desvio pequeno — o caso que de fato acontece — passa intacto.
+    // A small offset — the case that actually happens — passes through intact.
     controller.viewOffset.set(0, 0, 0);
     controller.absorbViewOffset(new THREE.Vector3(0.05, 0, 0));
-    check('e um desvio pequeno não é tocado pelo teto',
+    check('and a small offset is not touched by the ceiling',
       controller.viewOffset.length(), 0.05, 1e-9, ' m');
   }
 
-  // 42. **A escada em que o corpo está sai da posição, e não do fio.** É o que
-  //     dispensa um bit no instantâneo — e o caso mede a folga que torna a
-  //     derivação segura: as duas escadas do navio estão a sete metros uma da outra
-  //     em Z, e `insideGangway` separa as duas com metros de sobra dos dois lados.
-  check('o mastro está longe do vão do portaló',
+  // 42. **Which ladder the body is on comes out of the position, and not off the wire.** It
+  //     is what does away with a bit in the snapshot — and the case measures the clearance
+  //     that makes the derivation safe: the ship's two ladders are seven meters apart in Z,
+  //     and `insideGangway` separates them with meters to spare on both sides.
+  check('the mast is far from the gangway opening',
     Math.abs(MAST_LADDER.z - spec.z), 7.164, 0.01, ' m');
-  check('e insideGangway não confunde as duas',
+  check('and insideGangway does not confuse the two',
     insideGangway(MAST_LADDER.z) ? 1 : 0, 0, 0, '');
 
-  // -- a água, com os clipes dentro ---------------------------------------------
+  // -- the water, with the clips in it ------------------------------------------
 
-  // 43. **A braçada é indexada pela distância, e o fator de velocidade cai dela.**
-  //     É o mesmo teorema do caso 1 com outra régua: um ciclo de `Swim` cobre
-  //     `SWIM_DISTANCE` no mar, em qualquer velocidade de nado. E dele cai o número
-  //     que ninguém escreveu em lugar nenhum — o clipe foi animado a 1,32 m/s e o
-  //     jogo nada a 1,40, então a fase corre 1,06 ciclo por segundo e a braçada
-  //     sai 6% mais rápida do que saiu do Blender. É exatamente a conta que a
-  //     caminhada já faz (1,65 nativo, 2,80 de jogo, fator 1,70), e é por ela ser
-  //     automática que **não existe `timeScale` nenhum** nos dois clipes de água.
+  // 43. **The stroke is indexed by distance, and the speed factor falls out of it.** It is
+  //     case 1's theorem with a different ruler: one cycle of `Swim` covers `SWIM_DISTANCE`
+  //     in the sea, at any swimming speed. And out of it falls the number nobody wrote
+  //     anywhere — the clip was animated at 1.32 m/s and the game swims at 1.40, so the
+  //     phase runs 1.06 cycles per second and the stroke comes out 6% faster than it left
+  //     Blender. It is exactly the arithmetic the walk already does (1.65 native, 2.80 in
+  //     game, factor 1.70), and it is because it is automatic that **there is no
+  //     `timeScale` at all** on either water clip.
   {
     const SWIM_SPEED = 2.8 / 2;
     const swim = new SwimClock();
@@ -1445,34 +1446,34 @@ export function runLocomotionTests(): TestReport {
     for (let i = 0; i < steps; i++) swim.update(1 / 60, true, SWIM_SPEED);
 
     const swum = SWIM_SPEED * seconds;
-    check('a braçada fecha uma volta a cada 1,32 m nadados',
+    check('the stroke closes one revolution every 1.32 m swum',
       swim.phase, ((swum / SWIM_DISTANCE) % 1 + 1) % 1, 1e-9, '');
-    // Ciclos por segundo é o mesmo que a razão entre a velocidade do jogo e a
-    // nativa — que é a definição do fator de reprodução do clipe.
-    check('e a velocidade do jogo toca o clipe 1,06× mais rápido que o nativo',
-      SWIM_SPEED / SWIM_DISTANCE, SWIM_SPEED / SWIM_CLIP.speed, 1e-12, ' ciclos/s');
-    check('valor do fator', SWIM_SPEED / SWIM_CLIP.speed, 1.0606, 1e-4, '×');
-    // A velocidade nativa é a que o `anim_swim.verify` mediu, refeita aqui a partir
-    // dos dois números do clipe: se alguém reanimar a braçada com outra cadência e
-    // esquecer de trazer o par, este caso reprova.
-    check('a velocidade nativa do clipe é a de `anim_swim`',
+    // Cycles per second is the same as the ratio between the game's speed and the native
+    // one — which is the definition of the clip's playback factor.
+    check('and the game speed plays the clip 1.06× faster than native',
+      SWIM_SPEED / SWIM_DISTANCE, SWIM_SPEED / SWIM_CLIP.speed, 1e-12, ' cycles/s');
+    check('value of the factor', SWIM_SPEED / SWIM_CLIP.speed, 1.0606, 1e-4, '×');
+    // The native speed is the one `anim_swim.verify` measured, rebuilt here from the
+    // clip's two numbers: if somebody reanimates the stroke at another cadence and forgets
+    // to bring the pair along, this case fails.
+    check('the native speed of the clip is the one from `anim_swim`',
       SWIM_CLIP.speed / SWIM_CLIP.cycle, 1.32, 1e-9, ' m/s');
 
-    // Parado, a fase da braçada congela: o corpo fica onde o último braço o
-    // deixou, como na escada, em vez de remar sem sair do lugar.
+    // Still, the stroke's phase freezes: the body stays where the last arm left it, as on
+    // the ladder, instead of paddling without going anywhere.
     const frozen = swim.phase;
     for (let i = 0; i < 120; i++) swim.update(1 / 60, true, 0);
-    check('parado na água, a braçada congela', swim.phase, frozen, 1e-12, '');
+    check('still in the water, the stroke freezes', swim.phase, frozen, 1e-12, '');
   }
 
-  // 44. **A boia é o único clipe de água que roda no relógio.** Boiar não tem
-  //     grandeza do mundo de onde ler uma fase — é respiração, e respiração não
-  //     acelera com a corrente —, então `Float` é a exceção da mesma família do
-  //     `Carry`: 210 quadros a 30 fps, sete segundos por volta. O caso mede a volta
-  //     e mede a coisa que a exceção existe para dar: a fase **não** recomeça do
-  //     zero quando o marujo sai da água e cai de novo.
+  // 44. **The float is the only water clip that runs on the clock.** Floating has no
+  //     quantity in the world to read a phase from — it is breathing, and breathing does
+  //     not speed up with the current —, so `Float` is the exception of the same family as
+  //     `Carry`: 210 frames at 30 fps, seven seconds per revolution. The case measures the
+  //     revolution and measures the thing the exception exists to give: the phase does
+  //     **not** restart from zero when the sailor leaves the water and falls in again.
   {
-    /** Distância entre duas fases num círculo — 0,999 e 0,001 são vizinhas. */
+    /** The distance between two phases on a circle — 0.999 and 0.001 are neighbors. */
     const gap = (a: number, b: number): number => {
       const d = Math.abs(a - b) % 1;
       return Math.min(d, 1 - d);
@@ -1480,42 +1481,41 @@ export function runLocomotionTests(): TestReport {
 
     const swim = new SwimClock();
     for (let i = 0; i < 7 * 60; i++) swim.update(1 / 60, true, 0);
-    // A tolerância é **derivada**: a fase é somada uma vez por quadro, e 420
-    // somas de `1/420` não caem exatamente em 1 em ponto flutuante. O que se
-    // cobra é que a volta feche dentro de um quadro dela.
-    check('a boia fecha uma volta em sete segundos',
+    // The tolerance is **derived**: the phase is added once per frame, and 420 additions
+    // of `1/420` do not land exactly on 1 in floating point. What is demanded is that the
+    // revolution close within one frame of it.
+    check('the float closes one revolution in seven seconds',
       gap(swim.floatPhase, 0), 0, 1 / (60 * FLOAT_CLIP.duration), '');
-    check('e a volta é a duração do clipe: 210 quadros a 30 fps',
+    check('and the revolution is the length of the clip: 210 frames at 30 fps',
       FLOAT_CLIP.duration, 210 / 30, 1e-9, ' s');
 
     swim.reset();
     for (let i = 0; i < Math.round(2.1 * 60); i++) swim.update(1 / 60, true, 0);
     const breathing = swim.floatPhase;
-    check('e no meio do laço ela está onde o tempo a pôs',
+    check('and halfway through the loop it is where the time put it',
       breathing, 2.1 / FLOAT_CLIP.duration, 1e-9, '');
 
-    // Fora da água a respiração para — e para **onde estava**. Quem agarra a
-    // escada, escorrega e cai de novo não recomeça o ciclo do começo.
+    // Out of the water the breathing stops — and stops **where it was**. Whoever grabs the
+    // ladder, slips and falls in again does not restart the cycle from the beginning.
     for (let i = 0; i < 90; i++) swim.update(1 / 60, false, 0);
-    check('fora do mar a boia congela', swim.floatPhase, breathing, 1e-12, '');
+    check('out of the sea the float freezes', swim.floatPhase, breathing, 1e-12, '');
     swim.update(1 / 60, true, 0);
-    check('e cair de novo a retoma de onde parou',
+    check('and falling in again picks it up where it stopped',
       swim.floatPhase, breathing + 1 / 60 / FLOAT_CLIP.duration, 1e-12, '');
   }
 
-  // 45. **Os pesos de mistura somam 1 — em terra, na água e na travessia entre as
-  //     duas.** É a invariante que o Three cobra em silêncio: o que sobra acima de 1
-  //     ele renormaliza, encolhendo todo mundo na mesma proporção; o que falta ele
-  //     preenche com a pose de repouso do rig, que é a T-pose de braços abertos.
-  //     Nenhum dos dois aparece no Blender, e os dois aparecem no primeiro segundo
-  //     de jogo.
+  // 45. **The blend weights add up to 1 — on land, in the water and on the crossing
+  //     between the two.** It is the invariant Three enforces in silence: what goes above 1
+  //     it renormalizes, shrinking everyone in the same proportion; what is missing it
+  //     fills with the rig's rest pose, which is the T-pose with arms out. Neither appears
+  //     in Blender, and both appear in the game's first second.
   //
-  //     O caso mede `poseBudget` — a aritmética de verdade, a mesma que o avatar
-  //     chama — alimentada pelos **relógios de verdade**, e não por números
-  //     escolhidos: é a exclusividade entre escada, timão, água e pulo que faz a
-  //     soma fechar, e é ela que o percurso completo exercita.
+  //     The case measures `poseBudget` — the real arithmetic, the same one the avatar calls
+  //     — fed by the **real clocks**, and not by chosen numbers: it is the exclusivity
+  //     between ladder, helm, water and jump that makes the sum close, and it is what the
+  //     full route exercises.
   {
-    /** A soma que o Three vai ver, dado o estado dos relógios de um marujo. */
+    /** The sum Three is going to see, given the state of one sailor's clocks. */
     const total = (c: PlayerController): { sum: number; posts: number } => {
       const posts = {
         climb: c.climb.weight,
@@ -1541,78 +1541,80 @@ export function runLocomotionTests(): TestReport {
       worstPosts = Math.max(worstPosts, posts);
     };
 
-    // O percurso inteiro, passo a passo: andar pelo convés, atravessar o portaló,
-    // cair, boiar, nadar de volta, agarrar a escada e subir. Cada quadro é medido.
+    // The whole route, step by step: walk along the deck, cross the gangway, fall, float,
+    // swim back, grab the ladder and climb. Every frame is measured.
     const run = (frame: InputFrame, seconds: number): void => {
       for (let i = 0; i < Math.round(seconds * 60); i++) {
         controller.fixedUpdate(1 / 60, frame, ship, waves);
         watch();
       }
     };
-    run(walkForward(), 1.2);                       // convés, queda e respingo
-    check('caiu na água no meio do percurso', controller.inWater ? 1 : 0, 1, 0, '');
-    run(idleFrame(), 1.5);                         // boiando
+    run(walkForward(), 1.2);                       // deck, fall and splash
+    check('he fell into the water partway through the route', controller.inWater ? 1 : 0, 1, 0, '');
+    run(idleFrame(), 1.5);                         // floating
     controller.yaw = Math.PI / 2;
-    run(walkForward(), 3);                         // nadando de volta ao costado
+    run(walkForward(), 3);                         // swimming back to the side
     const reachable = controller.reachableBoardingLadder();
-    check('a escada do bordo está ao alcance', reachable ? 1 : 0, 1, 0, '');
+    check('the ladder on that side is within reach', reachable ? 1 : 0, 1, 0, '');
     if (reachable) controller.grabBoardingLadder(reachable);
-    run(walkForward(), 3);                         // subindo, e o mar se apagando
-    check('e a subida terminou fora da água', controller.inWater ? 1 : 0, 0, 0, '');
+    run(walkForward(), 3);                         // climbing, and the sea fading out
+    check('and the climb ended out of the water', controller.inWater ? 1 : 0, 0, 0, '');
 
-    check('a mistura soma 1 em todo quadro do percurso água↔terra',
+    check('the blend adds up to 1 on every frame of the water↔land route',
       worstSum, 0, 1e-12, '');
-    // E ela fecha **porque** os postos são exclusivos: escada, timão, água e pulo
-    // nunca somam mais que um corpo inteiro. Sem isto a soma acima fecharia por
-    // grampeamento, que é outra coisa — seria a locomoção sendo apagada em silêncio.
-    check('e nenhum quadro pediu mais de um corpo aos postos',
+    // And it closes **because** the stations are exclusive: ladder, helm, water and jump
+    // never add up to more than one whole body. Without that the sum above would close by
+    // clamping, which is a different thing — it would be the locomotion being erased in
+    // silence.
+    check('and no frame asked the stations for more than one body',
       worstPosts <= 1 ? 1 : 0, 1, 0, '');
-    check('quanto o pior quadro pediu', worstPosts, 1, 0.001, '');
+    check('how much the worst frame asked for', worstPosts, 1, 0.001, '');
   }
 
-  // 46. **A tábua é a única que cede, e ela cede a todos.** A outra metade da
-  //     invariante do caso 45: `Carry` convive com os outros postos (dá para
-  //     carregar madeira andando pelo porão), então é ela que é grampeada ao que
-  //     sobrou. O caso põe o pior cruzamento possível — tábua cheia, água cheia — e
-  //     cobra que a soma continue fechada.
+  // 46. **The plank is the only one that yields, and it yields to everyone.** The other
+  //     half of case 45's invariant: `Carry` coexists with the other stations (you can
+  //     carry wood while walking through the hold), so it is the one clamped to whatever is
+  //     left. The case sets up the worst possible crossing — full plank, full water — and
+  //     demands that the sum stay closed.
   {
     const full = { climb: 0, helm: 0, swim: 1, jump: 0 };
     const drowning = poseBudget(full, 1, 0);
-    check('com a água ocupando o corpo, a tábua não pede nada',
+    check('with the water taking the body, the plank asks for nothing',
       drowning.carry, 0, 1e-12, '');
-    check('e a soma continua fechada',
+    check('and the sum stays closed',
       full.swim + drowning.carry + drowning.ground, 1, 1e-12, '');
 
-    // Andando com a tábua na mão: ela cede à passada, que é o que impede o corpo de
-    // deslizar pelo porão com os pés parados.
+    // Walking with the plank in hand: it yields to the stride, which is what keeps the body
+    // from sliding through the hold with its feet still.
     const walkingWithPlank = poseBudget({ climb: 0, helm: 0, swim: 0, jump: 0 }, 1, 1);
-    check('andando, a tábua cede a pose inteira à passada',
+    check('walking, the plank yields the whole pose to the stride',
       walkingWithPlank.carry, 0, 1e-12, '');
-    check('e parado ela toma o corpo todo',
+    check('and standing still it takes the whole body',
       poseBudget({ climb: 0, helm: 0, swim: 0, jump: 0 }, 1, 0).carry, 1, 1e-12, '');
 
-    // No ar com a tábua: o pulo é posto, e a madeira sai da frente dele. Sem esta
-    // cláusula a soma dava **2** — o pulo cheio mais a tábua cheia.
+    // In the air with the plank: the jump is a station, and the wood gets out of its way.
+    // Without this clause the sum came to **2** — the full jump plus the full plank.
     const jumpingWithPlank = poseBudget({ climb: 0, helm: 0, swim: 0, jump: 1 }, 1, 0);
-    check('no ar a tábua também cede',
+    check('in the air the plank yields too',
       jumpingWithPlank.carry, 0, 1e-12, '');
-    check('e a soma do salto com madeira fecha em 1',
+    check('and the sum of a leap with wood closes at 1',
       1 + jumpingWithPlank.carry + jumpingWithPlank.ground, 1, 1e-12, '');
   }
 
-  // 47. **O deslocamento vertical da água: 1,44 m, e não 1,32.**
+  // 47. **The water's vertical offset: 1.44 m, and not 1.32.**
   //
-  //     Os dois clipes de água têm `y = 0` na **linha d'água**, e não no chão sob os
-  //     pés como os oito de terra. Sem corrigir isso, tocar `Float` põe a linha
-  //     d'água do clipe na altura dos pés simulados e o pirata boia um metro e meio
-  //     acima do mar.
+  //     Both water clips have `y = 0` at the **waterline**, and not on the floor under the
+  //     feet like the eight land ones. Without correcting that, playing `Float` puts the
+  //     clip's waterline at the height of the simulated feet and the pirate floats a meter
+  //     and a half above the sea.
   //
-  //     A correção é `SWIM_SUBMERSION`, que é onde a **física** põe a superfície em
-  //     relação aos pés (1,44 m), e não `FLOAT_CLIP.sink`, que é onde o **animador**
-  //     pôs os pés em relação à superfície dele (1,32 m). Os 12 cm de diferença são
-  //     escolha: alinhar pela física entrega o clipe exatamente como o `verify()`
-  //     dele o mediu — queixo 11,8 cm fora da água —, enquanto alinhar pelo clipe o
-  //     afundaria esses 12 cm e o queixo raspa a superfície. Ver `waterPoseY`.
+  //     The correction is `SWIM_SUBMERSION`, which is where the **physics** puts the
+  //     surface relative to the feet (1.44 m), and not `FLOAT_CLIP.sink`, which is where
+  //     the **animator** put the feet relative to their own surface (1.32 m). The 12 cm of
+  //     difference are a choice: aligning by the physics delivers the clip exactly as its
+  //     `verify()` measured it — chin 11.8 cm out of the water —, while aligning by the
+  //     clip would sink it those 12 cm and the chin would graze the surface. See
+  //     `waterPoseY`.
   {
     const controller = atGangway(1);
     const ship = fakeShip();
@@ -1621,68 +1623,68 @@ export function runLocomotionTests(): TestReport {
     stepPlayer(controller, idleFrame(), 2, ship, waves);
     controller.syncView(1, 0, 0, ship);
 
-    // O mar do teste é uma chapa em y = 0, então "a origem do clipe caiu na linha
-    // d'água" se escreve como um zero.
-    check('boiando, a origem do clipe de água cai na superfície',
+    // The test's sea is a flat plate at y = 0, so "the clip's origin landed on the
+    // waterline" is written as a zero.
+    check('floating, the origin of the water clip lands on the surface',
       waterPoseY(controller.visualLocal.y, 1), 0, 1e-3, ' m');
-    // E fora da água, ou com um GLB antigo que não traz os clipes, a soma some: o
-    // corpo volta a ser pendurado nos pés, que é o que a locomoção quer.
-    check('e sem clipe de água o corpo continua pendurado nos pés',
+    // And out of the water, or with an old GLB that does not carry the clips, the offset
+    // disappears: the body goes back to hanging from its feet, which is what the locomotion
+    // wants.
+    check('and with no water clip the body still hangs from its feet',
       waterPoseY(controller.visualLocal.y, 0), controller.visualLocal.y, 1e-12, ' m');
-    // No meio da mistura o corpo tem de estar no meio do caminho — é a linearidade
-    // que faz a transição terra↔água não dar salto, porque a pose que o mixer
-    // desenha também é a média ponderada dos dois assentamentos.
-    check('e no meio da transição ele está no meio do caminho',
+    // Halfway through the blend the body has to be halfway along — it is the linearity that
+    // keeps the land↔water transition from jumping, because the pose the mixer draws is
+    // also the weighted average of the two seatings.
+    check('and halfway through the transition it is halfway along',
       waterPoseY(controller.visualLocal.y, 0.5),
       (waterPoseY(controller.visualLocal.y, 0) + waterPoseY(controller.visualLocal.y, 1)) / 2,
       1e-12, ' m');
 
-    // ⚠️ O caso que amarra a decisão: os 12 cm entre a física e o clipe. Mexer no
-    // enquadramento do olho na água (`SWIM_EYE_HEIGHT`) sem reler o parágrafo de
-    // `SWIM_SUBMERSION` reprova aqui.
-    check('o afundamento simulado é o do olho a 22 cm da água',
+    // ⚠️ The case that pins the decision down: the 12 cm between the physics and the clip.
+    // Touching the eye's framing in the water (`SWIM_EYE_HEIGHT`) without rereading
+    // `SWIM_SUBMERSION`'s paragraph fails here.
+    check('the simulated submersion is the one with the eye 22 cm out of the water',
       SWIM_SUBMERSION, 1.44, 1e-9, ' m');
-    check('e ele fica 12 cm abaixo do afundamento com que o clipe foi construído',
+    check('and it sits 12 cm below the submersion the clip was built with',
       SWIM_SUBMERSION - FLOAT_CLIP.sink, 0.12, 1e-9, ' m');
-    // Os pés **desenhados** ficam esses 12 cm acima dos pés **simulados**. É o preço
-    // da escolha, e ele é pago onde ninguém vê: a um metro e meio de profundidade,
-    // num corpo reclinado.
-    check('os pés do clipe param 1,32 m abaixo da superfície',
+    // The **drawn** feet sit those 12 cm above the **simulated** feet. It is the price of
+    // the choice, and it is paid where nobody sees it: a meter and a half down, on a
+    // reclined body.
+    check('the feet of the clip stop 1.32 m below the surface',
       waterPoseY(controller.visualLocal.y, 1) - FLOAT_CLIP.sink, -1.32, 1e-3, ' m');
   }
 
-  // 48. **A passada larga a água de vez.** Enquanto `Float`/`Swim` não existiam, o
-  //     `GaitClock` era alimentado com a velocidade de nado e desenhava o mar de
-  //     empréstimo. Agora que os clipes existem, uma passada viva por baixo deles
-  //     daria um corpo batendo perna dentro da braçada — e, pior, o balanço de
-  //     câmera que ela alimenta (2,1 cm por passo) sacudiria a cabeça de quem está
-  //     boiando, num movimento que nada na superfície tem para justificar.
+  // 48. **The stride lets go of the water for good.** While `Float`/`Swim` did not exist,
+  //     `GaitClock` was fed the swimming speed and drew the sea on loan. Now that the clips
+  //     exist, a live stride underneath them would give a body kicking its legs inside the
+  //     stroke — and, worse, the camera bob it feeds (2.1 cm per step) would shake the head
+  //     of whoever is floating, in a movement nothing on the surface has to justify it.
   {
     const controller = atGangway(1);
     const ship = fakeShip();
     const waves = flatSea();
     fallOverboard(controller, ship, waves);
 
-    // O respingo **não é um pouso**. Sem `jump.reset` em `enterWater`, o `airborne`
-    // que ficou da queda dispara `JumpLand` com a força do tombo e o pirata passa
-    // meio segundo se agachando dentro do mar — e o peso desse agachamento soma com
-    // o da água e estoura o total de 1.
-    check('o respingo não dispara pouso', controller.jump.land, 0, 1e-12, '');
-    check('nem deixa o clipe de ar grudado', controller.jump.air, 0, 1e-12, '');
+    // The splash is **not a landing**. Without `jump.reset` in `enterWater`, the `airborne`
+    // left over from the fall fires `JumpLand` with the fall's force and the pirate spends
+    // half a second crouching inside the sea — and that crouch's weight adds to the water's
+    // and overflows the total of 1.
+    check('the splash does not trigger a landing', controller.jump.land, 0, 1e-12, '');
+    check('nor leave the air clip stuck on', controller.jump.air, 0, 1e-12, '');
 
     stepPlayer(controller, walkForward(), 3, ship, waves);
-    check('nadando, quem desenha o corpo é a água', controller.swim.stroke, 1, 0.001, '');
-    check('e a passada está apagada', controller.gait.moving, 0, 0.001, '');
-    check('com velocidade zero, e não com a de nado', controller.gait.speed, 0, 1e-12, ' m/s');
+    check('swimming, what draws the body is the water', controller.swim.stroke, 1, 0.001, '');
+    check('and the stride is switched off', controller.gait.moving, 0, 0.001, '');
+    check('at zero speed, and not at swimming speed', controller.gait.speed, 0, 1e-12, ' m/s');
 
-    // A consequência que se vê: a cabeça de quem nada fica na mesma altura da de
-    // quem boia. Antes desta troca ela subia e descia 2,1 cm a cada braçada, que era
-    // o balanço da passada emprestada aparecendo na câmera.
+    // The consequence you can see: the head of whoever swims sits at the same height as the
+    // head of whoever floats. Before this handover it rose and fell 2.1 cm on every stroke,
+    // which was the borrowed stride's bob showing up in the camera.
     controller.syncView(1, 0, 0, ship);
-    check('e o olho de quem nada fica onde o de quem boia fica',
+    check('and the eye of whoever swims sits where the eye of whoever floats sits',
       controller.eyeLocal.y, 0.22, 1e-3, ' m');
   }
 
-  const falhas = cases.filter((c) => !c.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((c) => !c.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }

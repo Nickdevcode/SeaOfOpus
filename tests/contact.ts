@@ -42,17 +42,17 @@ import { computeDisplacement, halfWidthAtHeight } from '../src/ship/ShipDimensio
 import type { Ship } from '../src/ship/Ship';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -173,17 +173,17 @@ const CATAPULT_CEILING = 500;
 export function runContactTests(): TestReport {
   const cases: TestCase[] = [];
 
-  function record(nome: string, medido: string, esperado: string, passou: boolean, erro = ''): void {
-    cases.push({ nome, medido, esperado, erro: passou ? '—' : erro || 'fora do esperado', passou });
+  function record(name: string, measured: string, expected: string, passed: boolean, error = ''): void {
+    cases.push({ name, measured, expected, error: passed ? '—' : error || 'fora do expected', passed });
   }
 
-  function checkCollision(nome: string, met: Encounter): void {
+  function checkCollision(name: string, met: Encounter): void {
     const ok =
       met.contacts > 0 &&
       met.separation >= COLLISION_FLOOR &&
       met.separation <= CATAPULT_CEILING;
     record(
-      nome,
+      name,
       `${met.contacts} contacts · ${met.depth.toFixed(2)} m · ${met.separation.toFixed(1)} m/s²`,
       `> 0 contacts · ${COLLISION_FLOOR}–${CATAPULT_CEILING} m/s² of separation`,
       ok,
@@ -337,6 +337,6 @@ export function runContactTests(): TestReport {
     );
   }
 
-  const falhas = cases.filter((entry) => !entry.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((entry) => !entry.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }

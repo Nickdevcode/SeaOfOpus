@@ -42,17 +42,17 @@ import {
 } from '../src/ship/ShipDamage';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -106,14 +106,14 @@ export function runDamageTests(): TestReport {
   const cases: TestCase[] = [];
   const AREA = baseArea();
 
-  function check(nome: string, medido: number, esperado: number, tolerancia: number, unidade: string): void {
-    const erro = medido - esperado;
+  function check(name: string, measured: number, expected: number, tolerance: number, unidade: string): void {
+    const error = measured - expected;
     cases.push({
-      nome,
-      medido: `${medido.toFixed(3)} ${unidade}`,
-      esperado: `${esperado.toFixed(3)} ${unidade}`,
-      erro: `${erro >= 0 ? '+' : ''}${erro.toFixed(3)} ${unidade} (tol. ±${tolerancia} ${unidade})`,
-      passou: Math.abs(erro) <= tolerancia,
+      name,
+      measured: `${measured.toFixed(3)} ${unidade}`,
+      expected: `${expected.toFixed(3)} ${unidade}`,
+      error: `${error >= 0 ? '+' : ''}${error.toFixed(3)} ${unidade} (tol. ±${tolerance} ${unidade})`,
+      passed: Math.abs(error) <= tolerance,
     });
   }
 
@@ -125,11 +125,11 @@ export function runDamageTests(): TestReport {
   // came to keep from coming back.
   const bore = 2 * Math.sqrt(AREA / Math.PI);
   cases.push({
-    nome: 'merge · fits inside two breach bores',
-    medido: `${MERGE_DISTANCE.toFixed(3)} m (bore ${bore.toFixed(3)} m)`,
-    esperado: `≤ ${(bore * 2).toFixed(3)} m`,
-    erro: MERGE_DISTANCE <= bore * 2 ? '—' : `${(MERGE_DISTANCE / bore).toFixed(1)} bores`,
-    passou: MERGE_DISTANCE <= bore * 2,
+    name: 'merge · fits inside two breach bores',
+    measured: `${MERGE_DISTANCE.toFixed(3)} m (bore ${bore.toFixed(3)} m)`,
+    expected: `≤ ${(bore * 2).toFixed(3)} m`,
+    error: MERGE_DISTANCE <= bore * 2 ? '—' : `${(MERGE_DISTANCE / bore).toFixed(1)} bores`,
+    passed: MERGE_DISTANCE <= bore * 2,
   });
 
   // And it really has to merge what is close and separate what is far, or else the number
@@ -141,11 +141,11 @@ export function runDamageTests(): TestReport {
   hit(far, 0);
   hit(far, MERGE_DISTANCE * 1.5);
   cases.push({
-    nome: 'merge · close becomes one breach, far becomes two',
-    medido: `close ${near.breaches.length} · far ${far.breaches.length}`,
-    esperado: 'close 1 · far 2',
-    erro: near.breaches.length === 1 && far.breaches.length === 2 ? '—' : 'merge outside the radius',
-    passou: near.breaches.length === 1 && far.breaches.length === 2,
+    name: 'merge · close becomes one breach, far becomes two',
+    measured: `close ${near.breaches.length} · far ${far.breaches.length}`,
+    expected: 'close 1 · far 2',
+    error: near.breaches.length === 1 && far.breaches.length === 2 ? '—' : 'merge outside the radius',
+    passed: near.breaches.length === 1 && far.breaches.length === 2,
   });
 
   // --- 2. the inflow is linear in the area, saturated included -----------------
@@ -231,13 +231,13 @@ export function runDamageTests(): TestReport {
 
   const ratio = groupedSum / spreadSum;
   cases.push({
-    nome: 'broadside · grouped fire yields close to spread fire',
-    medido: `${(ratio * 100).toFixed(0)}% of the area`,
-    esperado: `≥ ${(FLOOR * 100).toFixed(0)}%`,
-    erro: ratio >= FLOOR ? '—' : `${((FLOOR - ratio) * 100).toFixed(0)} points below the floor`,
-    passou: ratio >= FLOOR,
+    name: 'broadside · grouped fire yields close to spread fire',
+    measured: `${(ratio * 100).toFixed(0)}% of the area`,
+    expected: `≥ ${(FLOOR * 100).toFixed(0)}%`,
+    error: ratio >= FLOOR ? '—' : `${((FLOOR - ratio) * 100).toFixed(0)} points below the floor`,
+    passed: ratio >= FLOOR,
   });
 
-  const falhas = cases.filter((c) => !c.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((c) => !c.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }

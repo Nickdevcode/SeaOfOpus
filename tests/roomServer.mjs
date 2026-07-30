@@ -180,13 +180,13 @@ async function drainQueue() {
   await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
-async function test(nome, run) {
+async function test(name, run) {
   const sockets = [];
   try {
     await run(sockets);
-    cases.push({ nome, passou: true, erro: '' });
+    cases.push({ name, passed: true, error: '' });
   } catch (error) {
-    cases.push({ nome, passou: false, erro: String(error?.message ?? error) });
+    cases.push({ name, passed: false, error: String(error?.message ?? error) });
   } finally {
     for (const socket of sockets) {
       try {
@@ -454,6 +454,6 @@ await test('whoever was paired and left alone before the start is told', async (
 });
 
 console.table(cases);
-const falhas = cases.filter((entry) => !entry.passou).length;
-console.log(falhas === 0 ? `\n${cases.length} casos, todos passaram.` : `\n${falhas} de ${cases.length} falharam.`);
-process.exit(falhas === 0 ? 0 : 1);
+const failures = cases.filter((entry) => !entry.passed).length;
+console.log(failures === 0 ? `\n${cases.length} casos, todos passaram.` : `\n${failures} de ${cases.length} falharam.`);
+process.exit(failures === 0 ? 0 : 1);

@@ -32,17 +32,17 @@ import { Match, type MatchInputs } from '../src/game/Match';
 import { Environment } from '../src/world/Environment';
 
 export interface TestCase {
-  nome: string;
-  medido: string;
-  esperado: string;
-  erro: string;
-  passou: boolean;
+  name: string;
+  measured: string;
+  expected: string;
+  error: string;
+  passed: boolean;
 }
 
 export interface TestReport {
-  passou: boolean;
+  passed: boolean;
   total: number;
-  falhas: number;
+  failures: number;
   cases: TestCase[];
 }
 
@@ -252,11 +252,11 @@ export async function runDeterminismTests(): Promise<TestReport> {
 
   // --- 1. both fingerprints have the same size --------------------------------
   cases.push({
-    nome: 'fingerprint · same number of fields',
-    medido: `${first.length}`,
-    esperado: `${second.length}`,
-    erro: first.length === second.length ? '—' : 'breach lists diverged',
-    passou: first.length === second.length,
+    name: 'fingerprint · same number of fields',
+    measured: `${first.length}`,
+    expected: `${second.length}`,
+    error: first.length === second.length ? '—' : 'breach lists diverged',
+    passed: first.length === second.length,
   });
 
   // --- 2. bit for bit, with no tolerance --------------------------------------
@@ -275,14 +275,14 @@ export async function runDeterminismTests(): Promise<TestReport> {
   }
 
   cases.push({
-    nome: `${TICKS} steps · identical state`,
-    medido: `${mismatches} diverging fields`,
-    esperado: '0 diverging fields',
-    erro:
+    name: `${TICKS} steps · identical state`,
+    measured: `${mismatches} diverging fields`,
+    expected: '0 diverging fields',
+    error:
       mismatches === 0
         ? '—'
         : `worst: field ${worstIndex}, Δ ${worst.toExponential(3)}`,
-    passou: mismatches === 0,
+    passed: mismatches === 0,
   });
 
   // --- 3. the script actually did something -----------------------------------
@@ -293,16 +293,16 @@ export async function runDeterminismTests(): Promise<TestReport> {
   const shots = a.shotsFired + a.shotsLanded;
   const holes = a.playerHoles + a.enemyHoles;
   cases.push({
-    nome: 'script · the duel actually happened',
-    medido: `${moved.toFixed(1)} m · ${shots} shots · ${holes} breaches`,
-    esperado: '> 20 m, with a shot and a breach',
-    erro:
+    name: 'script · the duel actually happened',
+    measured: `${moved.toFixed(1)} m · ${shots} shots · ${holes} breaches`,
+    expected: '> 20 m, with a shot and a breach',
+    error:
       moved > 20 && shots > 0 && holes > 0
         ? '—'
         : 'with no combat, the test does not exercise the simulation draws',
-    passou: moved > 20 && shots > 0 && holes > 0,
+    passed: moved > 20 && shots > 0 && holes > 0,
   });
 
-  const falhas = cases.filter((c) => !c.passou).length;
-  return { passou: falhas === 0, total: cases.length, falhas, cases };
+  const failures = cases.filter((c) => !c.passed).length;
+  return { passed: failures === 0, total: cases.length, failures, cases };
 }
