@@ -1,93 +1,91 @@
 /**
- * A fila de entrada do host: absorve o jitter da rede sem deixar a simulação
- * parada.
+ * The host's input queue: it absorbs the network's jitter without leaving the simulation
+ * stalled.
  *
- * A rede não entrega quadros num ritmo constante — ela entrega em rajadas, com
- * buracos. A simulação, ao contrário, precisa de exatamente um quadro por passo,
- * sessenta vezes por segundo. Esta fila é o amortecedor entre as duas, e o
- * `depth` dela vai em todo instantâneo para que o guest ajuste o quanto se
- * adianta.
+ * The network does not deliver frames at a constant rate — it delivers them in bursts,
+ * with gaps. The simulation, on the contrary, needs exactly one frame per step, sixty
+ * times a second. This queue is the shock absorber between the two, and its `depth` goes
+ * in every snapshot so the guest can tune how far ahead it runs.
  *
- * ## A política de fome é onde mora o bug sutil
+ * ## The starvation policy is where the subtle bug lives
  *
- * Quando a fila esvazia — e ela vai esvaziar —, o host tem de simular alguma
- * coisa. Repetir o último quadro é o certo, mas **não inteiro**, e as três regras
- * são independentes:
+ * When the queue empties — and it will empty —, the host has to simulate something.
+ * Repeating the last frame is right, but **not all of it**, and the three rules are
+ * independent:
  *
- * 1. **`pressed` zera.** Uma borda repetida é um comando dado duas vezes. Um
- *    engasgo de meio segundo viraria uma saraivada de tiros que o jogador não
- *    deu — e ele veria a munição sumir sem entender.
- * 2. **`look` zera.** O olhar é um delta, não um estado. Repeti-lo faz a cabeça
- *    do adversário girar sozinha, cada vez mais rápido quanto pior a rede.
- * 3. **`held` e os eixos repetem.** Segurar o W durante um engasgo tem de
- *    continuar andando. Zerar aqui daria um adversário que trava a cada
- *    oscilação de rede e depois volta a andar — o "elástico" clássico.
+ * 1. **`pressed` is zeroed.** A repeated edge is a command given twice. A half-second
+ *    hiccup would become a volley of shots the player never fired — and they would watch
+ *    the ammunition disappear without understanding why.
+ * 2. **`look` is zeroed.** The gaze is a delta, not a state. Repeating it makes the
+ *    opponent's head turn on its own, faster the worse the network gets.
+ * 3. **`held` and the axes repeat.** Holding W through a hiccup has to keep walking.
+ *    Zeroing here would give an opponent who freezes at every network wobble and then
+ *    walks again — the classic "rubber band".
  */
 
 import { clearInputFrame, copyInputFrame, createInputFrame, type InputFrame } from '../core/InputFrame';
 
 /**
- * Quadros guardados.
+ * Frames kept.
  *
- * Sessenta são um segundo de rede. Mais que isso seria guardar entrada tão velha
- * que já não vale a pena aplicar: um comando de um segundo atrás executado agora
- * é pior que comando nenhum.
+ * Sixty is one second of network. More than that would be keeping input so old it is no
+ * longer worth applying: a command from a second ago executed now is worse than no
+ * command at all.
  */
 const CAPACITY = 60;
 
 /**
- * Fila a partir da qual se aceita um quadro do futuro. Ver `claimAhead`.
+ * The queue depth from which a frame from the future is accepted. See `claimAhead`.
  *
- * Oito quadros são 133 ms de comando guardado — muito acima do que o jitter de
- * uma conexão saudável produz, e muito abaixo dos vinte e um que denunciaram o
- * defeito. Entre os dois há folga de sobra para a política normal continuar
- * sendo a normal.
+ * Eight frames is 133 ms of stored command — well above what a healthy connection's
+ * jitter produces, and well below the twenty-one that gave the defect away. Between the
+ * two there is plenty of room for the normal policy to go on being the normal one.
  */
 const AHEAD_THRESHOLD = 8;
 
 /**
- * Distância em que um tick faltando conta como **buraco**, e não como atraso.
+ * The distance at which a missing tick counts as a **gap**, and not as a delay.
  *
- * Quatro quadros. A diferença entre os dois casos é o que a fila já tem:
+ * Four frames. The difference between the two cases is what the queue already has:
  *
- * - Se o quadro pedido não chegou e **nada** mais chegou, ele está a caminho —
- *   esperar é o certo, e a política de fome cobre o passo.
- * - Se o quadro pedido não chegou mas o **seguinte** já está aqui, ele não vem
- *   mais: a rede entrega em ordem, então quem passou na frente enterrou o que
- *   ficou para trás. Repetir o comando anterior nesse caso é jogar fora o
- *   comando certo, que está guardado a um passo de distância.
+ * - If the requested frame did not arrive and **nothing** else did, it is on its way —
+ *   waiting is right, and the starvation policy covers the step.
+ * - If the requested frame did not arrive but the **next** one is already here, it is not
+ *   coming: the network delivers in order, so whatever went ahead buried whatever was
+ *   left behind. Repeating the previous command in that case is throwing away the right
+ *   command, which is sitting one step away.
  *
- * A janela é curta de propósito. Ela cobre a perda das duas cópias que a
- * redundância do lote manda (ver `INPUT_BATCH`) e não muito mais; buraco maior
- * que isso é salto de relógio, e para salto quem responde é `AHEAD_THRESHOLD`.
+ * The window is short on purpose. It covers the loss of the two copies the batch's
+ * redundancy sends (see `INPUT_BATCH`) and not much more; a gap larger than that is a
+ * clock jump, and what answers a jump is `AHEAD_THRESHOLD`.
  */
 const AHEAD_WINDOW = 4;
 
 export class InputBuffer {
-  /** Quadros à espera, ordenados por tick. Vai em todo instantâneo. */
+  /** Frames waiting, ordered by tick. It goes in every snapshot. */
   depth = 0;
-  /** Quantas vezes a fila esvaziou. Telemetria: um número alto é rede ruim. */
+  /** How many times the queue emptied. Telemetry: a high number is a bad network. */
   starves = 0;
   /**
-   * Fomes desde o último instantâneo enviado.
+   * Starvations since the last snapshot sent.
    *
-   * Vai no fio, e não é telemetria: é o sinal com que o cliente decide se
-   * precisa correr mais à frente. Inferir isso da profundidade da fila — que era
-   * o que se fazia — não funciona, porque a fila fica em zero tanto quando o
-   * comando chega tarde quanto quando ele chega na hora exata.
+   * It goes on the wire, and it is not telemetry: it is the signal the client uses to
+   * decide whether it has to run further ahead. Inferring that from the queue's depth —
+   * which is what used to be done — does not work, because the queue sits at zero both
+   * when the command arrives late and when it arrives exactly on time.
    */
   private starvedSinceReport = 0;
-  /** Último tick consumido, para o guest medir a ida e volta. */
+  /** The last tick consumed, so the guest can measure the round trip. */
   lastConsumedTick = 0;
   /**
-   * O carimbo do quadro que de fato alimentou o último passo, ou `-1` se ele
-   * foi alimentado por repetição.
+   * The stamp of the frame that actually fed the last step, or `-1` if it was fed by
+   * repetition.
    *
-   * Não é o mesmo que `lastConsumedTick`, e a diferença é justamente o que
-   * `claimAhead` introduz: o passo pedido e o comando aplicado podem ser de
-   * ticks vizinhos. É a única medida que responde "o comando do jogador chegou?"
-   * — contar fome responde outra pergunta, e um comando pode se perder sem
-   * produzir fome nenhuma.
+   * It is not the same as `lastConsumedTick`, and the difference is precisely what
+   * `claimAhead` introduces: the requested step and the applied command may be from
+   * neighboring ticks. It is the only measurement that answers "did the player's command
+   * arrive?" — counting starvations answers a different question, and a command can be
+   * lost without producing any starvation at all.
    */
   appliedTick = -1;
 
@@ -97,12 +95,12 @@ export class InputBuffer {
   private readonly out: InputFrame = createInputFrame();
 
   /**
-   * Guarda um quadro recebido.
+   * Stores a received frame.
    *
-   * Duplicatas são descartadas em silêncio — e são esperadas, porque o cliente
-   * manda cada quadro mais de uma vez de propósito (ver `INPUT_BATCH`). O mesmo
-   * vale para quadros de ticks que já passaram: chegaram tarde, e aplicá-los
-   * seria voltar no tempo.
+   * Duplicates are discarded in silence — and they are expected, because the client sends
+   * each frame more than once on purpose (see `INPUT_BATCH`). The same goes for frames
+   * from ticks that have already passed: they arrived late, and applying them would be
+   * going back in time.
    */
   push(frame: InputFrame): void {
     if (frame.tick <= this.lastConsumedTick) return;
@@ -116,11 +114,11 @@ export class InputBuffer {
   }
 
   /**
-   * O quadro deste passo.
+   * This step's frame.
    *
-   * @returns o quadro a aplicar. Nunca `null` — a simulação não pode pular um
-   *   passo à espera da rede, então a fome é resolvida com repetição, e não com
-   *   ausência. Ver o cabeçalho.
+   * @returns the frame to apply. Never `null` — the simulation cannot skip a step waiting
+   *   for the network, so starvation is resolved with repetition, and not with absence.
+   *   See the header.
    */
   consume(tick: number): InputFrame {
     this.lastConsumedTick = tick;
@@ -146,7 +144,7 @@ export class InputBuffer {
     this.dropStale(tick);
     this.depth = this.frames.size;
 
-    // Fome: repete o que dá para repetir. Ver as três regras no cabeçalho.
+    // Starvation: repeat what can be repeated. See the three rules in the header.
     this.out.tick = tick;
     this.out.held = this.last.held;
     this.out.moveX = this.last.moveX;
@@ -154,9 +152,9 @@ export class InputBuffer {
     this.out.pressed = 0;
     this.out.lookX = 0;
     this.out.lookY = 0;
-    // O olhar absoluto **repete**, e é o oposto do delta: repetir um incremento
-    // gira a cabeça sozinha, repetir uma posição a deixa parada, que é o que
-    // "nada mudou" quer dizer. Ver `PlayerController.applyLook`.
+    // The absolute gaze **repeats**, and it is the opposite of the delta: repeating an
+    // increment turns the head on its own, repeating a position leaves it still, which is
+    // what "nothing changed" means. See `PlayerController.applyLook`.
     this.out.yaw = this.last.yaw;
     this.out.pitch = this.last.pitch;
     this.out.absoluteView = this.last.absoluteView;
@@ -164,39 +162,37 @@ export class InputBuffer {
   }
 
   /**
-   * O quadro mais antigo da fila, quando **tudo** que há nela é futuro.
+   * The oldest frame in the queue, when **everything** in it is from the future.
    *
-   * ⚠️ Existe por causa de um estado que parece impossível e não é: a fila cheia
-   * e o host passando fome ao mesmo tempo. Medido num duelo real — 21 quadros
-   * guardados e 1.340 fomes acumuladas, com o jogador do outro lado relatando
-   * que **não conseguia controlar o barco**.
+   * ⚠️ It exists because of a state that looks impossible and is not: the queue full and
+   * the host starving at the same time. Measured in a real duel — 21 frames stored and
+   * 1,340 starvations accumulated, with the player on the other side reporting that they
+   * **could not control the boat**.
    *
-   * A causa é um salto no relógio do cliente. Quando a janela de quem simula
-   * congela (uma aba em segundo plano basta) e volta, os dois relógios divergem
-   * o bastante para o cliente saltar em vez de derivar — e o salto abre um
-   * **buraco** na numeração: os ticks pulados nunca foram enviados, e nunca
-   * serão. O host, consumindo um por um, encontra buraco em todos eles, repete o
-   * último comando conhecido e passa a ignorar tudo que o jogador faz, enquanto
-   * a fila engorda com quadros de um futuro que ele levaria vinte segundos para
-   * alcançar.
+   * The cause is a jump in the client's clock. When the simulating window freezes (a
+   * background tab is enough) and comes back, the two clocks diverge enough for the
+   * client to jump instead of drift — and the jump opens a **gap** in the numbering: the
+   * skipped ticks were never sent, and never will be. The host, consuming them one by
+   * one, finds a gap at every one, repeats the last known command and starts ignoring
+   * everything the player does, while the queue fattens with frames from a future it
+   * would take twenty seconds to reach.
    *
-   * Aceitar o mais antigo disponível fecha o buraco em um passo: o comando é de
-   * um instante ligeiramente diferente do pedido — e é o comando **certo**, em
-   * vez de um comando velho repetido.
+   * Accepting the oldest available closes the gap in one step: the command is from a
+   * slightly different instant than the one requested — and it is the **right** command,
+   * instead of an old command repeated.
    *
-   * ## Duas guardas, e não uma
+   * ## Two guards, and not one
    *
-   * A versão anterior só aceitava com a fila **gorda**, o que resolvia o salto
-   * de relógio e deixava passar o caso comum: o buraco de um quadro só. Na fila
-   * rasa em que um duelo saudável trabalha — a mira é justamente manter uma ou
-   * duas unidades de folga —, oito quadros guardados nunca acontecem, então a
-   * perda das duas cópias de um mesmo comando caía direto na política de fome
-   * mesmo com o comando seguinte já em mãos. Uma fome dessas é relatada, e um
-   * relato de fome manda o avanço subir: o remédio de um problema que não
-   * existia virava latência permanente.
+   * The previous version only accepted with the queue **fat**, which solved the clock
+   * jump and let the common case through: the single-frame gap. On the shallow queue a
+   * healthy duel works with — the aim is precisely to keep one or two units of slack —,
+   * eight stored frames never happen, so losing both copies of the same command fell
+   * straight into the starvation policy even with the next command already in hand. A
+   * starvation like that is reported, and a starvation report pushes the lead up: the
+   * remedy for a problem that did not exist became permanent latency.
    *
-   * Hoje há duas: buraco **curto** é aceito sempre (ver `AHEAD_WINDOW`), e o
-   * salto grande continua exigindo a fila gorda.
+   * Today there are two: a **short** gap is always accepted (see `AHEAD_WINDOW`), and the
+   * big jump still requires the fat queue.
    */
   private claimAhead(tick: number): InputFrame | null {
     let earliest: InputFrame | null = null;
@@ -206,16 +202,16 @@ export class InputBuffer {
     }
     if (!earliest) return null;
 
-    // Buraco curto: o comando certo está logo ali, e aplicá-lo um passo
-    // adiantado é melhor que repetir o anterior. Ver `AHEAD_WINDOW`.
+    // Short gap: the right command is right there, and applying it one step early is
+    // better than repeating the previous one. See `AHEAD_WINDOW`.
     if (earliest.tick - tick <= AHEAD_WINDOW) return earliest;
 
-    // Salto grande: só com a fila visivelmente gorda, que é o sinal de que o
-    // relógio do cliente pulou. Ver o parágrafo acima.
+    // Big jump: only with the queue visibly fat, which is the sign that the client's
+    // clock jumped. See the paragraph above.
     return this.frames.size >= AHEAD_THRESHOLD ? earliest : null;
   }
 
-  /** Fomes desde o último instantâneo. Zerado por quem as reporta. */
+  /** Starvations since the last snapshot. Zeroed by whoever reports them. */
   takeStarvedSinceReport(): number {
     const value = this.starvedSinceReport;
     this.starvedSinceReport = 0;
@@ -236,7 +232,7 @@ export class InputBuffer {
     this.appliedTick = -1;
   }
 
-  /** Devolve ao pool o que ficou para trás. */
+  /** Returns to the pool whatever was left behind. */
   private dropStale(tick: number): void {
     for (const [key, frame] of this.frames) {
       if (key > tick) continue;

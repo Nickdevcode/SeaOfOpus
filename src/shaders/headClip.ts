@@ -1,106 +1,104 @@
 /**
- * Sumir com a cabeça sem sumir com a sombra.
+ * Making the head disappear without making the shadow disappear.
  *
- * Em primeira pessoa o olho do jogador fica a 1,66 m e o crânio do personagem
- * vai de 1,545 m a 1,76 m — com o tricórnio até 1,94 m. A câmera nasce **dentro**
- * da malha, e o material do pirata é `DoubleSide`, então o interior da cabeça
- * renderiza: sem recorte, a primeira pessoa é uma tela de couro cabeludo por
- * dentro. É por isso que o corpo vivia escondido inteiro.
+ * In first person the player's eye sits at 1.66 m and the character's skull runs from
+ * 1.545 m to 1.76 m — with the tricorn up to 1.94 m. The camera is born **inside** the
+ * mesh, and the pirate's material is `DoubleSide`, so the head's interior renders:
+ * without a clip, first person is a screenful of scalp seen from within. That is why the
+ * body used to be hidden entirely.
  *
- * O recorte é `discard` no fragmento, decidido pelo **peso de skinning** do
- * vértice nos ossos da cabeça. Um peso é um campo contínuo, então o corte cai
- * numa curva suave ao longo do pescoço em vez de num plano, e o limiar move essa
- * curva sem recompilar nada — que é o que permite calibrar isto com o olho na
- * tela.
+ * The clip is a `discard` in the fragment, decided by the vertex's **skinning weight** on
+ * the head bones. A weight is a continuous field, so the cut falls on a smooth curve
+ * along the neck instead of on a plane, and the threshold moves that curve without
+ * recompiling anything — which is what allows calibrating this with your eye on the
+ * screen.
  *
- * **Por que não `head.scale = 0`.** É o truque clássico e aqui ele não serve. Os
- * vértices do pescoço e da gola têm peso **misto** (`PART_Neck` divide entre
- * `neck`, `head` e `spine_03`; `PART_Coat_Collar` entre quatro ossos). Encolher o
- * osso não os apaga: **arrasta** cada um em direção à origem do `head` na fração
- * do peso que tiver, e o que sobra é um funil amassado a 20 cm do olho, para
- * sempre. E não seria nem mais barato — os seis clipes gravam SCALE dos 43 nós,
- * então a escala teria de ser reescrita a cada quadro depois do mixer.
+ * **Why not `head.scale = 0`.** It is the classic trick and here it does not serve. The
+ * neck's and collar's vertices have **mixed** weights (`PART_Neck` splits between `neck`,
+ * `head` and `spine_03`; `PART_Coat_Collar` between four bones). Shrinking the bone does
+ * not erase them: it **drags** each one toward `head`'s origin by whatever fraction of
+ * weight it has, and what is left is a crumpled funnel 20 cm from the eye, forever. And
+ * it would not even be cheaper — the six clips record SCALE for all 43 nodes, so the
+ * scale would have to be rewritten every frame after the mixer.
  *
- * **Por que não `clippingPlanes`.** Um plano de recorte é infinito. Um plano na
- * altura do pescoço, com `clipShadows = false`, daria "invisível com sombra
- * inteira" de graça — e amputaria as **mãos na escada**, que no `ClimbUp` sobem
- * bem acima do pescoço. Ou seja: mataria justamente o que a primeira pessoa veio
- * mostrar.
+ * **Why not `clippingPlanes`.** A clipping plane is infinite. A plane at neck height,
+ * with `clipShadows = false`, would give "invisible with a full shadow" for free — and it
+ * would amputate the **hands on the ladder**, which in `ClimbUp` rise well above the
+ * neck. That is: it would kill precisely what first person came to show.
  *
- * **Por que `onBeforeCompile`, que não se usa em nenhum outro lugar daqui.** O
- * padrão da casa é `ShaderMaterial` escrito do zero (`hullClip.ts`, `Ocean`,
- * `Sky`) porque ali o shader **é** o trabalho — são efeitos autorais. Aqui é o
- * oposto: a exigência é preservar exatamente o PBR que o `GLTFLoader` montou
- * (normal map, ORM empacotado, skinning por textura de ossos) e acrescentar uma
- * linha. Reescrever `meshphysical` seria assumir a manutenção de umas 800 linhas
- * de GLSL do three para adicionar um `discard`.
+ * **Why `onBeforeCompile`, which is not used anywhere else here.** The house pattern is a
+ * `ShaderMaterial` written from scratch (`hullClip.ts`, `Ocean`, `Sky`) because there the
+ * shader **is** the work — they are authored effects. Here it is the opposite: the
+ * requirement is to preserve exactly the PBR `GLTFLoader` assembled (normal map, packed
+ * ORM, skinning through a bone texture) and add one line. Rewriting `meshphysical` would
+ * be taking on the maintenance of some 800 lines of three's GLSL in order to add a
+ * `discard`.
  *
- * **O efeito colateral é o melhor da feature.** `WebGLShadowMap.getDepthMaterial`
- * copia do material de origem só uma lista fechada de campos — `visible`,
- * `side`, `alphaMap`, `alphaTest`, `clipShadows`, `displacementMap` e afins — e
- * `onBeforeCompile` **não** está nela. O mapa de sombras desenha o pirata
- * inteiro, com chapéu, enquanto o passe de cor descarta a cabeça. O jogador
- * ganha a própria sombra no convés, que em primeira pessoa nunca existiu (objeto
- * invisível nem entra no `renderObject` do shadow map). Se um dia se quiser a
- * sombra também sem cabeça, o gancho é `mesh.customDepthMaterial`, que tem
- * prioridade — não é o caso hoje.
+ * **The side effect is the best part of the feature.** `WebGLShadowMap.getDepthMaterial`
+ * copies from the source material only a closed list of fields — `visible`, `side`,
+ * `alphaMap`, `alphaTest`, `clipShadows`, `displacementMap` and the like — and
+ * `onBeforeCompile` is **not** on it. The shadow map draws the whole pirate, hat
+ * included, while the color pass discards the head. The player gets their own shadow on
+ * the deck, which in first person never existed (an invisible object does not even enter
+ * the shadow map's `renderObject`). If one day the shadow should be headless too, the
+ * hook is `mesh.customDepthMaterial`, which takes priority — that is not the case today.
  */
 
 import * as THREE from 'three';
 
 /**
- * Limiar que desliga o recorte.
+ * The threshold that switches the clip off.
  *
- * Maior que qualquer peso somado possível (os pesos de um vértice somam 1, e a
- * parcela do pescoço entra no máximo com 1 de fator), então nada é descartado
- * sem trocar de programa nem recompilar shader. É o que a terceira pessoa usa
- * quando a câmera se solta com `C`.
+ * Larger than any possible summed weight (a vertex's weights add up to 1, and the neck's
+ * share comes in with a factor of at most 1), so nothing is discarded without swapping
+ * programs or recompiling a shader. It is what third person uses when the camera comes
+ * loose with `C`.
  */
 export const HEAD_CLIP_OFF = 2;
 
 /**
- * Peso acima do qual o fragmento some, em [0, 1].
+ * The weight above which the fragment disappears, in [0, 1].
  *
- * Meio significa "mais da metade deste vértice pertence à cabeça", que
- * geometricamente cai no meio do pescoço — o `head` começa em 1,545 m e o `neck`
- * em 1,425 m. O tricórnio, os olhos, o nariz, as orelhas, a boca, o bigode e o
- * cabelo estão 100% no `head` e somem em qualquer limiar abaixo de 1.
+ * A half means "more than half of this vertex belongs to the head", which geometrically
+ * falls in the middle of the neck — `head` begins at 1.545 m and `neck` at 1.425 m. The
+ * tricorn, the eyes, the nose, the ears, the mouth, the moustache and the hair are 100%
+ * on `head` and disappear at any threshold below 1.
  */
 export const HEAD_CLIP_THRESHOLD = 0.5;
 
 /**
- * Quanto o peso do osso `neck` conta para o corte, em [0, 1].
+ * How much the `neck` bone's weight counts toward the cut, in [0, 1].
  *
- * Em zero só a cabeça some e sobra um toco de pescoço apontando para a câmera.
- * Subindo, o corte desce em direção à gola do casaco. Fica em zero por padrão
- * porque o toco está fora do campo de visão na esmagadora maioria dos ângulos, e
- * cortar fundo demais abre o casaco por dentro quando se olha para baixo.
+ * At zero only the head disappears and a stump of neck is left pointing at the camera.
+ * Raising it, the cut descends toward the coat's collar. It stays at zero by default
+ * because the stump is out of the field of view at the overwhelming majority of angles,
+ * and cutting too deep opens the coat from the inside when you look down.
  */
 export const HEAD_CLIP_NECK_SHARE = 0;
 
-/** Controle do recorte já instalado num material. */
+/** The control for a clip already installed in a material. */
 export interface HeadClipHandle {
-  /** Limiar em vigor. `HEAD_CLIP_OFF` quer dizer desligado. */
+  /** The threshold in force. `HEAD_CLIP_OFF` means switched off. */
   readonly threshold: number;
-  /** Parcela do pescoço em vigor. */
+  /** The neck share in force. */
   readonly neckShare: number;
   setThreshold(value: number): void;
   setNeckShare(value: number): void;
 }
 
-/** Declarações comuns aos dois estágios. */
+/** Declarations common to both stages. */
 const DECLARATIONS = /* glsl */ `
 varying float vHeadClipWeight;
 `;
 
 /**
- * Soma o peso do vértice nos ossos da cabeça.
+ * Sums the vertex's weight on the head bones.
  *
- * Sem ramificação e sem indexar vetor com índice variável: `step` devolve 1
- * exatamente no osso procurado (os índices são inteiros, então a diferença é 0
- * ou pelo menos 1) e o `dot` soma as quatro influências de uma vez. Um índice
- * negativo — o osso que não existe num GLB antigo — nunca casa com nada, e o
- * termo cai a zero sozinho.
+ * With no branching and no indexing a vector with a variable index: `step` returns 1
+ * exactly at the bone being looked for (the indices are integers, so the difference is 0
+ * or at least 1) and the `dot` sums the four influences at once. A negative index — the
+ * bone that does not exist in an old GLB — never matches anything, and the term falls to
+ * zero on its own.
  */
 const VERTEX_BODY = /* glsl */ `
 #ifdef USE_SKINNING
@@ -112,29 +110,28 @@ const VERTEX_BODY = /* glsl */ `
 `;
 
 /**
- * Instala o recorte num material do personagem.
+ * Installs the clip in one of the character's materials.
  *
- * Não clona **aqui**, e não precisa: o GLB é carregado uma vez e serve os dois
- * corpos a bordo, mas quem já entrega material privado por avatar é
- * `CharacterAsset.instantiateCharacter`. A ordem importa e é essa — sem o clone
- * de lá, ligar o recorte para ver pelos próprios olhos decapitaria o adversário
- * no mesmo quadro, porque os dois piratas dividiriam o uniform de limiar.
+ * It does not clone **here**, and it does not need to: the GLB is loaded once and serves
+ * both bodies aboard, but what already hands out a private material per avatar is
+ * `CharacterAsset.instantiateCharacter`. The order matters and it is that one — without
+ * the clone over there, switching the clip on to see through your own eyes would behead
+ * the opponent in the same frame, because both pirates would share the threshold uniform.
  *
- * O programa compilado, esse sim, é compartilhado de graça:
- * `Material.customProgramCacheKey` devolve o **texto-fonte** do
- * `onBeforeCompile`, idêntico para toda closure criada desta mesma expressão. Um
- * programa, N conjuntos de uniforms.
+ * The compiled program, that one is shared for free:
+ * `Material.customProgramCacheKey` returns `onBeforeCompile`'s **source text**, identical
+ * for every closure created from this same expression. One program, N sets of uniforms.
  *
- * @param headIndex índice do osso `head` em `skeleton.bones`, ou -1.
- * @param neckIndex índice do osso `neck` em `skeleton.bones`, ou -1.
+ * @param headIndex index of the `head` bone in `skeleton.bones`, or -1.
+ * @param neckIndex index of the `neck` bone in `skeleton.bones`, or -1.
  */
 export function installHeadClip(
   material: THREE.Material,
   headIndex: number,
   neckIndex: number,
 ): HeadClipHandle {
-  // Começa desligado: quem liga é o avatar, no primeiro quadro em que souber se
-  // a câmera está nos olhos do personagem.
+  // It starts switched off: what switches it on is the avatar, on the first frame it
+  // knows whether the camera is in the character's eyes.
   const uniforms = {
     uHeadClipHead: { value: headIndex },
     uHeadClipNeck: { value: neckIndex },
@@ -154,8 +151,8 @@ uniform float uHeadClipNeck;
 uniform float uHeadClipNeckShare;
 ${DECLARATIONS}`,
       )
-      // Depois de `begin_vertex` só porque é uma âncora que existe em qualquer
-      // material; a conta não depende de nada que venha antes.
+      // After `begin_vertex` only because it is an anchor that exists in any material;
+      // the computation does not depend on anything that comes before.
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERTEX_BODY}`);
 
     shader.fragmentShader = shader.fragmentShader
@@ -165,8 +162,8 @@ ${DECLARATIONS}`,
 uniform float uHeadClipThreshold;
 ${DECLARATIONS}`,
       )
-      // Antes de tudo o mais: o fragmento descartado não paga normal map,
-      // amostragem de ORM nem iluminação.
+      // Before everything else: the discarded fragment pays for no normal map, no ORM
+      // sampling and no lighting.
       .replace(
         '#include <clipping_planes_fragment>',
         `if (vHeadClipWeight > uHeadClipThreshold) discard;

@@ -1,86 +1,88 @@
 /**
- * O corpo que se torce: pernas para onde se anda, tronco para onde se olha.
+ * The body that twists: legs where you walk, torso where you look.
  *
- * Fora da primeira pessoa o corpo inteiro aponta para a direção do movimento, e
- * está certo — sem clipes de andar de lado e de ré, um corpo preso ao olhar
- * desliza de costas, o *moonwalk*. Vestindo o corpo, essa mentira barata deixa de
- * ser invisível: andando para trás o jogador veria os próprios pés apontados
- * para ele, e o peito virado para o lado errado da tela.
+ * Outside first person the whole body points in the movement's direction, and that is
+ * right — with no strafing or backward clips, a body pinned to the gaze slides backward,
+ * the *moonwalk*. Wearing the body, that cheap lie stops being invisible: walking
+ * backward the player would see their own feet pointed at them, and their chest turned to
+ * the wrong side of the screen.
  *
- * A saída é a de sempre em jogo de primeira pessoa: **separar os dois**. As
- * pernas continuam com a direção do movimento, que é a única que a animação sabe
- * andar; o tronco fica com o olhar, que é a única que a câmera aceita. A
- * diferença vira torção de quadril, e quem paga é a coluna.
+ * The way out is the usual one in a first-person game: **separate the two**. The legs
+ * keep the movement's direction, which is the only one the animation knows how to walk;
+ * the torso keeps the gaze, which is the only one the camera accepts. The difference
+ * becomes hip twist, and what pays is the spine.
  *
- * ## O que se faz com os ossos
+ * ## What is done to the bones
  *
- * Roda-se tudo abaixo do osso `root` pelo desvio, e devolve-se o desvio
- * distribuído pela coluna. O resultado é pernas em `legYaw` e ombros de volta em
- * `torsoYaw`, sem tocar em braços, pescoço nem cabeça — eles herdam a coluna e
- * chegam corretos de graça.
+ * Everything below the `root` bone is rotated by the offset, and the offset is given back
+ * distributed along the spine. The result is legs at `legYaw` and shoulders back at
+ * `torsoYaw`, without touching arms, neck or head — they inherit the spine and arrive
+ * correct for free.
  *
- * Distribuir por `spine_01/02/03` em vez de torcer um osso só não é capricho: é
- * a mesma decisão que `anim_gait.pose_spine` já tomou para a contra-torção da
- * marcha, e pelo mesmo motivo escrito lá — concentrar a torção num disco faz um
- * vinco no casaco em vez de um tronco inclinado. Os pesos são os mesmos.
+ * Distributing across `spine_01/02/03` instead of twisting a single bone is not
+ * fussiness: it is the same decision `anim_gait.pose_spine` already made for the gait's
+ * counter-twist, and for the same reason written over there — concentrating the twist in
+ * one disc makes a crease in the coat instead of a leaning torso. The weights are the
+ * same.
  *
- * **A conjugação não é enfeite.** O eixo Y local do `pelvis` não é a vertical do
- * personagem: o rig anima `pelvis_roll` de 4,2° e `pelvis_pitch` de 3°, e a
- * conversão Z-up→Y-up do glTF já girou os eixos de repouso. Multiplicar o
- * quaternion do osso por um yaw cru torceria em torno de um eixo inclinado e o
- * quadril sairia jogando para os lados conforme a passada. Cada rotação é levada
- * para o espaço do osso antes de ser aplicada.
+ * **The conjugation is not decoration.** The `pelvis`'s local Y axis is not the
+ * character's vertical: the rig animates `pelvis_roll` by 4.2° and `pelvis_pitch` by 3°,
+ * and glTF's Z-up→Y-up conversion has already rotated the rest axes. Multiplying the
+ * bone's quaternion by a raw yaw would twist around a tilted axis and the hip would end
+ * up throwing side to side with the stride. Each rotation is carried into the bone's space
+ * before being applied.
  *
- * ## Andar de ré sem clipe de ré
+ * ## Walking backward with no backward clip
  *
- * Acima de um certo desvio, as pernas dobram meia-volta e a passada é **lida ao
- * contrário** — o ciclo de caminhada rodado para trás é uma caminhada para trás
- * convincente, porque os contatos de pé caem nos mesmos instantes. Quem consome
- * `reversed` é o `PlayerAvatar`, que inverte a leitura de `.time` do clipe sem
- * tocar na fase: ela é compartilhada com o balanço da câmera e com os testes.
+ * Past a certain offset, the legs flip half a turn and the stride is **read backward** —
+ * the walk cycle run in reverse is a convincing backward walk, because the foot contacts
+ * land at the same instants. What consumes `reversed` is `PlayerAvatar`, which inverts
+ * the reading of the clip's `.time` without touching the phase: that is shared with the
+ * camera's sway and with the tests.
  *
- * A dobra tem **histerese** por necessidade aritmética, não por gosto: no strafe
- * puro o desvio é exatamente 90°, e um limiar único ali faz as pernas darem
- * meia-volta de 180° a cada quadro.
+ * The flip has **hysteresis** out of arithmetic necessity, not out of taste: in a pure
+ * strafe the offset is exactly 90°, and a single threshold there makes the legs flip 180°
+ * every frame.
  */
 
 import * as THREE from 'three';
 import { DEG, clamp, damp, wrapAngle } from '../core/MathUtils';
 
 /**
- * Quanto o quadril pode desviar dos ombros, em radianos.
+ * How far the hips may deviate from the shoulders, in radians.
  *
- * Uma separação quadril-ombro real fica em 15–25° andando, e chega a uns 45°
- * parada. 65° é mais do que qualquer anatomia entrega, e é de propósito: quando
- * o limite morde — strafe puro, ré parcial — a escolha é entre escorregar o pé e
- * torcer o boneco, e em primeira pessoa **não se vê o próprio quadril**, mas se
- * vê o pé patinando de relance no rodapé da tela. O erro cai para o lado que não
- * aparece.
+ * A real hip-shoulder separation sits at 15–25° while walking, and reaches some 45°
+ * standing still. 65° is more than any anatomy delivers, and it is on purpose: when the
+ * limit bites — pure strafe, partial reverse — the choice is between sliding the foot and
+ * twisting the figure, and in first person you **do not see your own hips**, but you do
+ * catch the foot skating at the bottom of the screen. The error falls on the side that
+ * does not show.
  */
 const LEG_OFFSET_LIMIT = 65 * DEG;
 
 /**
- * Como a contra-torção se reparte pela coluna, da lombar para cima.
+ * How the counter-twist is shared along the spine, from the lumbar up.
  *
- * Tem de somar 1: é isso que faz os ombros voltarem exatamente para o olhar.
- * Os números são os de `anim_gait.pose_spine`.
+ * It has to add up to 1: that is what brings the shoulders back exactly onto the gaze.
+ * The numbers are `anim_gait.pose_spine`'s.
  */
 const SPINE_SHARES = [0.3, 0.35, 0.35] as const;
 
-/** Convergência das pernas ao alvo, andando, em 1/s. */
+/** The legs' convergence to the target while walking, in 1/s. */
 const LEG_CHASE_LAMBDA = 12;
 
 /**
- * Convergência das pernas ao olhar, parado, em 1/s.
+ * The legs' convergence to the gaze while standing still, in 1/s.
  *
- * Baixo de propósito: quem gira a cabeça parado vira o corpo **depois**, e é
- * essa preguiça que faz o personagem parecer habitado em vez de colado no mouse.
+ * Low on purpose: whoever turns their head standing still turns their body **afterward**,
+ * and it is that laziness that makes the character look inhabited instead of glued to the
+ * mouse.
  */
 const LEG_IDLE_LAMBDA = 4;
 
-/** Acima deste desvio o corpo passa a andar de ré. */
+/** Past this offset the body starts walking backward. */
 const LEG_REVERSE_ENTER = 100 * DEG;
-/** E só volta a andar de frente abaixo deste. A folga cobre o ruído do analógico. */
+/** And only walks forward again below this one. The gap covers the stick's noise. */
 const LEG_REVERSE_EXIT = 80 * DEG;
 
 const _up = new THREE.Vector3(0, 1, 0);
@@ -91,15 +93,15 @@ const _world = new THREE.Quaternion();
 const _original = new THREE.Quaternion();
 
 /**
- * Dobra o rumo das pernas para trás quando o desvio passa do limite.
+ * Flips the legs' heading backward when the offset passes the limit.
  *
- * Separada da classe porque é aritmética pura e é ela que carrega o único caso
- * traiçoeiro (o strafe de 90° oscilando entre os dois estados) — assim dá para
- * medir sem esqueleto nenhum. Ver `tests/locomotion.ts`.
+ * Kept outside the class because it is pure arithmetic and it is what carries the one
+ * treacherous case (the 90° strafe oscillating between the two states) — that way it can
+ * be measured with no skeleton at all. See `tests/locomotion.ts`.
  *
- * @param heading para onde as pernas iriam, no referencial do navio.
- * @param torsoYaw para onde o tronco aponta.
- * @param reversed se o corpo já vinha andando de ré.
+ * @param heading where the legs would go, in the ship's frame.
+ * @param torsoYaw where the torso points.
+ * @param reversed whether the body was already walking backward.
  */
 export function foldLegHeading(
   heading: number,
@@ -112,37 +114,37 @@ export function foldLegHeading(
 }
 
 export class FirstPersonBody {
-  /** Para onde as pernas apontam, no referencial do navio. */
+  /** Where the legs point, in the ship's frame. */
   legYaw = 0;
-  /** `true` quando a passada tem de ser lida ao contrário. */
+  /** `true` when the stride has to be read backward. */
   reversed = false;
-  /** Desvio aplicado neste quadro, em radianos. Já grampeado. Diagnóstico. */
+  /** The offset applied this frame, in radians. Already clamped. Diagnostic. */
   offset = 0;
 
   private rootBone: THREE.Bone | null = null;
   private pelvis: THREE.Bone | null = null;
   private readonly spine: THREE.Bone[] = [];
   /**
-   * Orientação do rig dentro do avatar, do pai do osso `root` para cima.
+   * The rig's orientation inside the avatar, from the `root` bone's parent upward.
    *
-   * Estática — nenhum clipe anima os nós acima do esqueleto —, então é medida uma
-   * vez. É ela que leva uma rotação do espaço do avatar para o espaço em que o
-   * quaternion do osso `root` vive.
+   * Static — no clip animates the nodes above the skeleton —, so it is measured once. It
+   * is what carries a rotation from the avatar's space into the space the `root` bone's
+   * quaternion lives in.
    */
   private readonly rigQuaternion = new THREE.Quaternion();
   private ready = false;
   private started = false;
 
   /**
-   * Resolve os ossos. Devolve `false` se algum faltar.
+   * Resolves the bones. Returns `false` if any is missing.
    *
-   * Faltar osso não é motivo para derrubar nada: um GLB antigo em cache do
-   * navegador pode não ter a coluna com estes nomes, e nesse caso o corpo perde
-   * só a torção — continua andando, pulando e subindo escada. É a mesma política
-   * que o `PlayerAvatar` já aplica ao clipe de pulo e ao de escalada.
+   * A missing bone is no reason to bring anything down: an old GLB cached by the browser
+   * may not have the spine under these names, and in that case the body loses only the
+   * twist — it goes on walking, jumping and climbing. It is the same policy `PlayerAvatar`
+   * already applies to the jump clip and to the climb one.
    *
-   * @param avatarRoot o nó do avatar; a torção é definida no espaço dele, depois
-   *   de o rumo do corpo já ter sido aplicado.
+   * @param avatarRoot the avatar's node; the twist is defined in its space, after the
+   *   body's heading has already been applied.
    */
   attach(skeleton: THREE.Skeleton, avatarRoot: THREE.Object3D): boolean {
     this.ready = false;
@@ -161,8 +163,8 @@ export class FirstPersonBody {
     for (const bone of spine) this.spine.push(bone!);
 
     this.rigQuaternion.identity();
-    // De baixo para cima recolhendo, de cima para baixo compondo: o acumulado é
-    // o produto na ordem do ancestral mais alto para o mais baixo.
+    // Bottom-up to collect, top-down to compose: the accumulated value is the product in
+    // order from the highest ancestor down to the lowest.
     const chain: THREE.Object3D[] = [];
     for (let node = rootBone.parent; node && node !== avatarRoot; node = node.parent) {
       chain.push(node);
@@ -174,22 +176,22 @@ export class FirstPersonBody {
   }
 
   /**
-   * Persegue o rumo das pernas.
+   * Chases the legs' heading.
    *
-   * O estado guardado é o **rumo**, no referencial do navio, e não o desvio em
-   * relação aos ombros. A diferença aparece no ar: ali o alvo congela, e com um
-   * rumo guardado quem gira o mouse no meio do salto vê as pernas ficarem onde
-   * estavam — que é o certo. Com um desvio guardado, elas girariam junto com a
-   * câmera, que é exatamente o defeito que a locomoção já tinha consertado no
-   * chão.
+   * The stored state is the **heading**, in the ship's frame, and not the offset relative
+   * to the shoulders. The difference shows in the air: there the target freezes, and with
+   * a stored heading whoever swings the mouse mid-jump sees the legs stay where they were
+   * — which is correct. With a stored offset, they would turn along with the camera,
+   * which is exactly the defect the locomotion had already fixed on the ground.
    *
-   * @param torsoYaw para onde o tronco aponta, no referencial do navio.
-   * @param target para onde as pernas deveriam ir, ou `null` para congelar.
-   * @param moving se o alvo veio do movimento (e não do olhar de quem está parado).
+   * @param torsoYaw where the torso points, in the ship's frame.
+   * @param target where the legs should go, or `null` to freeze.
+   * @param moving whether the target came from movement (and not from the gaze of someone
+   *   standing still).
    */
   update(dt: number, torsoYaw: number, target: number | null, moving: boolean): void {
     if (target === null) {
-      // Congelado: o desvio se ajusta sozinho conforme o tronco gira.
+      // Frozen: the offset adjusts itself as the torso turns.
       this.offset = this.clampOffset(torsoYaw);
       return;
     }
@@ -201,8 +203,8 @@ export class FirstPersonBody {
       this.legYaw = folded.heading;
       this.started = true;
     } else {
-      // Pelo caminho mais curto, como o rumo do corpo: sem isto, cruzar ±π faz as
-      // pernas girarem quase uma volta inteira num quadro.
+      // By the shortest path, like the body's heading: without this, crossing ±π makes
+      // the legs spin nearly a full turn in one frame.
       const lambda = moving ? LEG_CHASE_LAMBDA : LEG_IDLE_LAMBDA;
       const delta = wrapAngle(folded.heading - this.legYaw);
       this.legYaw = damp(this.legYaw, this.legYaw + delta, lambda, dt);
@@ -212,12 +214,12 @@ export class FirstPersonBody {
   }
 
   /**
-   * Prende as pernas a um rumo e desliga a torção.
+   * Pins the legs to a heading and switches the twist off.
    *
-   * É o caso da escada: mãos e pés estão nas barras, e virar a cabeça para olhar
-   * o convés lá embaixo não pode torcer o tronco de quem está pendurado. Escrever
-   * o rumo em vez de só zerar o desvio é o que evita o safanão ao largar — as
-   * pernas já estão onde o corpo as deixou, e o desvio nasce de zero.
+   * It is the ladder's case: hands and feet are on the rungs, and turning your head to
+   * look at the deck below cannot twist the torso of someone hanging there. Writing the
+   * heading instead of only zeroing the offset is what avoids the jerk on letting go —
+   * the legs are already where the body left them, and the offset is born at zero.
    */
   hold(yaw: number): void {
     this.legYaw = yaw;
@@ -231,32 +233,33 @@ export class FirstPersonBody {
   }
 
   /**
-   * Escreve a torção nos ossos. **Depois** de `mixer.update(dt)`.
+   * Writes the twist into the bones. **After** `mixer.update(dt)`.
    *
-   * Tem de ser todo quadro, e a ordem não é negociável: os seis clipes animam os
-   * 43 nós com peso somando 1, então o mixer reescreve `root`, `pelvis` e a
-   * coluna inteira a cada passagem. O que se escreve aqui não realimenta o mixer
-   * — ele guarda a pose original dele por dentro —, então nada acumula.
+   * It has to be every frame, and the order is not negotiable: the six clips animate the
+   * 43 nodes with weights adding up to 1, so the mixer rewrites `root`, `pelvis` and the
+   * whole spine on every pass. What is written here does not feed back into the mixer —
+   * it keeps its own original pose inside —, so nothing accumulates.
    *
-   * O acumulado da coluna é colhido **antes** de qualquer escrita, e o osso `root`
-   * é o último a ser tocado, porque é ele que os acumulados usam.
+   * The spine's accumulator is collected **before** any write, and the `root` bone is the
+   * last one touched, because it is what the accumulators use.
    */
   apply(): void {
     if (!this.ready || this.offset === 0) return;
     const rootBone = this.rootBone!;
     const pelvis = this.pelvis!;
 
-    // A rotação pedida, no espaço do avatar.
+    // The requested rotation, in the avatar's space.
     _rotation.setFromAxisAngle(_up, this.offset);
 
-    // W do pelvis: do avatar até ele, com os quaternions ainda intactos.
+    // The pelvis's W: from the avatar down to it, with the quaternions still intact.
     _world.copy(this.rigQuaternion).multiply(rootBone.quaternion).multiply(pelvis.quaternion);
 
     for (let i = 0; i < this.spine.length; i++) {
       const bone = this.spine[i]!;
       _original.copy(bone.quaternion);
 
-      // s ← W⁻¹ · R^(-fração) · W · s, com W o acumulado até o **pai** do osso.
+      // s ← W⁻¹ · R^(-share) · W · s, with W the accumulator down to the bone's
+      // **parent**.
       _delta.setFromAxisAngle(_up, -SPINE_SHARES[i]! * this.offset);
       _inverse.copy(_world).invert();
       bone.quaternion.premultiply(_inverse.multiply(_delta).multiply(_world));
@@ -264,7 +267,7 @@ export class FirstPersonBody {
       _world.multiply(_original);
     }
 
-    // r ← (A⁻¹ · R · A) · r, por último: os acumulados acima leram o valor antigo.
+    // r ← (A⁻¹ · R · A) · r, last: the accumulators above read the old value.
     _inverse.copy(this.rigQuaternion).invert();
     rootBone.quaternion.premultiply(_inverse.multiply(_rotation).multiply(this.rigQuaternion));
   }
