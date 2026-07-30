@@ -1,52 +1,53 @@
 /**
- * Balística: a física de uma bala de canhão no ar, e o inverso dela.
+ * Ballistics: the physics of a cannonball in the air, and its inverse.
  *
- * Duas coisas moram aqui, e é de propósito que morem juntas:
+ * Two things live here, and they live together on purpose:
  *
- * - **O passo de integração** que o projétil usa em voo.
- * - **O solucionador de pontaria** — dado onde o alvo está e para onde vai, qual
- *   elevação e qual direção acertam.
+ * - **The integration step** the projectile uses in flight.
+ * - **The aiming solver** — given where the target is and where it is going, which
+ *   elevation and which bearing hit.
  *
- * O solucionador não tem fórmula fechada: com arrasto quadrático a trajetória
- * deixa de ser parábola e a inversa não existe em forma analítica. Então ele
- * **simula** com a mesma função de passo que o projétil real usa, e busca o
- * ângulo por bisseção. É mais caro que uma conta de papel, e é a única maneira de
- * o tiro previsto e o tiro disparado concordarem — se a IA usasse a parábola de
- * vácuo, erraria por metros justamente nos tiros longos, que é onde a diferença
- * entre as três dificuldades tem que aparecer.
+ * The solver has no closed form: with quadratic drag the trajectory stops being a
+ * parabola and the inverse does not exist analytically. So it **simulates** with the
+ * same step function the real projectile uses, and finds the angle by bisection. It is
+ * more expensive than a pencil-and-paper calculation, and it is the only way for the
+ * predicted shot and the fired shot to agree — if the AI used the vacuum parabola, it
+ * would miss by meters precisely on the long shots, which is where the difference
+ * between the three difficulties has to show.
  *
- * Escala do problema: a 95 m/s a bala perde ~5,4 m/s² só de arrasto no início do
- * voo, contra os 9,81 da gravidade. Não é um detalhe que dê para ignorar.
+ * The scale of the problem: at 95 m/s the ball loses ~5.4 m/s² to drag alone early in
+ * the flight, against gravity's 9.81. It is not a detail you can ignore.
  */
 
 import * as THREE from 'three';
 import { AIR_DENSITY, GRAVITY, clamp } from '../core/MathUtils';
 
-/** Coeficiente de arrasto de uma esfera lisa em regime subsônico. */
+/** Drag coefficient of a smooth sphere in the subsonic regime. */
 export const SPHERE_DRAG = 0.47;
 
-/** Passo da simulação interna do solucionador, em segundos. */
+/** Step of the solver's internal simulation, in seconds. */
 const SOLVER_STEP = 1 / 120;
-/** Teto de tempo de voo que o solucionador considera, em segundos. */
+/** Ceiling on the time of flight the solver considers, in seconds. */
 const SOLVER_MAX_TIME = 14;
 
-/** Elevação mais baixa que o solucionador tenta, em radianos. */
+/** Lowest elevation the solver tries, in radians. */
 const SOLVER_MIN_ELEVATION = -0.35;
 /**
- * E a mais alta (44°).
+ * And the highest (44°).
  *
- * Fica logo abaixo do ângulo de alcance máximo de propósito: é ali que a altura
- * a uma dada distância deixa de crescer com a elevação, e a bisseção precisa de
- * monotonicidade para valer. Quem quiser o arco alto que suba o limite — mas o
- * combate naval é tiro tenso, não morteiro.
+ * It sits just below the maximum-range angle on purpose: that is where the height at a
+ * given distance stops growing with the elevation, and the bisection needs monotonicity
+ * to hold. Whoever wants the high arc should raise the limit — but naval combat is flat
+ * fire, not mortar fire.
  */
 const SOLVER_MAX_ELEVATION = 0.77;
 
 /**
- * Fator de arrasto de um projétil: `k = ½·ρ·Cd·A / m`.
+ * A projectile's drag factor: `k = ½·ρ·Cd·A / m`.
  *
- * Guardado pronto porque a desaceleração é `k·|v|·v` e essa conta roda por
- * sub-passo, por bala. Depende só de massa e raio, que não mudam em voo.
+ * Kept ready because the deceleration is `k·|v|·v` and that calculation runs per
+ * sub-step, per ball. It depends only on mass and radius, which do not change in
+ * flight.
  */
 export function dragFactor(mass: number, radius: number): number {
   return (0.5 * AIR_DENSITY * SPHERE_DRAG * Math.PI * radius * radius) / mass;
@@ -55,11 +56,11 @@ export function dragFactor(mass: number, radius: number): number {
 const _accel = new THREE.Vector3();
 
 /**
- * Um passo de voo, semi-implícito: acelera primeiro, anda depois.
+ * One step of flight, semi-implicit: accelerate first, move afterwards.
  *
- * Semi-implícito (e não Euler puro) porque com arrasto o erro do explícito se
- * acumula sempre no mesmo sentido — a bala vai parando um pouco menos do que
- * devia a cada passo, e a 60 Hz isso vira metros de alcance a mais.
+ * Semi-implicit (and not plain Euler) because with drag the explicit method's error
+ * always accumulates in the same direction — the ball slows a little less than it
+ * should on every step, and at 60 Hz that becomes meters of extra range.
  */
 export function stepBallistic(
   position: THREE.Vector3,
@@ -76,11 +77,11 @@ export function stepBallistic(
 }
 
 export interface FlightResult {
-  /** Altura relativa ao ponto de partida quando o alcance foi cruzado. */
+  /** Height relative to the starting point when the range was crossed. */
   height: number;
-  /** Tempo de voo até ali, em segundos. */
+  /** Time of flight up to there, in seconds. */
   time: number;
-  /** `false` quando a bala nunca chegou ao alcance pedido. */
+  /** `false` when the ball never reached the requested range. */
   reached: boolean;
 }
 
@@ -89,11 +90,12 @@ const _flightVel = new THREE.Vector3();
 const _previousPos = new THREE.Vector3();
 
 /**
- * Voa um tiro no plano vertical e devolve a altura ao cruzar `range`.
+ * Flies a shot in the vertical plane and returns the height at which it crosses
+ * `range`.
  *
- * Trabalha em duas dimensões (X é o alcance no chão, Y a altura) porque o
- * problema *é* bidimensional: o vento não desvia a bala neste jogo, então o
- * plano do tiro contém a origem, o alvo e a gravidade.
+ * It works in two dimensions (X is the ground range, Y the height) because the problem
+ * *is* two-dimensional: the wind does not deflect the ball in this game, so the shot's
+ * plane contains the origin, the target and gravity.
  */
 export function flyToRange(
   range: number,
@@ -110,9 +112,9 @@ export function flyToRange(
     stepBallistic(_flightPos, _flightVel, dragK, SOLVER_STEP);
 
     if (_flightPos.x >= range) {
-      // Interpola dentro do passo em que cruzou: sem isso o resultado ganha um
-      // degrau de até 80 cm (um passo de voo), e a bisseção fica procurando um
-      // ângulo que a discretização escondeu.
+      // It interpolates inside the step it crossed on: without this the result gains
+      // a step of up to 80 cm (one flight step), and the bisection ends up hunting for
+      // an angle the discretization hid.
       const span = _flightPos.x - _previousPos.x;
       const s = span > 1e-9 ? (range - _previousPos.x) / span : 0;
       return {
@@ -122,7 +124,8 @@ export function flyToRange(
       };
     }
 
-    // Já vem descendo e passou bem abaixo do alvo: não vai chegar.
+    // It is already coming down and passed well below the target: it will not get
+    // there.
     if (_flightVel.x <= 0.01) break;
   }
 
@@ -130,20 +133,21 @@ export function flyToRange(
 }
 
 export interface AimSolution {
-  /** Elevação do cano acima da horizontal, em radianos. */
+  /** Elevation of the barrel above the horizontal, in radians. */
   elevation: number;
-  /** Tempo de voo até o alvo, em segundos. */
+  /** Time of flight to the target, in seconds. */
   time: number;
 }
 
 /**
- * Elevação que faz a bala passar por (`range`, `height`) relativo à boca.
+ * The elevation that makes the ball pass through (`range`, `height`) relative to the
+ * muzzle.
  *
- * Bisseção sobre o arco baixo. A altura no alcance cresce com a elevação até o
- * ângulo de alcance máximo, e `SOLVER_MAX_ELEVATION` fica abaixo dele — dentro
- * dessa faixa a função é monótona e a bisseção é exata.
+ * Bisection over the low arc. The height at a given range grows with the elevation up
+ * to the maximum-range angle, and `SOLVER_MAX_ELEVATION` sits below it — inside that
+ * band the function is monotonic and the bisection is exact.
  *
- * @returns `null` quando nem na elevação máxima a bala chega lá.
+ * @returns `null` when even at maximum elevation the ball does not get there.
  */
 export function solveElevation(
   range: number,
@@ -160,9 +164,9 @@ export function solveElevation(
   let high = SOLVER_MAX_ELEVATION;
   let result = highest;
 
-  // Vinte voltas levam a faixa de 1,12 rad a ~1 µrad: muito além do que a
-  // travessia da carreta consegue apontar, e ainda assim barato (uma simulação
-  // de 2D por volta, ~2 mil passos no pior caso).
+  // Twenty rounds take the 1.12 rad band down to ~1 µrad: far beyond what the
+  // carriage's traverse can point, and still cheap (one 2D simulation per round,
+  // ~2 thousand steps in the worst case).
   for (let i = 0; i < 20; i++) {
     const mid = (low + high) * 0.5;
     result = flyToRange(range, mid, speed, dragK);
@@ -177,23 +181,23 @@ const _toTarget = new THREE.Vector3();
 const _predicted = new THREE.Vector3();
 
 export interface InterceptSolution extends AimSolution {
-  /** Azimute do tiro, em radianos, medido como `atan2(x, z)` no mundo. */
+  /** Azimuth of the shot, in radians, measured as `atan2(x, z)` in the world. */
   azimuth: number;
-  /** Ponto do mundo onde a bala e o alvo se encontram. */
+  /** The world point where the ball and the target meet. */
   readonly aimPoint: THREE.Vector3;
 }
 
 /**
- * Onde apontar para acertar um alvo que está andando.
+ * Where to point to hit a target that is moving.
  *
- * O problema é implícito — o tempo de voo depende de onde o alvo vai estar, e
- * onde ele vai estar depende do tempo de voo —, então resolve-se por iteração de
- * ponto fixo. Três voltas bastam: o alvo faz no máximo uns 6 m/s e a correção da
- * terceira volta já está na casa dos centímetros.
+ * The problem is implicit — the time of flight depends on where the target will be, and
+ * where it will be depends on the time of flight — so it is solved by fixed-point
+ * iteration. Three rounds are enough: the target does at most about 6 m/s and the third
+ * round's correction is already down to centimeters.
  *
- * A velocidade da boca herdada do navio que atira **não** entra aqui. Quem chama
- * subtrai a própria velocidade do alvo antes, se quiser essa correção — do jeito
- * que está, `targetVelocity` é a velocidade *relativa* que interessa.
+ * The muzzle velocity inherited from the firing ship does **not** come in here. The
+ * caller subtracts its own velocity from the target's beforehand if it wants that
+ * correction — as it stands, `targetVelocity` is the *relative* velocity that matters.
  */
 export function solveIntercept(
   muzzle: THREE.Vector3,
@@ -228,8 +232,8 @@ export function solveIntercept(
 }
 
 /**
- * Alcance máximo teórico, em metros — quanto voa um tiro saindo da linha d'água
- * no melhor ângulo. Serve para a IA descartar alvos longe demais sem simular.
+ * Theoretical maximum range, in meters — how far a shot leaving the waterline at the
+ * best angle flies. It lets the AI discard targets that are too far without simulating.
  */
 export function maxRange(speed: number, dragK: number): number {
   let best = 0;
