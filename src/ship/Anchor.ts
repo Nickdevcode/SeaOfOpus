@@ -1,30 +1,30 @@
 /**
- * Âncora e cabrestante.
+ * Anchor and capstan.
  *
- * Não existe fundo do mar neste jogo — o combate acontece em mar aberto — então
- * "fundear" aqui significa **fixar um ponto no mundo** e amarrar a proa a ele por
- * uma amarra elástica. É a mesma abstração do Sea of Thieves, onde a âncora morde
- * em qualquer lugar, e é o que permite a manobra que interessa.
+ * There is no seabed in this game — the combat happens in open water — so "anchoring"
+ * here means **fixing a point in the world** and tying the bow to it with an elastic
+ * rode. It is the same abstraction as Sea of Thieves, where the anchor bites anywhere,
+ * and it is what makes the maneuver that matters possible.
  *
- * O comportamento que vale a implementação inteira é o **anchor turn**: com a
- * amarra tesa puxando pelo escovém, o navio deixa de girar em torno do próprio
- * centro e passa a girar em torno da proa. O raio despenca e a chalupa vira quase
- * no lugar — a manobra clássica de PvP do jogo. Repare que não há uma linha de
- * código para isso: ele cai do braço entre o escovém e o centro de massa.
+ * The behavior that justifies the whole implementation is the **anchor turn**: with
+ * the rode taut pulling on the hawse, the ship stops turning about its own center and
+ * starts turning about the bow. The radius collapses and the sloop turns almost on the
+ * spot — the game's classic PvP maneuver. Note there is not a line of code for it: it
+ * falls out of the lever arm between the hawse and the center of mass.
  *
- * ## As duas metades da manobra não se parecem, e é de propósito
+ * ## The maneuver's two halves do not look alike, and that is on purpose
  *
- * **Largar é um gesto.** Solta-se o ferrolho, a amarra corre sozinha e o
- * cabrestante roda livre até a âncora bater no fundo. Um toque, e o resto é a
- * gravidade trabalhando — quem larga o ferro não faz mais nada.
+ * **Dropping is a gesture.** You release the pawl, the rode runs out on its own and
+ * the capstan spins free until the anchor hits the bottom. One tap, and the rest is
+ * gravity working — whoever drops the anchor does nothing more.
  *
- * **Recolher é trabalho.** Não há botão que suspenda o ferro: é preciso assumir
- * o cabrestante e **caminhar em volta dele**, empurrando as barras para vante,
- * volta após volta. O cabrestante gira o tanto que o marujo andou, nem um grau a
- * mais, e parar de andar é parar de recolher. É por isso que a âncora decide
- * combates no Sea of Thieves: largar custa meio segundo e desfazer custa onze.
+ * **Weighing is work.** There is no button that raises the anchor: you have to take
+ * the capstan and **walk around it**, pushing the bars forward, turn after turn. The
+ * capstan turns by however far the sailor walked, not one degree more, and stopping
+ * walking is stopping hauling. That is why the anchor decides fights in Sea of
+ * Thieves: dropping costs half a second and undoing it costs eleven.
  *
- * Ver `PlayerController.pushCapstan`, que é onde o andar vira volta de barra.
+ * See `PlayerController.pushCapstan`, which is where walking becomes turns of the bar.
  */
 
 import * as THREE from 'three';
@@ -34,88 +34,88 @@ import type { ShipModel } from './ShipBuilder';
 
 export type AnchorState = 'stowed' | 'dropping' | 'set' | 'raising';
 
-/** Profundidade em que a âncora crava, abaixo da linha d'água de projeto. */
+/** Depth the anchor bites at, below the design waterline. */
 const SEABED_DEPTH = 11;
 /**
- * Comprimento da amarra.
+ * Length of the rode.
  *
- * Um pouco maior que a profundidade, e não muito: a folga vira o raio de deriva
- * livre antes de a amarra tesar (aqui ~2,3 m). Folga demais e a âncora vira um
- * freio preguiçoso em vez de um pivô.
+ * A little longer than the depth, and not much: the slack becomes the radius of free
+ * drift before the rode goes taut (here ~2.3 m). Too much slack and the anchor becomes
+ * a lazy brake instead of a pivot.
  */
 const CHAIN_LENGTH = 11.7;
 
-/** Rigidez da amarra, em N/m. */
+/** Stiffness of the rode, in N/m. */
 const CHAIN_STIFFNESS = 165_000;
 /**
- * Amortecimento da amarra, em N·s/m.
+ * Damping of the rode, in N·s/m.
  *
- * Alto o bastante para o navio **parar**, e não para quicar. Com 60 000 a
- * chalupa esticava a amarra, era arremessada de volta e passava vários segundos
- * pendulando em torno do ferro — o que se via era um barco de borracha. Em
- * 130 000 o sistema fica levemente subamortecido: sobra um caldo só, a proa cai
- * para o ferro e ele assenta. É o que se vê quando um barco de verdade fundeia.
+ * High enough for the ship to **stop**, and not to bounce. At 60,000 the sloop
+ * stretched the rode, was thrown back and spent several seconds swinging around the
+ * anchor — what you saw was a rubber boat. At 130,000 the system is slightly
+ * underdamped: one snub is left, the bow falls toward the anchor and it settles. It is
+ * what you see when a real boat anchors.
  */
 const CHAIN_DAMPING = 130_000;
-/** Teto de tração. Existe só para um passo ruim não virar catapulta. */
+/** Tension ceiling. It only exists so a bad step does not become a catapult. */
 const MAX_TENSION = 420_000;
 
 /**
- * Arrasto do ferro arrastando no fundo, em N·s/m.
+ * Drag of the anchor dragging along the bottom, in N·s/m.
  *
- * Age enquanto a âncora está no fundo e o navio ainda tem seguimento, **antes**
- * de a amarra tesar. Sem ele o navio corre os dois metros de folga na velocidade
- * cheia e só descobre que fundeou quando a corrente estica de uma vez — um
- * solavanco seco que lê como bug. Com ele, largar o ferro em movimento freia o
- * navio progressivamente, que é o que a unha mordendo o fundo realmente faz.
+ * It acts while the anchor is on the bottom and the ship still has way on, **before**
+ * the rode goes taut. Without it the ship runs the two meters of slack at full speed
+ * and only finds out it has anchored when the chain snaps tight all at once — a dry
+ * jolt that reads as a bug. With it, dropping the anchor while moving brakes the ship
+ * progressively, which is what the fluke biting the bottom really does.
  */
 const DRAG_COEFFICIENT = 9_000;
 
-/** Fração da amarra que sai por segundo ao largar. */
+/** Fraction of the rode that runs out per second while dropping. */
 const DROP_RATE = 1.6;
 
 /**
- * Quanto tempo o cabrestante segura sozinho depois que o marujo para de andar.
+ * How long the capstan holds on its own after the sailor stops walking.
  *
- * Não é zero, e não é infinito, e as duas pontas seriam erradas. Zero puniria a
- * passada trocada: um quadro de titubeio no meio da volta jogaria a âncora
- * inteira de volta ao fundo. Infinito — que era o comportamento anterior —
- * transformava suspender o ferro numa tarefa que se faz em parcelas, e tira do
- * fundeio justamente o que ele tem de tático: **largar é barato e desfazer é
- * caro, e caro sem interrupção**. Nove décimos é o tempo de contornar a barra e
- * pegar a seguinte — subiu junto com o passo mais pesado do marujo, senão a
- * própria travessia entre duas barras já contaria como ter largado o serviço.
+ * It is not zero, and it is not infinite, and both ends would be wrong. Zero would
+ * punish a stumbled stride: one frame of hesitation mid-turn would throw the whole
+ * anchor back to the bottom. Infinite — which was the previous behavior — turned
+ * weighing the anchor into a task you do in installments, and takes away from anchoring
+ * exactly what makes it tactical: **dropping is cheap and undoing it is expensive, and
+ * expensive without interruption**. Nine tenths is the time to get around the bar and
+ * take the next one — it went up along with the sailor's heavier stride, or the
+ * crossing between two bars would itself count as having left the job.
  */
 const CAPSTAN_GRACE = 0.9;
 /**
- * Fração da amarra que corre de volta por segundo quando o marujo larga.
+ * Fraction of the rode that runs back out per second when the sailor lets go.
  *
- * Mais lenta que a queda livre do `DROP_RATE` de propósito: o linguete não
- * soltou, o que cede é o homem. Dá tempo de voltar à barra e retomar — o que se
- * perde é o trabalho, não a partida.
+ * Slower than `DROP_RATE`'s free fall on purpose: the pawl did not release, what gives
+ * is the man. There is time to get back to the bar and resume — what is lost is the
+ * work, not the match.
  *
- * Caiu de 0,85 quando a volta ficou mais lenta, e é uma conta de proporção: com
- * o serviço a onze segundos, uma taxa que devolvia a amarra inteira em pouco
- * mais de um segundo transformava qualquer titubeio em recomeço do zero. A 0,45
- * são 2,2 s do topo ao fundo — punição sentida, e ainda assim recuperável para
- * quem voltar à barra.
+ * It dropped from 0.85 when the turn got slower, and it is a matter of proportion: with
+ * the job at eleven seconds, a rate that gave the whole rode back in a little over a
+ * second turned any hesitation into starting from scratch. At 0.45 it is 2.2 s from top
+ * to bottom — a punishment you feel, and still recoverable for whoever returns to the
+ * bar.
  */
 const RUNBACK_RATE = 0.45;
 /**
- * Voltas que o cabrestante dá para recolher a amarra inteira.
+ * Turns the capstan makes to haul in the whole rode.
  *
- * Três, e o número sai do relógio: o marujo caminha a 1,75 m/s num raio de barra
- * de 1,05 m, o que dá pouco mais de um quarto de volta por segundo — **onze
- * segundos** para suspender o ferro sozinho, sem parar.
+ * Three, and the number comes from the clock: the sailor walks at 1.75 m/s on a bar
+ * radius of 1.05 m, which gives a little over a quarter turn per second — **eleven
+ * seconds** to weigh the anchor alone, without stopping.
  *
- * Eram duas voltas a 2,2 m/s, ou seis segundos, e seis segundos é barato demais
- * para o que fundear faz: a âncora decide combate no Sea of Thieves justamente
- * porque desfazê-la ocupa um homem inteiro por um tempo que o adversário sente
- * passar. Meio segundo para largar contra onze para suspender é a assimetria que
- * dá peso à decisão de largar o ferro.
+ * It was two turns at 2.2 m/s, or six seconds, and six seconds is far too cheap for
+ * what anchoring does: the anchor decides fights in Sea of Thieves precisely because
+ * undoing it occupies a whole man for a length of time the opponent feels pass. Half a
+ * second to drop against eleven to weigh is the asymmetry that gives the decision to
+ * drop the anchor its weight.
  */
 const CAPSTAN_TURNS = 3;
-/** Voltas por segundo do cabrestante correndo livre enquanto a amarra sai. */
+/** Turns per second of the capstan spinning free while the rode runs out. */
 const FREEWHEEL_TURNS = 2.6;
 
 const _hawseWorld = new THREE.Vector3();
@@ -129,60 +129,61 @@ const _drag = new THREE.Vector3();
 
 export class Anchor {
   state: AnchorState = 'stowed';
-  /** 0 = a pique no turco, 1 = no fundo. */
+  /** 0 = home at the cathead, 1 = on the bottom. */
   deploy = 0;
-  /** Tração da amarra no último passo, em newtons. HUD e áudio leem. */
+  /** The rode's tension on the last step, in newtons. The HUD and the audio read it. */
   tension = 0;
 
-  /** Ponto fixo no mundo onde a âncora cravou. Só vale com `deploy > 0`. */
+  /** The fixed world point where the anchor bit. Only valid with `deploy > 0`. */
   readonly worldPoint = new THREE.Vector3();
 
-  /** Posição de repouso da âncora no navio — de onde ela sai e para onde volta. */
+  /** The anchor's stowed position on the ship — where it leaves from and returns to. */
   private readonly stowed = new THREE.Vector3();
   private readonly stowedRotation = new THREE.Euler();
-  /** Escovém: por onde a amarra passa e onde a tração é aplicada. */
+  /** Hawse: where the rode passes through and where the tension is applied. */
   private readonly hawse = new THREE.Vector3();
   private capstanAngle = 0;
-  /** Voltas de barra pedidas neste passo, em fração de volta. */
+  /** Turns of the bar asked for on this step, as a fraction of a turn. */
   private heaveTurns = 0;
-  /** Segundos desde a última barra empurrada. Ver `CAPSTAN_GRACE`. */
+  /** Seconds since the last bar was pushed. See `CAPSTAN_GRACE`. */
   private idleTime = 0;
 
   constructor(model: ShipModel) {
-    // A pose guardada é a que o `ShipBuilder` desenhou. Ler dela, em vez de
-    // repetir as coordenadas aqui, é o que impede a âncora de voltar para um
-    // lugar que não é o turco no dia em que a proa mudar de forma.
+    // The stowed pose is the one `ShipBuilder` drew. Reading from it, instead of
+    // repeating the coordinates here, is what keeps the anchor from returning to a
+    // place that is not the cathead the day the bow changes shape.
     this.stowed.copy(model.anchor.position);
     this.stowedRotation.copy(model.anchor.rotation);
     this.hawse.set(0, this.stowed.y - 0.25, this.stowed.z - 0.3);
   }
 
-  /** `true` quando a amarra já pode estar fazendo força. */
+  /** `true` when the rode may already be applying force. */
   get isDeployed(): boolean {
     return this.deploy > 0.001;
   }
 
-  /** Quanto da amarra já foi recolhida, de 0 (no fundo) a 1 (a pique). */
+  /** How much of the rode has been hauled in, from 0 (on the bottom) to 1 (home). */
   get raised(): number {
     return 1 - this.deploy;
   }
 
-  /** Larga o ferro. Sem efeito se já estiver fora. */
+  /** Drops the anchor. No effect if it is already out. */
   drop(body: ShipBody): void {
     if (this.state !== 'stowed') return;
     this.state = 'dropping';
     body.localToWorld(this.hawse, _hawseWorld);
-    // Crava a prumo do escovém: é onde a âncora cairia, e é o que faz o navio
-    // girar em volta da própria proa em vez de em volta de um ponto arbitrário.
+    // It bites plumb below the hawse: it is where the anchor would fall, and it is
+    // what makes the ship turn about its own bow instead of about some arbitrary
+    // point.
     this.worldPoint.set(_hawseWorld.x, -SEABED_DEPTH, _hawseWorld.z);
   }
 
   /**
-   * Empurra as barras do cabrestante.
+   * Pushes the capstan bars.
    *
-   * @param turns fração de volta empurrada neste passo. Vem do quanto o jogador
-   *   **andou** em torno do cabrestante, não de um botão segurado: é a diferença
-   *   entre suspender o ferro e pedir para ele ser suspenso.
+   * @param turns fraction of a turn pushed on this step. It comes from how far the
+   *   player **walked** around the capstan, not from a held button: it is the
+   *   difference between weighing the anchor and asking for it to be weighed.
    */
   heave(turns: number): void {
     if (this.state === 'stowed' || this.state === 'dropping') return;
@@ -195,8 +196,8 @@ export class Anchor {
     switch (this.state) {
       case 'dropping':
         this.deploy = Math.min(this.deploy + DROP_RATE * dt, 1);
-        // O cabrestante roda livre enquanto a amarra corre: ninguém o segura, e
-        // é esse giro solto que diz ao jogador que o ferro está caindo.
+        // The capstan spins free while the rode runs out: nobody is holding it, and
+        // it is that loose spin that tells the player the anchor is falling.
         this.capstanAngle -= FREEWHEEL_TURNS * TAU * dt;
         if (this.deploy >= 1) this.state = 'set';
         break;
@@ -207,20 +208,20 @@ export class Anchor {
         this.capstanAngle += this.heaveTurns * TAU;
         if (this.deploy <= 0) this.state = 'stowed';
 
-        // **Largar a barra é perder o que se ganhou.**
+        // **Letting go of the bar is losing what you gained.**
         //
-        // Antes o progresso congelava: dava para suspender 30% do ferro, largar,
-        // ir bombear o porão, voltar e continuar de onde parou. Isso apaga o
-        // custo do fundeio, que é a coisa inteira — no Sea of Thieves a âncora
-        // decide combates justamente porque suspendê-la ocupa um homem do começo
-        // ao fim, e soltar o cabrestante manda a corrente de volta ao fundo.
+        // The progress used to freeze: you could weigh 30% of the anchor, let go, go
+        // pump the hold, come back and carry on from where you stopped. That erases
+        // anchoring's cost, which is the whole thing — in Sea of Thieves the anchor
+        // decides fights precisely because weighing it occupies a man from start to
+        // finish, and releasing the capstan sends the chain back to the bottom.
         //
-        // A carência de meio segundo é o que separa "largou" de "trocou o passo".
+        // The half-second grace is what separates "let go" from "stumbled a step".
         if (this.heaveTurns <= 0 && this.deploy > 0) {
           this.idleTime += dt;
           if (this.idleTime > CAPSTAN_GRACE) {
             this.deploy = Math.min(this.deploy + RUNBACK_RATE * dt, 1);
-            // Girando ao contrário, que é o sinal de que a amarra está correndo.
+            // Turning backwards, which is the sign that the rode is running out.
             this.capstanAngle -= RUNBACK_RATE * TAU * dt * CAPSTAN_TURNS;
             if (this.deploy >= 1) this.state = 'set';
           }
@@ -228,8 +229,8 @@ export class Anchor {
           this.idleTime = 0;
         }
 
-        // Zerado todo passo: quem quiser continuar recolhendo tem de continuar
-        // andando. Sem isso o cabrestante giraria sozinho até o fim.
+        // Zeroed every step: whoever wants to keep hauling has to keep walking.
+        // Without this the capstan would turn on its own to the end.
         this.heaveTurns = 0;
         break;
       }
@@ -249,9 +250,9 @@ export class Anchor {
     _arm.subVectors(_hawseWorld, body.comPosition);
     body.pointVelocity(_arm, _pointVelocity);
 
-    // Atrito do ferro no fundo. Vale mesmo com a amarra frouxa — é ele que faz
-    // largar o ferro em movimento frear o navio em vez de não fazer nada até a
-    // corrente esticar de repente.
+    // Friction of the anchor on the bottom. It applies even with the rode slack — it
+    // is what makes dropping the anchor while moving brake the ship instead of doing
+    // nothing until the chain snaps tight.
     _drag.copy(_pointVelocity).multiplyScalar(-DRAG_COEFFICIENT * this.deploy);
     _drag.y = 0;
     body.applyForceAtPoint(_drag, _hawseWorld);
@@ -262,10 +263,10 @@ export class Anchor {
 
     _direction.copy(_chain).divideScalar(distance);
 
-    // Elástico + amortecedor ao longo da amarra. O `max` é o que garante que
-    // corrente puxa e nunca empurra; o fator `deploy` é a âncora ainda caindo
-    // (ou já saindo do fundo), que segura proporcionalmente ao quanto agarrou —
-    // e é por isso que o navio volta a andar antes de o ferro estar a pique.
+    // Spring + damper along the rode. The `max` is what guarantees a chain pulls and
+    // never pushes; the `deploy` factor is the anchor still falling (or already
+    // leaving the bottom), which holds in proportion to how much it has bitten — and
+    // that is why the ship starts moving again before the anchor is home.
     const stretch = distance - CHAIN_LENGTH;
     const closing = _pointVelocity.dot(_direction);
     const pull = (CHAIN_STIFFNESS * stretch - CHAIN_DAMPING * closing) * this.deploy;
@@ -276,7 +277,7 @@ export class Anchor {
     body.applyForceAtPoint(_force, _hawseWorld);
   }
 
-  /** Põe a âncora e o cabrestante onde a física diz que eles estão. */
+  /** Puts the anchor and the capstan where the physics says they are. */
   syncModel(model: ShipModel, body: ShipBody): void {
     model.capstan.rotation.y = this.capstanAngle;
 
@@ -286,31 +287,31 @@ export class Anchor {
       return;
     }
 
-    // A âncora continua sendo filha do navio, mas é desenhada no ponto do mundo
-    // onde cravou: converter para o sistema local todo frame custa uma matriz e
-    // evita reparentar objeto no meio do jogo, que é fonte garantida de bug de
-    // descarte. A rotação inversa a mantém de pé enquanto o casco joga em volta.
+    // The anchor is still a child of the ship, but it is drawn at the world point
+    // where it bit: converting into the local frame every frame costs one matrix and
+    // avoids reparenting an object mid-game, which is a guaranteed source of disposal
+    // bugs. The inverse rotation keeps it upright while the hull rolls around it.
     _inverse.copy(body.orientation).invert();
     model.anchor.position
       .subVectors(this.worldPoint, body.comPosition)
       .applyQuaternion(_inverse)
       .add(body.centerOfMass);
 
-    // E daí ela **sobe pela amarra**, na proporção do que já foi recolhido.
+    // And from there it **climbs the rode**, in proportion to what has been hauled in.
     //
-    // Sem esta linha o ferro ficava cravado no fundo até o último grau de barra
-    // e só então aparecia de volta no turco, de um quadro para o outro. O jogador
-    // empurrava o cabrestante minutos a fio sem ver nada acontecer — e agora que
-    // largar a barra devolve a amarra ao fundo, ver a âncora subir e descer é a
-    // única leitura direta do que o trabalho dele está rendendo. A interpolação é
-    // para a pose de repouso, e não para o escovém, para que chegar a zero
-    // coincida exatamente com o ferro de volta ao turco, sem salto na troca de
-    // estado.
+    // Without this line the anchor stayed stuck on the bottom until the last degree of
+    // bar and only then appeared back at the cathead, from one frame to the next. The
+    // player pushed the capstan for minutes on end without seeing anything happen —
+    // and now that letting go of the bar sends the rode back to the bottom, watching
+    // the anchor rise and fall is the only direct reading of what their work is
+    // yielding. The interpolation is toward the stowed pose, and not toward the hawse,
+    // so that reaching zero coincides exactly with the anchor back at the cathead, with
+    // no jump on the state change.
     model.anchor.position.lerp(this.stowed, 1 - this.deploy);
     model.anchor.quaternion.copy(_inverse);
   }
 
-  /** Recolhe tudo de uma vez, sem manivela — reinício de partida. */
+  /** Hauls everything in at once, with no cranking — a match restart. */
   reset(): void {
     this.state = 'stowed';
     this.deploy = 0;

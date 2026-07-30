@@ -1,120 +1,119 @@
 /**
- * O contrato entre o jogo e o servidor de sala.
+ * The contract between the game and the room server.
  *
- * Este arquivo é importado pelos **dois lados** — pelo cliente, que roda no
- * navegador com o DOM inteiro à disposição, e pelo Worker, que roda num runtime
- * sem DOM nenhum. Daí a única regra que ele tem:
+ * This file is imported by **both sides** — by the client, which runs in the browser
+ * with the whole DOM at its disposal, and by the Worker, which runs in a runtime with
+ * no DOM at all. Hence the one rule it has:
  *
- * ⚠️ **Nada de DOM, nada de Workers, nada de Three.js.** Só tipos e funções puras
- * sobre números e `ArrayBuffer`. Um `WebSocket` mencionado aqui quebraria a
- * compilação de um dos dois lados, porque os dois runtimes declaram esse nome com
- * formatos diferentes.
+ * ⚠️ **No DOM, no Workers, no Three.js.** Only types and pure functions over numbers
+ * and `ArrayBuffer`. A `WebSocket` mentioned here would break one of the two sides'
+ * compilation, because the two runtimes declare that name with different shapes.
  *
- * ## Duas linguagens no mesmo fio
+ * ## Two languages on the same wire
  *
- * O lobby fala **JSON**; a partida fala **binário**. A separação sai de graça no
- * recebimento — `typeof event.data === 'string'` já diz qual é qual — e cada uma
- * está no formato certo para o que faz:
+ * The lobby speaks **JSON**; the match speaks **binary**. The separation comes for
+ * free on receipt — `typeof event.data === 'string'` already says which is which —
+ * and each is in the right format for what it does:
  *
- * - O lobby são seis mensagens por sessão, com texto dentro (apelidos), e o que
- *   se quer delas é poder lê-las no inspetor do navegador quando algo der errado.
- * - A partida são 45 mensagens por segundo, e ali JSON custa caro duas vezes: no
- *   fio (`0.7071067811865476` são dezoito caracteres para um número que cabe em
- *   dois bytes) e na CPU, porque `JSON.parse` de alguns quilobytes quinze vezes
- *   por segundo constrói um grafo de objetos novo dentro do quadro de render.
+ * - The lobby is six messages per session, with text inside (nicknames), and what we
+ *   want from them is to be able to read them in the browser's inspector when
+ *   something goes wrong.
+ * - The match is 45 messages a second, and there JSON costs dearly twice: on the wire
+ *   (`0.7071067811865476` is eighteen characters for a number that fits in two bytes)
+ *   and on the CPU, because `JSON.parse` of a few kilobytes fifteen times a second
+ *   builds a fresh object graph inside the render frame.
  *
- * ## Versão
+ * ## Version
  *
- * `PROTOCOL_VERSION` sobe sempre que o formato binário muda. O servidor recusa a
- * conexão de quem chegar com outra — é o que impede duas versões do jogo de se
- * encontrarem numa sala e passarem a partida inteira interpretando os bytes uma
- * da outra ao contrário, que é uma falha silenciosa e horrível de diagnosticar.
+ * `PROTOCOL_VERSION` goes up whenever the binary format changes. The server refuses
+ * the connection of anyone arriving with a different one — it is what keeps two
+ * versions of the game from meeting in a room and spending the whole match reading
+ * each other's bytes backwards, which is a silent and horrible failure to diagnose.
  */
 
 /**
- * Sobe a cada mudança de formato. Ver o cabeçalho.
+ * Goes up on every format change. See the header.
  *
- * **2** — o instantâneo passou a carregar o relógio do dia e o estado do tempo
- * (sem eles, cada lado navegava sob o próprio céu e a própria chuva), e o
- * `ackTick` virou de 16 para 32 bits. O de 16 dava a volta em dezoito minutos de
- * duelo, e agora ele não é mais só telemetria: é ele que diz ao cliente quando a
- * predição de posto foi confirmada. Um `ack` que volta ao zero no meio da
- * partida travaria o jogador fora do timão até o fim dela.
+ * **2** — the snapshot started carrying the day's clock and the weather's state
+ * (without them, each side sailed under its own sky and its own rain), and `ackTick`
+ * went from 16 to 32 bits. The 16-bit one wrapped around after eighteen minutes of
+ * duel, and it is no longer only telemetry: it is what tells the client when the
+ * station prediction was confirmed. An `ack` that goes back to zero mid-match would
+ * lock the player out of the helm until the end of it.
  *
- * **3** — o instantâneo passou a dizer quantos passos o host ficou **sem
- * comando** desde o anterior. O cliente decidia isso olhando a profundidade da
- * fila, e os dois casos que ele precisava distinguir têm a mesma aparência ali:
- * fila vazia é tanto "o comando chegou tarde" quanto "o comando chegou na hora
- * exata". O avanço subia em cima do segundo e nunca mais descia.
+ * **3** — the snapshot started saying how many steps the host went **without a
+ * command** since the previous one. The client used to decide that by looking at the
+ * queue's depth, and the two cases it needed to distinguish look the same there: an
+ * empty queue is both "the command arrived late" and "the command arrived exactly on
+ * time". The lead climbed on the second and never came back down.
  *
- * **4** — três campos que faltavam ao mundo, e os três produziam a mesma queixa
- * ("não está sincronizado") por caminhos diferentes:
+ * **4** — three fields the world was missing, and all three produced the same
+ * complaint ("it is not synchronized") by different routes:
  *
- * - **O rumo da ondulação de fundo** (`swellDirection`). Ele nascia do vento
- *   *local* de cada cliente — que era diferente, porque cada um tinha ficado um
- *   tempo diferente na tela de título — e depois só andava no lado que simula.
- *   As duas ondas longas do espectro são as que levantam o casco, então os dois
- *   jogadores viam o mesmo navio flutuando em mares diferentes desde o primeiro
- *   quadro.
- * - **As tábuas pregadas.** Um rombo tapado sumia do costado do adversário em
- *   vez de virar cicatriz com madeira por cima.
- * - **A mira da peça operada**, que agora também é corrigida pelo instantâneo
- *   como já era a roda do timão: acumular deltas dos dois lados só concorda
- *   enquanto nenhum comando se perde.
+ * - **The background swell's heading** (`swellDirection`). It was born from each
+ *   client's *local* wind — which was different, because each had spent a different
+ *   amount of time on the title screen — and after that it only advanced on the
+ *   simulating side. The spectrum's two long waves are the ones that lift the hull, so
+ *   the two players saw the same ship floating on different seas from the first frame.
+ * - **The nailed planks.** A patched breach vanished from the opponent's planking
+ *   instead of becoming a scar with wood over it.
+ * - **The operated gun's aim**, which is now corrected by the snapshot as the wheel
+ *   already was: accumulating deltas on both sides only agrees while no command is
+ *   lost.
  *
- * **5** — a escala da **área do rombo** subiu de 2550 para 1400 (ver
- * `QUANT.breachArea`). A anterior saturava em 0,1 m² e o modelo produz até
- * 0,176: 43% da faixa útil não cabia no fio, e um rombo bem alargado chegava do
- * outro lado com pouco mais da metade do tamanho real. Achado pelo teste de
- * instantâneo na primeira vez que ele rodou.
+ * **5** — the **breach area**'s scale went from 2550 to 1400 (see
+ * `QUANT.breachArea`). The previous one saturated at 0.1 m² and the model produces up
+ * to 0.176: 43% of the useful range did not fit on the wire, and a well-widened breach
+ * arrived on the other side at a little over half its real size. Found by the snapshot
+ * test the first time it ran.
  *
- * **6** — o marujo passou a dizer se está com a **tábua nas mãos**. É um bit no
- * byte de estado do corpo, que já tinha dois sobrando, e ele fecha o último
- * gesto que faltava para o adversário ter corpo de gente: sem ele, quem estava
- * tapando um rombo aparecia do outro lado parado, de mãos vazias, enquanto a
- * madeira ia surgindo pregada no casco sozinha. Quem sabe disso é a
- * `Interaction` — só ela vê o buraco e o botão segurado no mesmo passo —, e o
- * outro lado não tem como deduzir.
+ * **6** — the sailor started saying whether they have the **plank in hand**. It is one
+ * bit in the body's state byte, which already had two to spare, and it closes the last
+ * gesture missing for the opponent to have a human body: without it, whoever was
+ * patching a breach showed up on the other side standing still, empty-handed, while
+ * the wood appeared nailed to the hull on its own. What knows this is `Interaction` —
+ * only it sees the hole and the held button on the same step — and the other side has
+ * no way to deduce it.
  *
- * **7** — o marujo passou a dizer se está **no mar**. É o último bit livre do
- * byte de estado do corpo (o de número 7, que agora fecha o byte), e ele é o
- * único estado da água que precisa viajar: a *posição* já vai, e dela se deriva
- * o resto — inclusive **em qual das duas escadas de embarque** o adversário está
- * pendurado, porque as duas ficam a sete metros uma da outra em Z e
- * `insideGangway` é a mesma pergunta que o portaló já faz. Sem este bit, quem
- * caísse na água aparecia do outro lado *andando pelo mar* com a pose de convés,
- * e a escada de embarque não tinha como acender a mão certa.
+ * **7** — the sailor started saying whether they are **at sea**. It is the last free
+ * bit of the body's state byte (number 7, which now closes the byte), and it is the
+ * only water state that has to travel: the *position* already goes, and the rest is
+ * derived from it — including **which of the two boarding ladders** the opponent is
+ * hanging from, because the two sit seven meters apart in Z and `insideGangway` is
+ * the same question the gangway already asks. Without this bit, whoever fell into the
+ * water showed up on the other side *walking across the sea* in the deck pose, and the
+ * boarding ladder had no way to light the right hand.
  *
- * Nesta mesma versão o **rumo da cabeça no instantâneo passou a ser
- * normalizado** antes de quantizar, como o do quadro de entrada já era. Não é
- * mudança de formato — os bytes são os mesmos —, mas a versão sobe junto porque
- * ela conserta o que aqueles bytes *significam* na borda da faixa. Ver a nota em
+ * In this same version the **head's heading in the snapshot started being
+ * normalized** before quantizing, as the input frame's already was. It is not a format
+ * change — the bytes are the same — but the version goes up along with it because it
+ * fixes what those bytes *mean* at the edge of the range. See the note in
  * `encodeSnapshot`.
  */
 export const PROTOCOL_VERSION = 7;
 
-/** Casas do código de sala. */
+/** Digits in a room code. */
 export const CODE_LENGTH = 4;
 
 /**
- * Alfabeto do código de sala: 32 caracteres sem par ambíguo.
+ * The room code's alphabet: 32 characters with no ambiguous pair.
  *
- * Sem `I`, `O`, `0` e `1` — os quatro que se confundem quando alguém dita um
- * código por voz ou o copia de uma tela para um papel. Duplicado no cliente
- * (`OnlineMenu`) de propósito: o cliente precisa dele para desenhar as casas, e
- * este módulo não pode importar nada de lá.
+ * No `I`, `O`, `0` or `1` — the four that get confused when somebody reads a code out
+ * loud or copies it from a screen onto paper. Duplicated in the client (`OnlineMenu`)
+ * on purpose: the client needs it to draw the digits, and this module cannot import
+ * anything from there.
  */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-/** Tamanho máximo de um apelido, em caracteres. Grampeado nos dois lados. */
+/** Maximum length of a nickname, in characters. Clamped on both sides. */
 export const NICKNAME_MAX_LENGTH = 16;
 
-// -- lobby, em JSON -----------------------------------------------------------
+// -- lobby, in JSON -----------------------------------------------------------
 
-/** O que o cliente quer da sala ao entrar. */
+/** What the client wants from the room on entering. */
 export type JoinIntent = 'queue' | 'create' | 'join';
 
-/** Cliente → sala. */
+/** Client → room. */
 export type ClientMessage =
   | {
       t: 'hello';
@@ -122,178 +121,177 @@ export type ClientMessage =
       nickname: string;
       intent: JoinIntent;
       /**
-       * O quanto esta máquina aguenta, de 0 a 100.
+       * How much this machine can take, from 0 to 100.
        *
-       * Serve para escolher **quem simula**. Num duelo host-autoritativo, quem
-       * hospeda carrega a física dos dois cascos, então uma máquina fraca no
-       * comando engasga os dois jogadores. Medido no cliente a partir da taxa de
-       * quadros no menu e dos núcleos disponíveis — ver `measurePerformance`.
+       * It is used to choose **who simulates**. In a host-authoritative duel, the host
+       * carries both hulls' physics, so a weak machine in command stutters for both
+       * players. Measured on the client from the frame rate in the menu and the cores
+       * available — see `measurePerformance`.
        */
       perfScore: number;
     }
-  /** Assets carregados; pode começar quando o outro também estiver. */
+  /** Assets loaded; ready to start once the other one is too. */
   | { t: 'ready' }
-  /** O host declara o fim. Só ele sabe, porque só ele simula. */
+  /** The host declares the end. Only it knows, because only it simulates. */
   | { t: 'result'; winner: 0 | 1 }
-  /** Sinal de vida durante a espera, para o servidor limpar sala abandonada. */
+  /** A sign of life while waiting, so the server can clean up an abandoned room. */
   | { t: 'ping' };
 
-/** Sala → cliente. */
+/** Room → client. */
 export type ServerMessage =
   /**
-   * Entrou. Eis o código para passar adiante.
+   * You are in. Here is the code to pass along.
    *
-   * **Sem papel**, e é de propósito: quem simula é decidido comparando as duas
-   * máquinas, e no instante em que o primeiro capitão entra não há com quem
-   * comparar. Dar um papel provisório aqui obrigaria a corrigi-lo depois, e um
-   * cliente que já se preparou para hospedar e é rebaixado é exatamente o tipo
-   * de transição que não vale a pena existir.
+   * **No role**, and that is on purpose: who simulates is decided by comparing the two
+   * machines, and at the instant the first captain enters there is nobody to compare
+   * with. Giving a provisional role here would force correcting it later, and a client
+   * that has already prepared to host and is demoted is exactly the kind of transition
+   * not worth having.
    */
   | { t: 'welcome'; v: number; code: string; self: string }
   /**
-   * O segundo capitão chegou, e agora dá para dizer quem simula.
+   * The second captain has arrived, and now we can say who simulates.
    *
-   * Os dois recebem esta mensagem, cada um com o **próprio** papel em `role` e o
-   * apelido do outro em `nickname`.
+   * Both receive this message, each with their **own** role in `role` and the other's
+   * nickname in `nickname`.
    */
   | { t: 'peer'; nickname: string; role: 'host' | 'guest' }
-  /** Tudo combinado: eis o mundo, comecem. */
+  /** All arranged: here is the world, begin. */
   | {
       t: 'start';
-      /** Semente do mar, do tempo e de tudo que sorteia. */
+      /** Seed for the sea, the weather and everything that draws. */
       seed: number;
-      /** Modo de tempo da sala. Sobrepõe a preferência local dos dois lados. */
+      /** The room's weather mode. Overrides both sides' local preference. */
       weather: 'dynamic' | 'clear' | 'breeze' | 'squall' | 'storm';
-      /** Fração do dia em que o duelo começa. */
+      /** Fraction of the day the duel starts at. */
       timeOfDay: number;
     }
-  /** Acabou, e por quê. */
+  /** It is over, and why. */
   | {
       t: 'over';
       reason: 'sunk' | 'left' | 'timeout' | 'error';
-      /** Índice do vencedor do ponto de vista do host, ou `null`. */
+      /** Index of the winner from the host's point of view, or `null`. */
       winner: 0 | 1 | null;
     }
-  /** Deu errado antes de começar. */
+  /** Something went wrong before starting. */
   | { t: 'error'; reason: string }
   | { t: 'pong' };
 
-// -- partida, em binário ------------------------------------------------------
+// -- match, in binary ---------------------------------------------------------
 
 /**
- * O primeiro byte de todo quadro binário.
+ * The first byte of every binary frame.
  *
- * ⚠️ Os valores são o formato de rede: acrescente no fim, nunca reordene.
+ * ⚠️ The values are the network format: append at the end, never reorder.
  */
 export const MessageType = {
-  /** Guest → host: um lote de `InputFrame`. */
+  /** Guest → host: a batch of `InputFrame`s. */
   Input: 1,
-  /** Host → guest: o estado do mundo. */
+  /** Host → guest: the world's state. */
   Snapshot: 2,
-  /** Host → guest: "minha janela está em segundo plano, segura aí". */
+  /** Host → guest: "my window is in the background, hold on". */
   Stall: 3,
 } as const;
 
 /**
- * Quantos `InputFrame` cabem numa mensagem de entrada.
+ * How many `InputFrame`s fit in one input message.
  *
- * Quatro, sendo dois novos e dois repetidos do envio anterior. A redundância é o
- * que torna a perda de um pacote invisível: o quadro perdido chega de novo no
- * seguinte, dentro do prazo em que o host ainda o consome. Custa 32 bytes por
- * mensagem, num orçamento de subida de ~2 KB/s — barato o bastante para não valer
- * a pena bolar um esquema de confirmação e reenvio.
+ * Four, of which two are new and two are repeats from the previous send. The
+ * redundancy is what makes a lost packet invisible: the lost frame arrives again in
+ * the next one, within the window in which the host still consumes it. It costs 32
+ * bytes per message, on an upstream budget of ~2 KB/s — cheap enough that it is not
+ * worth devising an acknowledgement and retransmission scheme.
  */
 export const INPUT_BATCH = 4;
 
 /**
- * Rombos (e tábuas pregadas) que o formato transporta por casco.
+ * Breaches (and nailed planks) the format carries per hull.
  *
- * Mora aqui, e não junto do modelo de avaria, porque **é o fio que manda neste
- * número**. A lista viaja atrás de uma contagem de um byte, e o leitor do outro
- * lado precisa parar exatamente onde o escritor parou: enquanto os dois lados
- * tinham cada um o seu teto — o escritor mandava quantos houvesse, o leitor
- * parava em 32 —, um casco muito castigado desalinhava o instantâneo inteiro a
- * partir dali, e o guest passava a ler o marujo, o adversário e os eventos em
- * cima de bytes que pertenciam a outra coisa.
+ * It lives here, and not next to the damage model, because **it is the wire that rules
+ * this number**. The list travels behind a one-byte count, and the reader on the other
+ * side has to stop exactly where the writer stopped: while the two sides each had a
+ * ceiling of their own — the writer sent however many there were, the reader stopped at
+ * 32 — a badly battered hull misaligned the whole snapshot from there on, and the guest
+ * started reading the sailor, the opponent and the events on top of bytes that belonged
+ * to something else.
  *
- * Um teto, uma definição, e `ShipDamage` o importa daqui para nunca abrir mais
- * rombos do que cabe contar. Ver `MAX_BREACHES` lá para o que acontece com o
- * tiro que chega com a lista cheia.
+ * One ceiling, one definition, and `ShipDamage` imports it from here so it never opens
+ * more breaches than can be counted. See `MAX_BREACHES` there for what happens to a
+ * shot that arrives with the list full.
  */
 export const MAX_BREACHES = 24;
 
 /**
- * Bytes de um `InputFrame` no fio.
+ * Bytes of an `InputFrame` on the wire.
  *
- * Dezoito desde a versão 2: os quatro que entraram são o olhar **absoluto**, que
- * passou a viajar ao lado do delta. Ver `PlayerController.applyLook` — em
- * resumo, delta de olhar não sobrevive a pacote perdido, e o que quebra quando
- * ele não sobrevive é o foco de interação do outro jogador.
+ * Eighteen since version 2: the four that came in are the **absolute** gaze, which
+ * started traveling alongside the delta. See `PlayerController.applyLook` — in short, a
+ * gaze delta does not survive a lost packet, and what breaks when it does not survive is
+ * the other player's interaction focus.
  */
 export const INPUT_FRAME_BYTES = 18;
 
 /**
- * Escalas de quantização.
+ * Quantization scales.
  *
- * Cada grandeza vira inteiro pela escala que preserva a precisão que **o olho ou
- * a física** exigem, e nem um bit a mais. Um quaternion unitário em `i16` erra no
- * quinto decimal, o que num casco de quinze metros é meio milímetro de guinada;
- * uma velocidade em centésimos de m/s é mais fina que a resolução com que o mar
- * empurra o navio.
+ * Every quantity becomes an integer through the scale that preserves the precision
+ * **the eye or the physics** demand, and not one bit more. A unit quaternion in `i16`
+ * errs in the fifth decimal, which on a fifteen-meter hull is half a millimeter of yaw;
+ * a velocity in hundredths of m/s is finer than the resolution with which the sea
+ * pushes the ship.
  */
 export const QUANT = {
-  /** Componentes de quaternion, −1..1. */
+  /** Quaternion components, −1..1. */
   quaternion: 32767,
-  /** Velocidade linear, m/s. */
+  /** Linear velocity, m/s. */
   velocity: 256,
-  /** Velocidade angular, rad/s. */
+  /** Angular velocity, rad/s. */
   angular: 2048,
-  /** Ângulos em radianos (roda, travessia, elevação, rumo da cabeça). */
+  /** Angles in radians (wheel, traverse, elevation, head heading). */
   angle: 10000,
-  /** Posições locais a bordo, m. */
+  /** Local positions aboard, m. */
   local: 256,
-  /** Posições de rombo no casco, m. */
+  /** Breach positions on the hull, m. */
   breach: 512,
   /**
-   * Área efetiva de um rombo, m². Um byte.
+   * A breach's effective area, m². One byte.
    *
-   * ⚠️ **Era 2550, e 2550 satura antes do que o jogo produz.** Um rombo nasce
-   * com 0,055 m² e cresce até 3,2 vezes isso ao absorver outros tiros
-   * (`MAX_BREACH_SCALE`), ou seja, até 0,176 m². Com o teto do byte em
-   * 255/2550 = 0,1 m², **43% da faixa útil não cabia no fio**: um rombo bem
-   * alargado chegava do outro lado com pouco mais da metade do tamanho que
-   * tinha. Quem não simula desenhava um furo menor que o real e, pior, calculava
-   * o esguicho a partir dessa área — 236 L/s no lugar de 416.
+   * ⚠️ **It was 2550, and 2550 saturates below what the game produces.** A breach is
+   * born at 0.055 m² and grows to 3.2 times that by absorbing other shots
+   * (`MAX_BREACH_SCALE`), meaning up to 0.176 m². With the byte's ceiling at
+   * 255/2550 = 0.1 m², **43% of the useful range did not fit on the wire**: a
+   * well-widened breach arrived on the other side at a little over half the size it
+   * had. The side that does not simulate drew a smaller hole than the real one and,
+   * worse, computed the jet from that area — 236 L/s instead of 416.
    *
-   * 1400 põe o teto em 0,182 m², um dedo acima do máximo que o modelo permite, e
-   * ainda dá 0,7 cm² de resolução — vinte vezes mais fino que o passo com que a
-   * área cresce.
+   * 1400 puts the ceiling at 0.182 m², a finger above the maximum the model allows,
+   * and it still gives 0.7 cm² of resolution — twenty times finer than the step the
+   * area grows by.
    */
   breachArea: 1400,
   /**
-   * Fração do dia, 0..1.
+   * Fraction of the day, 0..1.
    *
-   * Sobre um dia de doze minutos, um passo desta escala é um centésimo de
-   * segundo de jogo — ou seja, o sol nunca salta um pixel por causa da
-   * quantização. É gente demais para dois bytes? Não: a alternativa era um
-   * `f32` de quatro, e o que se ganharia com ele é precisão em casas que nem o
-   * relógio do HUD mostra.
+   * Over a twelve-minute day, one step of this scale is a hundredth of a game second —
+   * meaning the sun never jumps a pixel because of the quantization. Is that too much
+   * for two bytes? No: the alternative was a four-byte `f32`, and what it would gain is
+   * precision in decimal places the HUD's clock does not even show.
    */
   timeOfDay: 65535,
 } as const;
 
-/** Empacota um float numa faixa de `i16`, grampeando nas pontas. */
+/** Packs a float into an `i16` range, clamping at the ends. */
 export function quantize(value: number, scale: number): number {
   const scaled = Math.round(value * scale);
   return scaled < -32768 ? -32768 : scaled > 32767 ? 32767 : scaled;
 }
 
-/** Desempacota o que `quantize` produziu. */
+/** Unpacks what `quantize` produced. */
 export function dequantize(value: number, scale: number): number {
   return value / scale;
 }
 
-/** Um código de sala válido: quatro casas do alfabeto, em caixa alta. */
+/** A valid room code: four digits from the alphabet, uppercase. */
 export function isValidCode(code: string): boolean {
   if (code.length !== CODE_LENGTH) return false;
   for (const character of code) {
@@ -303,16 +301,16 @@ export function isValidCode(code: string): boolean {
 }
 
 /**
- * Deixa um apelido apresentável, ou devolve um padrão.
+ * Makes a nickname presentable, or returns a default.
  *
- * Roda **nos dois lados**, e é de propósito: o cliente saneia para o jogador ver
- * o nome com que vai entrar, e o servidor saneia porque entrada de rede não se
- * confia nunca — o cliente que manda o `hello` pode não ser o nosso.
+ * It runs on **both sides**, and that is on purpose: the client sanitizes so the player
+ * sees the name they are going in with, and the server sanitizes because network input
+ * is never to be trusted — the client sending the `hello` may not be ours.
  */
 export function sanitizeNickname(value: unknown): string {
   if (typeof value !== 'string') return 'Sailor';
   const cleaned = value
-    // Controles C0/C1, largura zero, marcas e isolamentos bidirecionais, e o BOM.
+    // C0/C1 controls, zero width, bidirectional marks and isolates, and the BOM.
     .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2066-\u2069\uFEFF]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
