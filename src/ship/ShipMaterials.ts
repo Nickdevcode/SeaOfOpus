@@ -1,14 +1,14 @@
 /**
- * A paleta de materiais da Chalupa.
+ * The sloop's material palette.
  *
- * Existe separado de quem constrói a geometria por dois motivos práticos: as
- * texturas são caras de gerar e nascem uma vez só para os dois navios da
- * partida, e trocar a cor do casco do inimigo vira uma linha em vez de uma
- * caçada por `new MeshStandardMaterial` espalhados pelo código.
+ * It exists apart from whoever builds the geometry for two practical reasons: the
+ * textures are expensive to generate and are born once for both ships in the match, and
+ * changing the enemy hull's color becomes one line instead of a hunt for
+ * `new MeshStandardMaterial`s scattered through the code.
  *
- * Todos os mapas vêm de `ProceduralTextures`. O canal R do ORM é oclusão, então
- * toda geometria que usar estes materiais precisa ter o atributo `uv1` (o three
- * lê `aoMap` por ele) — `withAoUv` cuida disso.
+ * Every map comes from `ProceduralTextures`. The ORM's R channel is occlusion, so any
+ * geometry using these materials has to have the `uv1` attribute (three reads `aoMap`
+ * through it) — `withAoUv` takes care of that.
  */
 
 import * as THREE from 'three';
@@ -22,12 +22,12 @@ import {
 } from '../textures/ProceduralTextures';
 
 /**
- * Duplica `uv` em `uv1`.
+ * Duplicates `uv` into `uv1`.
  *
- * O `aoMap` do three amostra pelo segundo conjunto de UV, uma herança do glTF,
- * onde a oclusão costuma ter um atlas próprio. Aqui a oclusão está no mesmo
- * ladrilho da cor, então o segundo conjunto é literalmente uma cópia — e sem
- * ela o mapa some sem nenhum aviso no console.
+ * Three's `aoMap` samples through the second UV set, an inheritance from glTF, where the
+ * occlusion usually has an atlas of its own. Here the occlusion is on the same tile as
+ * the color, so the second set is literally a copy — and without it the map disappears
+ * with no warning in the console at all.
  */
 export function withAoUv(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   const uv = geometry.getAttribute('uv');
@@ -36,9 +36,9 @@ export function withAoUv(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
 }
 
 /**
- * `normalScale` entra como escalar por conveniência — os dois eixos sempre andam
- * juntos aqui. Precisa ser `Omit` e não interseção: cruzar com o tipo do three
- * daria `Vector2 & number`, que nenhum valor satisfaz.
+ * `normalScale` comes in as a scalar for convenience — both axes always move together
+ * here. It has to be an `Omit` and not an intersection: crossing with three's type would
+ * give `Vector2 & number`, which no value satisfies.
  */
 function standard(
   maps: MaterialMaps,
@@ -52,8 +52,8 @@ function standard(
     aoMap: maps.ormMap,
     roughnessMap: maps.ormMap,
     metalnessMap: maps.ormMap,
-    // Com os mapas presentes estes escalares viram multiplicadores; deixá-los
-    // em 1 é o que preserva o que a textura escreveu em cada canal.
+    // With the maps present these scalars become multipliers; leaving them at 1 is what
+    // preserves what the texture wrote into each channel.
     roughness: 1,
     metalness: 1,
     aoMapIntensity: 0.9,
@@ -62,30 +62,30 @@ function standard(
 }
 
 export interface ShipMaterials {
-  /** Costado externo: carvalho alcatroado, quase preto. */
+  /** The outer side: tarred oak, nearly black. */
   hull: THREE.MeshStandardMaterial;
-  /** Convés: carvalho claro, lixado pelo pé e pelo sal. */
+  /** The deck: pale oak, sanded by feet and salt. */
   deck: THREE.MeshStandardMaterial;
-  /** Madeira interna do porão e da amurada por dentro. */
+  /** Interior wood of the hold and of the bulwark's inner face. */
   interior: THREE.MeshStandardMaterial;
-  /** Peças torneadas: mastro, verga, cabrestante, timão. */
+  /** Turned pieces: mast, yard, capstan, helm. */
   spar: THREE.MeshStandardMaterial;
-  /** Faixa decorativa e entalhes — o vermelho característico da Chalupa. */
+  /** Decorative band and carvings — the sloop's characteristic red. */
   trim: THREE.MeshStandardMaterial;
   sail: THREE.MeshStandardMaterial;
   rope: THREE.MeshStandardMaterial;
   iron: THREE.MeshStandardMaterial;
   brass: THREE.MeshStandardMaterial;
   glass: THREE.MeshPhysicalMaterial;
-  /** Chama da lanterna: só emissivo, sem depender de luz da cena. */
+  /** The lantern's flame: emissive only, depending on no scene light. */
   flame: THREE.MeshBasicMaterial;
 
   dispose(): void;
 }
 
 /**
- * Gera texturas e materiais. Roda uma vez por partida — são alguns décimos de
- * segundo de canvas 2D, então nunca deve ser chamada dentro do laço.
+ * Generates textures and materials. It runs once per match — a few tenths of a second of
+ * 2D canvas, so it must never be called inside the loop.
  */
 export function createShipMaterials(): ShipMaterials {
   const hullMaps = createWoodMaps({
@@ -141,8 +141,8 @@ export function createShipMaterials(): ShipMaterials {
 
   const sailMaps = createSailMaps();
   const ropeMaps = createRopeMaps();
-  // Ferro fundido de canhão sai da areia de fundição fosco: com rugosidade de
-  // metal polido ele lia como obsidiana, não como peça de artilharia.
+  // A cannon's cast iron comes out of the foundry sand matte: with polished-metal
+  // roughness it read as obsidian, not as a piece of artillery.
   const ironMaps = createMetalMaps({
     base: [0.2, 0.2, 0.21],
     corrosion: 0.42,
@@ -150,22 +150,21 @@ export function createShipMaterials(): ShipMaterials {
     roughness: 0.62,
     seed: 811,
   });
-  // Latão de bordo é latão *de trabalho*: exposto à maresia, ele embaça em dias.
+  // Brass aboard is *working* brass: exposed to the salt air, it dulls in days.
   //
-  // A rugosidade continua alta (0,62, a mesma do ferro fundido) pelo motivo de
-  // sempre: peça de serviço não devolve o sol como espelho, e a chapa polida
-  // lia como barra de ouro largada no tombadilho.
+  // The roughness is still high (0.62, the same as the cast iron) for the usual reason: a
+  // working piece does not throw the sun back like a mirror, and the polished plate read
+  // as a gold bar left on the quarterdeck.
   //
-  // **A corrosão, essa, caiu de 0,26 para 0,12**, e a razão é que o latão mudou
-  // de tamanho no navio. Ela tinha sido calibrada numa tampa de bitácula de
-  // 50 × 42 cm — superfície grande, onde 26% de zinabre vira textura. Essa tampa
-  // deixou de existir, e o que restou de latão são peças pequenas e **próximas
-  // do olho**: as cantoneiras da bitácula e, principalmente, o punho que marca o
-  // leme a meio, a meio metro da câmera de quem governa. Nessa escala, um quarto
-  // de mancha verde não lê como pátina — lê como limo, e a marca que precisa
-  // dizer "isto aqui é latão, repare em mim" aparecia mofada. O verde-azulado
-  // continua sendo a cor certa do óxido (liga de cobre cria zinabre, não
-  // ferrugem); o que mudou foi a dose.
+  // **The corrosion, that one, came down from 0.26 to 0.12**, and the reason is that the
+  // brass changed size on the ship. It had been calibrated on a 50 × 42 cm binnacle lid —
+  // a large surface, where 26% of verdigris becomes texture. That lid stopped existing,
+  // and what is left of the brass are small pieces **close to the eye**: the binnacle's
+  // corner pieces and, above all, the handle that marks the rudder amidships, half a
+  // meter from the camera of whoever is steering. At that scale, a quarter of green stain
+  // does not read as patina — it reads as slime, and the mark that has to say "this is
+  // brass, look at me" showed up moldy. The blue-green is still the oxide's right color
+  // (a copper alloy makes verdigris, not rust); what changed was the dose.
   const brassMaps = createMetalMaps({
     base: [0.76, 0.58, 0.26],
     corrosion: 0.12,
@@ -183,21 +182,21 @@ export function createShipMaterials(): ShipMaterials {
     interior: standard(interiorMaps),
     spar: standard(sparMaps, { normalScale: 0.8 }),
     trim: standard(trimMaps),
-    // A vela é vista dos dois lados e é fina: `DoubleSide` mais um pouco de
-    // transmissão de luz é o que dá o brilho de sol atravessando o pano.
+    // The sail is seen from both sides and it is thin: `DoubleSide` plus a little light
+    // transmission is what gives the glow of sun coming through the cloth.
     sail: standard(sailMaps, {
       side: THREE.DoubleSide,
       normalScale: 0.7,
-      // Sem isso a face de trás fica preta quando o sol bate na frente. O tom
-      // é quente de propósito: a luz que atravessa a lona sai com a cor dela,
-      // e é isso que impede a vela na sombra de ler como chapa cinza-azulada.
+      // Without this the back face goes black when the sun hits the front. The tone is
+      // warm on purpose: the light crossing the canvas comes out with the canvas's color,
+      // and that is what keeps a shaded sail from reading as a blue-gray plate.
       emissive: new THREE.Color(0x2a2016),
     }),
     rope: standard(ropeMaps, { normalScale: 1.3 }),
-    // Relevo contido: adensar o UV do cano do canhão dobrou a frequência do
-    // mapa, e é a *inclinação* (amplitude × frequência) que produz o brilho
-    // serrilhado. Metade da escala anterior mantém a picotagem de fundição
-    // legível sem transformar cada pite numa cratera com sombra própria.
+    // Restrained relief: tightening the cannon barrel's UV doubled the map's frequency,
+    // and it is the *slope* (amplitude × frequency) that produces the jagged glint. Half
+    // the previous scale keeps the foundry pitting legible without turning every pit into
+    // a crater with a shadow of its own.
     iron: standard(ironMaps, { normalScale: 0.45 }),
     brass: standard(brassMaps, { normalScale: 0.9 }),
     glass: new THREE.MeshPhysicalMaterial({
@@ -209,7 +208,7 @@ export function createShipMaterials(): ShipMaterials {
       transparent: true,
       opacity: 0.5,
     }),
-    // Cor acima de 1 de propósito: é o que o bloom do compositor procura.
+    // Color above 1 on purpose: it is what the compositor's bloom looks for.
     flame: new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 4.4, 1.4), fog: false }),
 
     dispose(): void {

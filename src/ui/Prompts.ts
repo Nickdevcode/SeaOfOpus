@@ -1,15 +1,15 @@
 /**
- * Prompts contextuais: o que dá para fazer agora, e com que tecla.
+ * Contextual prompts: what you can do right now, and with which key.
  *
- * É HTML sobre o canvas, não texto em 3D. Texto de UI desenhado no mundo custa
- * uma malha e um atlas por frase e ainda sai serrilhado; o DOM já resolve fonte,
- * subpixel e escala de tela de graça, e o custo é zero enquanto nada muda —
- * daí o cuidado de só escrever no DOM quando o conteúdo é diferente.
+ * It is HTML over the canvas, not 3D text. UI text drawn in the world costs a mesh and an
+ * atlas per phrase and still comes out jagged; the DOM already handles font, subpixel and
+ * screen scale for free, and the cost is zero while nothing changes — hence the care to
+ * only write to the DOM when the content is different.
  *
- * Os rótulos saem de `ACTION_LABELS`, a mesma tabela do remapeamento, e trocam
- * para os botões do controle no instante em que o jogador **encosta** no controle —
- * não quando ele é plugado (ver `Input.activeDevice`). Uma tecla renomeada ali
- * aparece aqui sozinha.
+ * The labels come out of `ACTION_LABELS`, the same table the remapping uses, and switch
+ * to the controller's buttons the instant the player **touches** the controller — not
+ * when it is plugged in (see `Input.activeDevice`). A key renamed there shows up here on
+ * its own.
  */
 
 import type { Action } from '../core/Input';
@@ -20,17 +20,17 @@ import type { Ship } from '../ship/Ship';
 import '../styles/prompts.css';
 
 /**
- * Uma dica de comando: a tecla e o que ela faz.
+ * One control hint: the key and what it does.
  *
- * A maioria sai de `ACTION_LABELS` pela `action`. As que não saem são os eixos
- * de movimento — não existe "ação" chamada andar para vante, existe um eixo —, e
- * é para elas que serve o par `key`/`padKey`: sem o segundo, o painel continuava
- * pedindo `W / S` para quem está com as duas mãos no controle.
+ * Most of them come out of `ACTION_LABELS` through `action`. The ones that do not are the
+ * movement axes — there is no "action" called walking forward, there is an axis —, and
+ * that is what the `key`/`padKey` pair is for: without the second, the panel went on
+ * asking for `W / S` from someone with both hands on the controller.
  */
 interface Hint {
   action: Action | null;
   key?: string;
-  /** Rótulo equivalente no controle. Sem ele, `key` vale para os dois. */
+  /** The equivalent label on the controller. Without it, `key` holds for both. */
   padKey?: string;
   text: string;
 }
@@ -100,16 +100,17 @@ export class Prompts {
   }
 
   /**
-   * O aviso de que a câmera está solta.
+   * The notice that the camera is loose.
    *
-   * O navegador só entrega movimento de mouse cru para quem travou o ponteiro, e
-   * travar exige um clique — não há como fazê-lo pelo jogo quando a partida
-   * começa, porque o `start` chega do servidor e não de um gesto do jogador.
-   * Quem não sabe disso vê um jogo em que o WASD anda e a cabeça não vira, e a
-   * conclusão razoável é que o mouse não funciona. Uma linha resolve.
+   * The browser only delivers raw mouse movement to whoever has locked the pointer, and
+   * locking requires a click — there is no way to do it from the game when the match
+   * starts, because the `start` comes from the server and not from a gesture by the
+   * player. Whoever does not know that sees a game where WASD walks and the head does not
+   * turn, and the reasonable conclusion is that the mouse does not work. One line settles
+   * it.
    *
-   * Some no controle porque lá não há o que resolver: o analógico direito olha
-   * em volta sem ponteiro travado nenhum.
+   * It disappears on the controller because there is nothing to settle there: the right
+   * stick looks around with no pointer lock at all.
    */
   private updatePointerHint(input: Input): void {
     const show = !input.pointerLocked && !input.usingGamepad;
@@ -117,7 +118,7 @@ export class Prompts {
     this.resume.hidden = !show;
   }
 
-  /** Esconde tudo — usado ao voltar para o menu. */
+  /** Hides everything — used when going back to the menu. */
   setVisible(visible: boolean): void {
     this.root.hidden = !visible;
   }
@@ -153,15 +154,15 @@ export class Prompts {
       this.promptBar.hidden = true;
     } else {
       this.promptBar.hidden = false;
-      // O grampo é do desenho, não da peça: uma barra com `scaleX(3)` só não
-      // vazava porque o `overflow: hidden` do prompt a recortava. Contar com o
-      // recorte é contar que ninguém mude o CSS.
+      // The clamp belongs to the drawing, not to the piece: a bar with `scaleX(3)` only
+      // did not spill because the prompt's `overflow: hidden` cropped it. Counting on the
+      // crop is counting on nobody changing the CSS.
       const fill = Math.min(Math.max(progress, 0), 1);
       this.promptFill.style.transform = `scaleX(${fill.toFixed(3)})`;
     }
   }
 
-  /** Estado da peça operada: só o canhão tem algo a dizer por enquanto. */
+  /** State of the station being operated: only the cannon has anything to say so far. */
   private updateStation(player: PlayerController, ship: Ship): void {
     if (player.station !== 'cannon') {
       if (!this.status.hidden) this.status.hidden = true;
@@ -189,13 +190,12 @@ export class Prompts {
   private updateHints(player: PlayerController, input: Input): void {
     const pad = input.usingGamepad;
     const list = hintsFor(player);
-    // Serializa antes de tocar no DOM: reconstruir cinco elementos por frame é
-    // desperdício num painel que muda quatro vezes por partida.
+    // Serialize before touching the DOM: rebuilding five elements per frame is waste in
+    // a panel that changes four times a match.
     //
-    // A assinatura carrega um glifo resolvido, e não só "tem controle ou não":
-    // trocar um Xbox por um DualSense mantém `pad` em `true` e mudaria todos os
-    // rótulos por baixo do cache, deixando o painel pedindo `X` onde agora se lê
-    // `□`.
+    // The signature carries a resolved glyph, and not just "there is a controller or
+    // not": swapping an Xbox for a DualSense keeps `pad` at `true` and would change every
+    // label under the cache, leaving the panel asking for `X` where it now reads `□`.
     const device = pad ? `pad:${input.padLabel('interact')}` : 'kbm';
     const signature = `${device}|${list.map((hint) => hint.text).join('|')}`;
     if (signature === this.lastHints) return;
@@ -223,22 +223,22 @@ export class Prompts {
 }
 
 /**
- * Rótulo da tecla ou do botão para uma ação, no aparelho que está em uso.
+ * The key's or button's label for an action, on the device in use.
  *
- * Passa por `Input.padLabel` em vez de ler `ACTION_LABELS[...].gamepad`: a
- * tabela guarda o nome do layout padrão (Xbox), e num controle da Sony o prompt
- * dizia `X` para o botão que está gravado `□` — e `A` para o `✕`.
+ * It goes through `Input.padLabel` instead of reading `ACTION_LABELS[...].gamepad`: the
+ * table stores the default layout's name (Xbox), and on a Sony controller the prompt said
+ * `X` for the button engraved `□` — and `A` for `✕`.
  */
 function keyFor(input: Input, action: Action): string {
   return input.usingGamepad ? input.padLabel(action) : ACTION_LABELS[action].keyboard;
 }
 
 function hintsFor(player: PlayerController): Hint[] {
-  // A água vem primeiro porque é o estado de que o jogador menos sabe: ele acabou
-  // de cair, o navio está indo embora e nada na tela diz o que fazer. As duas
-  // linhas são as duas únicas coisas que existem lá — e a segunda diz **onde** a
-  // escada está, porque procurar uma escada de embarque nadando ao lado de um
-  // casco de dezesseis metros é a parte difícil.
+  // The water comes first because it is the state the player knows least about: they
+  // have just fallen in, the ship is leaving and nothing on screen says what to do. The
+  // two lines are the only two things that exist there — and the second says **where**
+  // the ladder is, because finding a boarding ladder while swimming beside a
+  // sixteen-meter hull is the hard part.
   if (player.inWater) {
     return [
       { action: null, key: 'W A S D', padKey: 'Left stick', text: 'Swim' },
@@ -249,15 +249,15 @@ function hintsFor(player: PlayerController): Hint[] {
   if (player.onLadder) {
     return [
       { action: null, key: 'W / S', padKey: 'Left stick', text: 'Climb up and down' },
-      // A mesma tecla que agarrou, e é o que faz a escada ter saída: quem subiu
-      // não precisa descobrir um segundo comando para poder descer.
+      // The same key that grabbed on, and it is what gives the ladder a way out: whoever
+      // climbed up does not have to discover a second command in order to get down.
       { action: 'interact', text: 'Let go' },
     ];
   }
 
-  // O cabrestante é a única peça do convés que vira modo, e é a que mais precisa
-  // de dica: sem ela, quem assume as barras fica parado esperando uma barra
-  // encher sozinha em vez de sair andando.
+  // The capstan is the only piece on deck that becomes a mode, and it is the one that
+  // most needs a hint: without it, whoever takes the bars stands still waiting for a bar
+  // to fill on its own instead of starting to walk.
   if (player.atCapstan) {
     return [
       { action: null, key: 'W', padKey: 'Left stick', text: 'Walk forward to heave' },

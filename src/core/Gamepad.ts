@@ -1,21 +1,21 @@
 /**
- * Camada sobre a Gamepad API do navegador.
+ * A layer over the browser's Gamepad API.
  *
- * Segue o layout "standard" (Xbox), que é o que a Gamepad API normaliza. O
- * mapeamento reproduz o esquema padrão do Sea of Thieves: X interage, RT
- * dispara, LT mira, Y carrega o canhão, B sai do modo atual.
+ * It follows the "standard" (Xbox) layout, which is what the Gamepad API normalizes. The
+ * mapping reproduces Sea of Thieves' default scheme: X interacts, RT fires, LT aims, Y
+ * loads the cannon, B leaves the current mode.
  *
- * A Gamepad API não emite eventos de botão — é preciso pesquisar o estado a
- * cada frame. Por isso `poll()` roda uma vez por frame no início do loop.
+ * The Gamepad API emits no button events — the state has to be polled every frame. That
+ * is why `poll()` runs once per frame at the start of the loop.
  *
- * O que o `pad.id` ainda decide é o **nome** dos botões: mesmo índice, gravação
- * diferente num controle da Sony. Ver `GamepadLayout`.
+ * What `pad.id` still decides is the buttons' **names**: same index, different engraving
+ * on a Sony controller. See `GamepadLayout`.
  */
 
 import { applyDeadzone, clamp01 } from './MathUtils';
 import { settings } from './Settings';
 
-/** Índices de botão do layout "standard" da Gamepad API. */
+/** Button indices of the Gamepad API's "standard" layout. */
 export const GamepadButton = {
   A: 0,
   B: 1,
@@ -36,47 +36,47 @@ export const GamepadButton = {
 } as const;
 
 const BUTTON_COUNT = 16;
-/** Gatilhos analógicos contam como pressionados a partir deste valor. */
+/** Analog triggers count as pressed from this value on. */
 const TRIGGER_THRESHOLD = 0.35;
 
 /**
- * Família de rótulos do controle.
+ * The controller's label family.
  *
- * Só os **nomes** mudam: a Gamepad API normaliza os índices para o layout
- * "standard", então o botão 0 continua sendo o de baixo em qualquer controle. O
- * que muda é o que está impresso nele — `A` num Xbox, `✕` num DualSense —, e é
- * por isso que isto vive aqui e não numa segunda tabela de bindings.
+ * Only the **names** change: the Gamepad API normalizes the indices to the "standard"
+ * layout, so button 0 is still the bottom one on any controller. What changes is what is
+ * printed on it — `A` on an Xbox, `✕` on a DualSense —, and that is why this lives here
+ * and not in a second binding table.
  */
 export type GamepadLayout = 'xbox' | 'playstation';
 
 /**
- * `pad.id` que denuncia um controle da Sony.
+ * The `pad.id` that gives a Sony controller away.
  *
- * O `054c` é o identificador de fabricante da Sony e é o padrão mais confiável:
- * o Chrome monta ids como `"Wireless Controller (STANDARD GAMEPAD Vendor: 054c
- * Product: 09cc)"` — em que nem "DualShock" nem "PlayStation" aparecem — e o
- * Firefox usa `"054c-09cc-Wireless Controller"`. Os nomes por extenso ficam como
- * rede de segurança para navegadores que só expõem o rótulo comercial.
+ * `054c` is Sony's vendor identifier and it is the most reliable pattern: Chrome builds
+ * ids like `"Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 09cc)"` — in
+ * which neither "DualShock" nor "PlayStation" appears — and Firefox uses
+ * `"054c-09cc-Wireless Controller"`. The spelled-out names stay as a safety net for
+ * browsers that only expose the commercial label.
  */
 const PLAYSTATION_ID = /(dualshock|dualsense|playstation|054c)/;
 
-/** Descobre a família de rótulos a partir do `id` que o navegador reporta. */
+/** Works out the label family from the `id` the browser reports. */
 function detectLayout(id: string): GamepadLayout {
   return PLAYSTATION_ID.test(id.toLowerCase()) ? 'playstation' : 'xbox';
 }
 
 export class GamepadManager {
   connected = false;
-  /** Nome do controle conectado, mostrado no overlay de telemetria (F3). */
+  /** Name of the connected controller, shown in the telemetry overlay (F3). */
   deviceName = '';
-  /** Família de rótulos do controle em uso. Ver `GamepadLayout`. */
+  /** Label family of the controller in use. See `GamepadLayout`. */
   layout: GamepadLayout = 'xbox';
 
-  /** Analógico esquerdo já com zona morta aplicada. X: direita+, Y: baixo+. */
+  /** Left stick with the deadzone already applied. X: right+, Y: down+. */
   readonly leftStick = { x: 0, y: 0 };
-  /** Analógico direito, usado para olhar. */
+  /** Right stick, used to look around. */
   readonly rightStick = { x: 0, y: 0 };
-  /** Gatilhos analógicos, 0..1. */
+  /** Analog triggers, 0..1. */
   leftTrigger = 0;
   rightTrigger = 0;
 
@@ -102,7 +102,7 @@ export class GamepadManager {
     });
   }
 
-  /** Lê o estado do controle. Deve rodar uma vez por frame, antes da lógica. */
+  /** Reads the controller's state. It has to run once per frame, before the logic. */
   poll(): void {
     this.previousButtons.set(this.buttons);
 
@@ -136,7 +136,7 @@ export class GamepadManager {
         this.buttons[i] = 0;
         continue;
       }
-      // Gatilhos são analógicos: só contam como "pressionados" acima do limiar.
+      // Triggers are analog: they only count as "pressed" above the threshold.
       const isTrigger = i === GamepadButton.LT || i === GamepadButton.RT;
       const pressed = isTrigger ? button.value > TRIGGER_THRESHOLD : button.pressed;
       this.buttons[i] = pressed ? 1 : 0;
@@ -147,7 +147,7 @@ export class GamepadManager {
     return this.buttons[button] === 1;
   }
 
-  /** Verdadeiro apenas no frame em que o botão foi pressionado. */
+  /** True only on the frame the button was pressed. */
   wasPressed(button: number): boolean {
     return this.buttons[button] === 1 && this.previousButtons[button] === 0;
   }
@@ -158,7 +158,7 @@ export class GamepadManager {
       const pad = pads[this.index];
       if (pad?.connected) return pad;
     }
-    // O índice pode mudar após reconexão: pegar o primeiro disponível.
+    // The index can change after a reconnection: take the first available one.
     for (const pad of pads) {
       if (pad?.connected) {
         this.index = pad.index;

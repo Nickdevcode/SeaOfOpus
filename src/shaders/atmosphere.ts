@@ -1,26 +1,25 @@
 /**
- * Espalhamento atmosférico (Rayleigh + Mie) por integração numérica.
+ * Atmospheric scattering (Rayleigh + Mie) by numerical integration.
  *
- * É o mesmo modelo físico que dá o azul do meio-dia, o vermelho do poente e o
- * halo em volta do sol — sem tabela de cores pintada à mão. O custo real é
- * alto para rodar por pixel de tela, então ele é avaliado uma vez por frame
- * numa LUT equirretangular pequena (ver `Sky.ts`); o domo do céu e o reflexo
- * do oceano apenas amostram essa LUT, o que mantém os dois perfeitamente
- * coerentes e baratos.
+ * It is the same physical model that gives noon's blue, the sunset's red and the halo
+ * around the sun — with no hand-painted color table. The real cost is too high to run per
+ * screen pixel, so it is evaluated once per frame into a small equirectangular LUT (see
+ * `Sky.ts`); the sky dome and the ocean's reflection only sample that LUT, which keeps
+ * both perfectly consistent and cheap.
  */
 
 /**
- * Mapeamento equirretangular ↔ direção.
+ * Equirectangular ↔ direction mapping.
  *
- * Fica separado do modelo atmosférico porque o oceano precisa apenas ler a LUT
- * — arrastar o raymarch junto só engordaria a compilação do shader do mar.
+ * It is kept apart from the atmospheric model because the ocean only needs to read the
+ * LUT — dragging the raymarch along would only fatten the sea shader's compilation.
  */
 export const EQUIRECT_GLSL = /* glsl */ `
 #ifndef PI
 #define PI 3.141592653589793
 #endif
 
-/** Converte uma direção em UV equirretangular (para ler/escrever a LUT). */
+/** Converts a direction into equirectangular UV (to read/write the LUT). */
 vec2 directionToEquirect(vec3 dir) {
   return vec2(
     atan(dir.z, dir.x) / (2.0 * PI) + 0.5,
@@ -28,7 +27,7 @@ vec2 directionToEquirect(vec3 dir) {
   );
 }
 
-/** Inverso de \`directionToEquirect\`. */
+/** The inverse of \`directionToEquirect\`. */
 vec3 equirectToDirection(vec2 uv) {
   float phi = (uv.x - 0.5) * 2.0 * PI;
   float theta = uv.y * PI;
@@ -44,37 +43,38 @@ export const ATMOSPHERE_GLSL = /* glsl */ `
 
 const float PLANET_RADIUS = 6371e3;
 const float ATMOSPHERE_RADIUS = 6471e3;
-// Coeficientes de espalhamento de Rayleigh por canal (vermelho espalha menos,
-// azul espalha mais — é literalmente por isso que o céu é azul).
+// Rayleigh scattering coefficients per channel (red scatters less, blue scatters more —
+// it is literally why the sky is blue).
 const vec3 RAYLEIGH_COEFF = vec3(5.5e-6, 13.0e-6, 22.4e-6);
 const float MIE_COEFF = 21e-6;
 const float RAYLEIGH_SCALE_HEIGHT = 8e3;
 const float MIE_SCALE_HEIGHT = 1.2e3;
-// Assimetria de Mie: positivo concentra o espalhamento para frente, criando o
-// brilho difuso em torno do sol.
+// Mie asymmetry: positive concentrates the scattering forward, creating the diffuse glow
+// around the sun.
 const float MIE_G = 0.758;
 
 const int PRIMARY_STEPS = 12;
 const int LIGHT_STEPS = 4;
 
-// Teto da profundidade óptica ao longo do raio de visão.
+// Ceiling on the optical depth along the view ray.
 //
-// Este é um modelo de espalhamento simples: cada fóton espalha uma vez e o
-// resto é extinção. Perto do horizonte o raio atravessa centenas de
-// quilômetros de ar, a extinção mata o azul e o céu sai cor de caramelo ao
-// meio-dia — quando na realidade ele é branco-azulado pálido. O que falta é o
-// espalhamento múltiplo: o ar não absorve luz, ele a redistribui, então a
-// coluna longa devolve por espalhamento tudo o que tira por extinção.
+// This is a single-scattering model: each photon scatters once and the rest is
+// extinction. Near the horizon the ray crosses hundreds of kilometers of air, the
+// extinction kills the blue and the sky comes out caramel-colored at noon — when in
+// reality it is a pale bluish white. What is missing is multiple scattering: the air does
+// not absorb light, it redistributes it, so the long column gives back by scattering
+// everything it takes away by extinction.
 //
-// Limitar a extinção do trajeto de visão captura esse equilíbrio a custo zero.
-// A luz do sol (lightDepth) continua sem teto, então o poente vermelho — que
-// vem justamente da luz solar rasante — fica intacto.
-// O valor foi calibrado nas duas pontas: baixo demais (1.35) devolve azul
-// residual suficiente para lavar o poente e deixá-lo prateado; alto demais
-// traz o caramelo de volta ao meio-dia.
+// Capping the view path's extinction captures that balance at zero cost. The sunlight
+// (lightDepth) stays uncapped, so the red sunset — which comes precisely from grazing
+// sunlight — is left intact.
+//
+// The value was calibrated at both ends: too low (1.35) gives back enough residual blue
+// to wash the sunset out and leave it silvery; too high brings the caramel back at
+// noon.
 const vec3 MAX_VIEW_DEPTH = vec3(2.4);
 
-/** Interseção raio-esfera centrada na origem. Retorna (near, far). */
+/** Ray-sphere intersection centered at the origin. Returns (near, far). */
 vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
   float b = dot(origin, dir);
   float c = dot(origin, origin) - radius * radius;
@@ -85,17 +85,17 @@ vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
 }
 
 /**
- * Radiância do céu na direção rayDir para um sol em sunDir.
- * sunIntensity controla o brilho geral (usado para escurecer à noite).
+ * The sky's radiance in the direction rayDir for a sun at sunDir.
+ * sunIntensity controls the overall brightness (used to darken at night).
  */
 vec3 atmosphere(vec3 rayDir, vec3 sunDir, float sunIntensity) {
-  // Observador ao nível do mar, 1 m acima da superfície do planeta.
+  // Observer at sea level, 1 m above the planet's surface.
   vec3 origin = vec3(0.0, PLANET_RADIUS + 1.0, 0.0);
 
   vec2 hit = raySphereIntersect(origin, rayDir, ATMOSPHERE_RADIUS);
   if (hit.x > hit.y) return vec3(0.0);
 
-  // Raios que batem no planeta param na superfície.
+  // Rays that hit the planet stop at the surface.
   vec2 planetHit = raySphereIntersect(origin, rayDir, PLANET_RADIUS);
   if (planetHit.x > 0.0) hit.y = min(hit.y, planetHit.x);
 
@@ -110,7 +110,7 @@ vec3 atmosphere(vec3 rayDir, vec3 sunDir, float sunIntensity) {
   float mu = dot(rayDir, sunDir);
   float mumu = mu * mu;
   float gg = MIE_G * MIE_G;
-  // Fases de Rayleigh e Henyey-Greenstein (Mie).
+  // Rayleigh and Henyey-Greenstein (Mie) phases.
   float phaseR = 3.0 / (16.0 * PI) * (1.0 + mumu);
   float phaseM = 3.0 / (8.0 * PI) * ((1.0 - gg) * (mumu + 1.0)) /
                  (pow(1.0 + gg - 2.0 * mu * MIE_G, 1.5) * (2.0 + gg));
@@ -124,7 +124,7 @@ vec3 atmosphere(vec3 rayDir, vec3 sunDir, float sunIntensity) {
     opticalDepthR += hr;
     opticalDepthM += hm;
 
-    // Segunda integração: quanta luz do sol sobrevive até este ponto.
+    // Second integration: how much sunlight survives as far as this point.
     vec2 lightHit = raySphereIntersect(samplePos, sunDir, ATMOSPHERE_RADIUS);
     float lightStep = lightHit.y / float(LIGHT_STEPS);
     float lightTime = 0.0;
@@ -156,18 +156,18 @@ vec3 atmosphere(vec3 rayDir, vec3 sunDir, float sunIntensity) {
 }
 
 /**
- * O piso do céu noturno.
+ * The night sky's floor.
  *
- * O espalhamento acima precisa de uma fonte de luz; com o sol posto e a lua
- * ausente ele devolve zero e o céu vira preto absoluto, o que nunca acontece de
- * verdade. O que sobra numa noite sem lua é airglow (o próprio ar emitindo, a
- * ~90 km), luz zodiacal e a soma das estrelas fracas demais para serem contadas
- * uma a uma. Tudo isso sobe na direção do horizonte, onde a coluna de ar é mais
- * longa — o mesmo motivo de o dia clarear ali.
+ * The scattering above needs a light source; with the sun set and the moon absent it
+ * returns zero and the sky becomes absolute black, which never happens in reality. What
+ * is left on a moonless night is airglow (the air itself emitting, at ~90 km), zodiacal
+ * light and the sum of the stars too faint to be counted one by one. All of it rises
+ * toward the horizon, where the air column is longest — the same reason the day brightens
+ * there.
  *
- * A luz da lua não entra aqui: ela é uma fonte direcional de verdade e vai pelo
- * mesmo \`atmosphere\` do sol, só que com intensidade ínfima. É o que faz o halo
- * azulado em volta dela aparecer sozinho.
+ * The moon's light does not come in here: it is a real directional source and goes
+ * through the same \`atmosphere\` as the sun, only with a minute intensity. That is what
+ * makes the bluish halo around it appear on its own.
  */
 vec3 nightGlow(vec3 dir) {
   float horizonLift = pow(1.0 - clamp(dir.y, 0.0, 1.0), 3.0);

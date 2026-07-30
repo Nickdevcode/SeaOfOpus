@@ -1,11 +1,12 @@
 /**
- * Ruído procedural compartilhado pelos shaders.
+ * Procedural noise shared by the shaders.
  *
- * Simplex 2D/3D de Ashima Arts (domínio público / MIT), a implementação
- * canônica usada em WebGL — vale mais que reescrever: é rápida, sem textura de
- * permutação e sem os artefatos direcionais do value noise clássico.
+ * Ashima Arts' 2D/3D simplex (public domain / MIT), the canonical implementation used in
+ * WebGL — worth more than rewriting: it is fast, needs no permutation texture and has
+ * none of classic value noise's directional artifacts.
  *
- * Usado em: ripples da água, nuvens, flutter da vela, grão da madeira e fumaça.
+ * Used in: the water's ripples, the clouds, the sail's flutter, the wood's grain and the
+ * smoke.
  */
 
 export const NOISE_GLSL = /* glsl */ `
@@ -99,7 +100,7 @@ float snoise(vec3 v) {
   return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
 }
 
-/** Ruído fractal (soma de oitavas). Base de nuvens, espuma e grão de madeira. */
+/** Fractal noise (a sum of octaves). The base for clouds, foam and wood grain. */
 float fbm(vec2 p, int octaves, float lacunarity, float gain) {
   float sum = 0.0;
   float amplitude = 0.5;
@@ -129,8 +130,8 @@ float fbm(vec3 p, int octaves, float lacunarity, float gain) {
 }
 
 /**
- * fBm com dobras em valor absoluto ("ridged"): cria cristas afiadas em vez de
- * ondulações suaves. É o que dá a borda algodão das nuvens cumulus.
+ * fBm with absolute-value folds ("ridged"): it creates sharp crests instead of smooth
+ * undulations. It is what gives cumulus clouds their cotton edge.
  */
 float ridgedFbm(vec3 p, int octaves, float lacunarity, float gain) {
   float sum = 0.0;
@@ -146,7 +147,7 @@ float ridgedFbm(vec3 p, int octaves, float lacunarity, float gain) {
   return sum / max(totalAmplitude, 0.0001);
 }
 
-/** Hash barato para jitter e variação por instância. */
+/** A cheap hash for jitter and per-instance variation. */
 float hash11(float p) {
   p = fract(p * 0.1031);
   p *= p + 33.33;
