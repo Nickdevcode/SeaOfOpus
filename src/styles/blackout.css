@@ -1,7 +1,7 @@
 /**
  * The rescue's blackout.
  *
- * Uma folha preta sobre tudo, e nada mais — nem texto, nem giro, nem "carregando".
+ * A black sheet over everything, and nothing else — no text, no spinner, no "loading".
  * It is the oldest ellipsis there is: you cut to black and come back with the character
  * somewhere else, and nobody asks how they got there. Writing "Being rescued…" would be
  * explaining something the cut has already told.
@@ -18,7 +18,7 @@
   background: #000;
   /* It never steals a click: the canvas needs them for the pointer lock. */
   pointer-events: none;
-  /* Acima de qualquer HUD; abaixo de nada, porque nada mais existe durante ele. */
+  /* Above any HUD; below nothing, because nothing else exists while it is up. */
   z-index: 40;
   /* It is not a button or a notice — the screen reader has nothing to announce here. */
   opacity: 0;

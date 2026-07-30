@@ -149,7 +149,7 @@
 /* --- cannon reticle ---------------------------------------------------------- */
 
 /* Four strokes with a gap in the middle: the ball drops, and a filled dot at the center
-   mentiria sobre onde ela vai bater. O vão obriga o olho a mirar o alvo. */
+   would lie about where it will land. The gap forces the eye onto the target. */
 .prompts__reticle {
   position: absolute;
   left: 50%;

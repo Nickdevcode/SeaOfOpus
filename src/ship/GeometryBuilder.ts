@@ -198,7 +198,7 @@ export class GeometryBuilder {
   }
 
   /**
-   * Cilindro (ou tronco de cone) entre dois pontos quaisquer.
+   * A cylinder (or truncated cone) between any two points.
    *
    * It is the ship's rigging piece: shrouds, stays, halyards and the anchor's own cable
    * are all this. Since the axis is arbitrary, the orthonormal basis is built on the spot
