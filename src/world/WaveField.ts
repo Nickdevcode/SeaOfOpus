@@ -400,8 +400,16 @@ const scratchDisplacement = new THREE.Vector3();
  *
  * É injetado tanto no vertex shader do oceano quanto em qualquer efeito que
  * precise da superfície. Mantenha lado a lado com o TypeScript: qualquer
- * mudança aqui precisa da mesma mudança lá, e o teste de paridade em
- * `tests/wave-parity.ts` existe justamente para pegar quando isso escapar.
+ * mudança aqui precisa da mesma mudança lá.
+ *
+ * > [!warning] A paridade é mantida à mão, e **não** há teste que a prove
+ * > Este comentário prometia um `tests/wave-parity.ts` que nunca foi escrito, o
+ * > que é pior que não prometer nada: quem mexe no shader lê a promessa e confia
+ * > numa rede que não existe. Provar paridade de verdade exigiria executar este
+ * > GLSL, ou seja, uma GPU e um contexto WebGL — e os testes deste projeto rodam
+ * > sem nada disso. Enquanto isso não existir, a única defesa é a revisão lado a
+ * > lado: `displace` (com `footprint = 0`) e `gerstnerDisplacement` têm de ser a
+ * > mesma conta, termo a termo.
  */
 export const WAVE_GLSL = /* glsl */ `
 #define MAX_WAVES ${MAX_WAVES}

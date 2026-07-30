@@ -234,6 +234,18 @@ function keyFor(input: Input, action: Action): string {
 }
 
 function hintsFor(player: PlayerController): Hint[] {
+  // A água vem primeiro porque é o estado de que o jogador menos sabe: ele acabou
+  // de cair, o navio está indo embora e nada na tela diz o que fazer. As duas
+  // linhas são as duas únicas coisas que existem lá — e a segunda diz **onde** a
+  // escada está, porque procurar uma escada de embarque nadando ao lado de um
+  // casco de dezesseis metros é a parte difícil.
+  if (player.inWater) {
+    return [
+      { action: null, key: 'W A S D', padKey: 'Left stick', text: 'Swim' },
+      { action: 'interact', text: 'Climb the boarding ladder, aft on either side' },
+    ];
+  }
+
   if (player.onLadder) {
     return [
       { action: null, key: 'W / S', padKey: 'Left stick', text: 'Climb up and down' },

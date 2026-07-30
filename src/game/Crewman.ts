@@ -17,6 +17,7 @@ import type { InputFrame } from '../core/InputFrame';
 import { Interaction, createShipInteractables } from '../player/Interaction';
 import { PlayerController } from '../player/PlayerController';
 import type { Ship } from '../ship/Ship';
+import type { WaveField } from '../world/WaveField';
 
 export class Crewman {
   readonly controller = new PlayerController();
@@ -46,9 +47,13 @@ export class Crewman {
    * último por uma questão de quem sabe o quê: o controlador não conhece rombos, e
    * só a interação vê o buraco e o botão segurado no mesmo passo. Adiantá-lo daria
    * uma madeira que aparece na mão um passo antes de o jogador apertar.
+   *
+   * @param waves o mar. Chega até aqui por um motivo só, e ele é de fora do navio:
+   *   o marujo pode **cair na água**, e a única coisa que decide se ele está nela é
+   *   a altura da onda debaixo dos pés dele. Ver `PlayerController.fixedUpdate`.
    */
-  fixedUpdate(dt: number, frame: InputFrame): void {
-    this.controller.fixedUpdate(dt, frame, this.ship);
+  fixedUpdate(dt: number, frame: InputFrame, waves: WaveField): void {
+    this.controller.fixedUpdate(dt, frame, this.ship, waves);
     this.interaction.update(dt, frame, this.controller);
     this.controller.carry.update(dt, this.interaction.patching);
   }

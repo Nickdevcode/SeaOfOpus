@@ -1,0 +1,34 @@
+/**
+ * O apagão do resgate.
+ *
+ * Uma folha preta sobre tudo, e nada mais — nem texto, nem giro, nem "carregando".
+ * É a elipse mais antiga que existe: corta-se para o preto e volta-se com o
+ * personagem noutro lugar, e ninguém pergunta como ele chegou lá. Escrever
+ * "Sendo resgatado…" seria explicar uma coisa que o corte já contou.
+ *
+ * A opacidade é escrita pelo JS quadro a quadro (ver `Blackout`), e não por
+ * `@keyframes`: o apagão precisa durar o que dura, e o `prefers-reduced-motion`
+ * do `base.css` reduz toda animação a 0,01 ms — o que aqui não seria "menos
+ * movimento", seria o teleporte acontecendo à vista de todos. Um valor por
+ * quadro, e só enquanto ele está no ar.
+ */
+
+.blackout {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  /* Nunca rouba clique: o canvas precisa deles para o ponteiro travado. */
+  pointer-events: none;
+  /* Acima de qualquer HUD; abaixo de nada, porque nada mais existe durante ele. */
+  z-index: 40;
+  /* Não é um botão nem um aviso — o leitor de tela não tem o que anunciar aqui. */
+  opacity: 0;
+}
+
+#ui-root > .blackout {
+  pointer-events: none;
+}
+
+.blackout[hidden] {
+  display: none;
+}

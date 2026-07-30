@@ -88,7 +88,9 @@ Num controle da Sony os rótulos saem no layout de lá: `✕ ○ □ △`, `L1/L
 | Ação | Teclado | Controle |
 |---|---|---|
 | Andar / correr / pular | `W A S D` · `Shift` · `Espaço` | Analógico esq. · `L3` · `A` |
-| Interagir (timão, cabrestante, canhão, escada do mastro, bomba, rombo) | `F` | `X` |
+| Nadar (na água, sem correr — ver abaixo) | `W A S D` | Analógico esq. |
+| Interagir (timão, cabrestante, canhão, escadas, bomba, rombo) | `F` | `X` |
+| Subir a bordo pela escada de embarque · pedir um cabo | `F` | `X` |
 | Sair do posto atual — e soltar a escada | `X` | `B` |
 | Carregar o canhão | `R` | `Y` |
 | Disparar | Botão esquerdo | `RT` |
@@ -736,6 +738,100 @@ atravessando barra.
 ![o pirata no convés](PirateCharacter/preview/in_game.png)
 ![na escada do mastro](PirateCharacter/preview/climb_in_game.png)
 
+### 🌊 Homem ao mar
+
+O portaló é o único vão do falcaseio, e agora ele é uma **porta de verdade**. Até
+esta versão, sair do navio era geometricamente impossível: o resolvedor de casco
+grampeava o jogador dentro do costado em todo quadro, e o piso valia para qualquer
+posição. Abrir o vão exigiu as duas metades — o grampo deixa de valer na faixa de
+84 cm do portaló, e o chão passa a **acabar** na borda do convés. Quem passa por
+ali fez força para isso; quem raspa na amurada meio metro ao lado continua batendo
+em madeira.
+
+Cair no mar **não tem punição nenhuma**: sem afogamento, sem morte, sem contagem
+regressiva. O navio segue navegando sozinho — e é justamente aí que dói, porque a
+chalupa em popa faz 2,6 m/s e ninguém nada a 1,4. Perder o convés é perder tempo e
+posição no duelo, que é a moeda cara desta briga. Não dá para mergulhar: o corpo
+fica amarrado à altura da onda por um amortecedor, e amortecedor não ultrapassa o
+alvo — **não afundar não é um grampo, é uma equação que não tem como afundar**.
+
+Voltar a bordo tem dois caminhos. O primeiro é a **escada de embarque** (abaixo). O
+segundo abre cinco segundos depois do tombo: um prompt pede um cabo, a tela corta
+para o preto por dois segundos e o marujo reaparece a bordo. Cinco segundos é o que
+separa "escorreguei do portaló" de "perdi o navio" — e é o que impede a escada de
+virar enfeite.
+
+| O que | Quanto | De onde sai o número |
+|---|---|---|
+| Velocidade de nado | 1,40 m/s | metade exata do passo (2,8 m/s) — e o crawl de cruzeiro de gente vestida em mar aberto |
+| Correr na água | não existe | sem fôlego no jogo, uma segunda velocidade de graça é uma tecla que ninguém solta |
+| Olho acima da linha d'água | 0,22 m | é dele que sai a profundidade dos pés (1,44 m), e não o contrário |
+| Queda do tombadilho ao mar | 0,60 s | os 1,74 m do tombadilho, pela gravidade |
+| Resgate liberado em | 5 s | 7 m de nado: dá para alcançar a escada quem caiu perto dela |
+| Tela preta | ~2 s | corte imediato, espera, e volta lenta — a volta é a única parte que se assiste |
+| Alcance da escada, da água | 1,50 m | um corpo de distância; mais apertado e a onda faria o prompt piscar |
+| Alcance do corpo em rede | ±128 m do navio | teto da quantização de posição local |
+
+> [!note] As poses de água ainda são emprestadas
+> Os clipes `Float` (boiando) e `Swim` (braçada) **existem**, medidos e conferidos
+> em vídeo, mas ainda não estão no GLB — ver o
+> [README do personagem](PirateCharacter/README.md). Até entrarem, quem nada usa a
+> locomoção alimentada com a velocidade de nado, e o relógio de água já corre com a
+> cadência certa: a troca é de três linhas, e existe teste provando que a fase não
+> muda de dono quando ela acontecer.
+
+### 🪜 A escada de embarque: subir é dela, descer é do portaló
+
+Uma por bordo, na popa, no plano do timão — quem volta a bordo já chega ao posto. A
+divisão de trabalho é assimétrica de propósito: a escada só serve para **subir**;
+para descer, pula-se pelo portaló. Ela nasce 69 cm submersa (fundo o bastante para a
+cava de uma onda grande não deixar o nadador sem pegada) e morre no piso do
+tombadilho, sem nada acima da amurada.
+
+Os oito vãos não são um número redondo: são `CLIMB_CLIP.rise / 2`, **exatos**, o que
+dá **4,0 ciclos** do `ClimbUp` de ponta a ponta — é isso que faz a mão cair na barra
+que está desenhada, e não ao lado dela. É a mesma amarra da escada do mastro, por um
+caminho diferente: lá o espaçamento saiu de arredondar o número de vãos numa altura
+fixa; aqui a profundidade era livre, então usa-se o espaçamento exato e a base cai
+onde cair.
+
+| Medida | Valor | De onde sai |
+|---|---|---|
+| Estação | `t` = 0,106 (z = +6,30) | o plano do timão; vão livre nos dois bordos |
+| Barras | 9, a cada 30,33 cm | `CLIMB_CLIP.rise / 2`, exato |
+| Altura vencida | 2,43 m (−0,69 → +1,74) | 4,0 ciclos do clipe |
+| Inclinação | 14,11° (0,61 m de recuo) | aperto entre o bojo e a pose do clipe |
+| Folga ao costado | 4,00 cm no pior ponto | **resolvida**, não escolhida |
+| Vão do portaló | 84 × 65 cm | cabe o jogador (30 cm de raio) sem virar saída acidental |
+| Erro da mão na subida inteira | **0,0000 m** | medido ao longo de 2000 passos |
+
+> [!warning] A folga ao casco não se mede onde a escada está, e sim onde ela é mais larga
+> O primeiro número foi escolhido a mão — 8 cm, medidos no perfil do plano dos
+> degraus — e estava errado por um motivo que só aparece quando se trata a escada
+> como um objeto de 48 cm de largura em vez de um perfil: **a popa afina 26 cm por
+> metro de comprimento** nessa faixa, então entre os dois montantes o costado muda
+> 12,6 cm de meia boca. O montante de vante ficava **5,7 cm dentro do casco**, e com
+> ele a ponta de vante de três barras. O perfil anunciava 4,5 cm de folga enquanto a
+> peça inteira atravessava o costado.
+>
+> Por isso o recuo deixou de ser escolhido: uma varredura resolve o menor valor que
+> mantém 4 cm de folga em **toda** a largura. Dá 17,7 cm — e daí a soleira, porque
+> senão sobrava um vão de 18 cm entre o último degrau e o convés.
+
+> [!note] O corpo se inclina junto com a escada
+> O `ClimbUp` é um clipe de escada **a prumo**. Numa escada inclinada 14°, a barra
+> de cima deixa de estar exatamente acima da de baixo, e a mão do clipe erra a
+> madeira — com o erro **crescendo com a altura do alcance**, porque é um ângulo,
+> não um deslocamento. Inclinar o corpo o mesmo tanto devolve a geometria ao
+> referencial em que o clipe foi construído: relativo ao corpo, a barra volta a
+> ficar acima. É o mesmo tipo de acerto que o `align` faz na fase, um eixo adiante.
+
+A subida termina de pé na **soleira** do portaló, com o corpo a cavalo da junta
+entre a plataforma e o tombadilho. Não é desleixo: a soleira avança 28 cm além da
+borda do convés e o cilindro do jogador tem 30 cm de raio, então "inteiro em cima da
+tábua" não existe — e é exatamente assim que se transpõe a soleira de um portaló de
+verdade.
+
 ### 🎡 O timão: o posto era enquadramento e virou anatomia
 
 A roda é a régua mais limpa do projeto. Ela tem **oito punhos**, o curso vai de
@@ -933,6 +1029,8 @@ console:
 | Ele assume o timão | `takeHelm` teleporta os pés dois metros num passo — 120 m/s de velocidade deduzida, o pirata em disparada e um pouso disparado quando o "voo" terminasse | Teleporte zera a velocidade e **assenta** o relógio do pulo em vez de alimentá-lo |
 | A pose chega a 15 Hz | O corpo andando aos trancos em cima de um convés que anda a 144 | Interpolado com o **mesmo** relógio do casco: corpo e piso desenhados no mesmo instante, ou o marujo desliza sobre o próprio chão |
 | Ele prega uma tábua | Reparo não é predição de ninguém — o outro lado não tem como deduzir que a mão está ocupada | Um bit no instantâneo (protocolo **6**), e é ele que põe a madeira nas mãos dele |
+| Ele cai no mar | Um marujo boiando tem, **em relação ao navio**, a velocidade do próprio navio — o adversário sairia disparado pelo mar tocando o clipe de corrida a 2,6 m/s | Um bit no instantâneo (protocolo **7**, e o byte de corpo fechou), e a velocidade dele passa a somar a do casco de volta |
+| Ele sobe pelo costado | Saber que ele está numa escada não basta: são duas, uma por bordo, com grades e inclinações espelhadas | **Nada** viaja. As duas ficam a 7,16 m uma da outra em Z, e a mesma função que desenha o portaló responde qual é, a partir da posição que já viajava |
 
 E um detalhe barato que paga caro: **a cabeça segue o olhar dele**. O `pitch`
 viaja no fio desde a segunda versão do protocolo — é ele que decide o foco de
@@ -1163,6 +1261,13 @@ jogando**. Um defeito de física aparece na tela; um defeito de pareamento
 aparece como duas pessoas em telas de espera diferentes, cada uma achando que o
 problema é a internet da outra.
 
+> [!note] Os sete de navegador também rodam no Node, sem navegador
+> Nada no repositório precisa disso, e por isso não há script — mas um runner de
+> vinte linhas que sobe o Vite em `middlewareMode` e chama `ssrLoadModule` importa
+> os `.ts` do jogo direto no Node, e a suíte inteira roda no terminal. Serve para
+> rodar tudo de uma vez a cada conserto, sem trocar de janela. A única exceção é
+> `determinism.ts`, que precisa de `window`.
+
 > ⚠️ **Contra o publicado, a fila tem gente de verdade dentro** — e isso já reprovou
 > um caso que estava certo. Se alguém estiver esperando na fila, o primeiro socket do
 > teste é mandado para a sala **dele** e pareado com ele, que é o comportamento certo
@@ -1287,10 +1392,16 @@ onde estava o buraco** · **duelo 1v1 em rede, com sala por código, fila de
 pareamento e servidor próprio na Cloudflare** · **o adversário com corpo no convés
 dele, animado pelos mesmos clipes — andando, correndo, pulando, subindo a escada,
 de mãos na roda, tapando rombo, e com a cabeça acompanhando para onde ele
-olha**.
+olha** · **homem ao mar: portaló nos dois bordos, nado na superfície, escada de
+embarque de volta e resgate por cabo, tudo valendo em rede**.
 
 **O que falta, em ordem de impacto:**
 
+0. 🏊 **As poses de água no GLB.** `Float` e `Swim` já existem — gerados, medidos e
+   conferidos em vídeo —, mas ainda não foram exportados: falta a aprovação de quem
+   vai olhar o clipe rodando. Enquanto isso quem nada usa a locomoção emprestada,
+   com a cadência certa e a pose errada. A troca são três linhas, marcadas no
+   `updateSwim`, e há teste garantindo que a fase não muda de dono na hora.
 1. 🎚️ **Vela ajustável.** É a lacuna que mais se sente. Hoje o pano está sempre cheio,
    e duas chalupas idênticas numa caça de popa **empatam por física** — a que foge não
    é alcançável. Poder ferrar a vela é o que devolve a decisão de parar e brigar, e é
@@ -1600,6 +1711,60 @@ havia nem cronômetro andando para sugerir que algo estava errado; ele ficava em
 > 🧪 Os dois estão em `tests/roomServer.mjs`, e o primeiro só dá para provar abrindo as
 > duas conexões **antes** de qualquer `hello` — que é exatamente a sequência que
 > nenhum teste anterior produzia, porque nenhum jogador conseguiria descrevê-la.
+
+### E a quinta rodada, que a água desenterrou — três defeitos que só o comentário sabia
+
+Nenhum dos três foi relatado por quem jogou. Os três já estavam ali, e o que os
+trouxe à tona foi somar um recurso que pisa nos mesmos caminhos. Todos têm a mesma
+assinatura: **código que promete no comentário o que não faz**.
+
+**O rumo que saturava no fio.** O caminho do *input* (guest → host) normaliza o
+ângulo antes de quantizar, e o comentário ao lado explica o perigo com todas as
+letras: o rumo cresce sem limite enquanto se gira sempre para o mesmo lado, e o
+`i16` desta escala satura em ±3,2767 rad. O caminho do *instantâneo* (host → guest)
+mandava o valor cru. Como o cabrestante **soma uma volta inteira ao rumo a cada
+volta de barra**, quem suspendia o ferro aparecia do outro lado com a cabeça travada
+em 187,7° até o fim da partida. A proteção tinha sido escrita uma vez e aplicada só
+num dos dois lados. Medido com o conserto revertido: 7,5 rad chegam como 3,2767;
+com ele, como 1,2168, erro de 1,5 × 10⁻⁵.
+
+**A reconciliação comparava no referencial errado.** Ela compara a posição do corpo
+em **coordenadas do navio**, e para quem anda no convés isso é honesto — o `local`
+de um caminhante não lê a pose do casco para nada. O nadador é a primeira coisa
+desta base cuja posição *é* derivada dessa pose, e as duas pontas não têm a mesma: o
+host usa a real, o guest usa a interpolada da rede, **150 a 300 ms atrás** (é
+`lead + INTERP_DELAY`, não só o atraso de interpolação). Duas posições de mundo
+idênticas viravam números diferentes, e o cliente enxergava um erro que não existia:
+**0,56 m só de translação** numa conexão boa, desde o primeiro quadro na água. Com o
+navio guinando o termo cresce com o raio, e a faixa do teleporte seco (1,5 m) era
+cruzada com **6,3 s** de deriva — dentro da janela em que ainda nem se pode pedir
+resgate. Passou a comparar em mundo, reconstruindo a posição do host com a pose do
+casco que veio **no mesmo pacote**: resíduo medido, 0,000 m.
+
+**E o desvio visual que nenhum arquivo lia.** A reconciliação calculava um desvio
+para deslizar as correções pequenas em vez de saltar com elas, decaía esse desvio a
+cada quadro, e publicava um getter documentado como *"o desenho soma à posição"* —
+que **nenhum arquivo do projeto lia**. A faixa do meio da correção (de 8 cm a 1,5 m,
+onde mora quase tudo o que acontece de verdade) era escrita crua na posição, quinze
+vezes por segundo, desde sempre. Não dá erro, não fica marcado como código morto, e
+o comentário jura que funciona.
+
+Agora ela chega à tela — e com um teto tirado da corrida do próprio personagem:
+
+```
+OFFSET_LIMIT = RUN_SPEED / OFFSET_LAMBDA = 0,294 m
+```
+
+> [!warning] Ligar o desvio sem teto seria pior que o tranco
+> Um decaimento exponencial parte a `λ × |desvio|`. Com o λ de 16 que já estava lá,
+> uma correção de 1,4 m — que **cabe na faixa suavizada** — poria a câmera em
+> primeira pessoa a **22 m/s** por algumas dezenas de milissegundos. Translação de
+> câmera que o jogador não pediu é o gatilho clássico de enjoo, e o remédio seria
+> pior que a doença. Com o teto, a câmera nunca desliza mais rápido do que o
+> personagem corre — e o que passar disso entra seco, pelo mesmo argumento que o
+> amortecimento de degrau já usava: *alisar demais esconderia do jogador que ele caiu
+> de algum lugar*. Trinta centímetros é predição; um metro e meio é discordância, e
+> discordância deve aparecer.
 
 ### Medindo
 

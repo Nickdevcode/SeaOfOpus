@@ -38,6 +38,7 @@
 
 import * as THREE from 'three';
 import { MAX_BREACHES } from '../shared/protocol';
+import { wrapAngle } from '../src/core/MathUtils';
 import type { Match } from '../src/game/Match';
 import type { MatchEvent } from '../src/game/MatchEvents';
 import { encodeSnapshot } from '../src/net/snapshotCodec';
@@ -133,13 +134,24 @@ function makeCrew(seed: number) {
   return {
     controller: {
       local: new THREE.Vector3(0.85 + seed, 1.45 - seed * 0.5, -2.35 + seed),
-      yaw: seed === 0 ? 1.9375 : -2.5625,
+      // ⚠️ **O primeiro está fora da faixa de propósito, e é um caso de teste.**
+      // 7,5 rad é mais de uma volta inteira, e é exatamente o que o cabrestante
+      // produz: `followCapstan` soma o ângulo varrido direto no rumo, então cada
+      // volta de barra são 2π acumulados. Nesta escala o `i16` satura em ±3,2767 —
+      // sem normalizar antes de quantizar, este marujo chega do outro lado com a
+      // cabeça travada em 3,2767 rad em vez dos 1,2168 equivalentes. Ver
+      // `crewCases`, que compara o ângulo **equivalente** e não o número cru.
+      yaw: seed === 0 ? 7.5 : -2.5625,
       pitch: seed === 0 ? -0.4375 : 0.6875,
       station: seed === 0 ? 'helm' : 'cannon',
       cannonIndex: seed === 0 ? -1 : 1,
       grounded: seed === 0,
       onLadder: seed !== 0,
       atCapstan: seed === 0,
+      // O mar, com valores opostos como todo o resto deste arquivo. O bit dele é o
+      // **sétimo** e fecha o byte de estado do corpo: um deslocamento ali não
+      // desalinha o quadro, só faz o adversário nadar no convés.
+      inWater: seed === 0,
     },
     // A tábua na mão é o único estado do corpo que **não** mora no controlador:
     // quem vê o rombo e o botão segurado no mesmo passo é a interação. Os dois
@@ -351,10 +363,11 @@ export function runSnapshotTests(): TestReport {
     check(
       'campo condicional · quadro sem a lista de estrago se lê igual',
       `rombos ${world.ships[0]!.breaches} · tábuas ${world.ships[0]!.patches} · olhar ${crew.yaw.toFixed(4)} · eventos ${world.events.length}`,
-      'null / null / 1.9375 / 5',
+      // 1,2168 e não 7,5: o rumo atravessa normalizado. Ver `crewCases`.
+      'null / null / 1.2168 / 5',
       world.ships[0]!.breaches === null &&
         world.ships[0]!.patches === null &&
-        Math.abs(crew.yaw - source.yaw) < TOLERANCE.angle &&
+        Math.abs(wrapAngle(crew.yaw - source.yaw)) < TOLERANCE.angle &&
         world.events.length === 5,
       'o leitor e o escritor discordam sobre quando a lista está no quadro',
     );
@@ -501,27 +514,47 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
     const source = crewman.controller;
     const read = world.crew[slot]!;
 
+    // ⚠️ **O rumo é comparado como ângulo, e não como número.** O fio carrega
+    // `wrapAngle(yaw)`, então um marujo que girou mais de uma volta chega do outro
+    // lado com o **ângulo equivalente** — que é a resposta certa, e a única que
+    // cabe na faixa do `i16` nesta escala. Comparar cru reprovaria o conserto.
+    const yawError = Math.abs(wrapAngle(read.yaw - source.yaw));
+
     const ok =
       read.local.distanceTo(source.local) < TOLERANCE.local &&
-      Math.abs(read.yaw - source.yaw) < TOLERANCE.angle &&
+      yawError < TOLERANCE.angle &&
       Math.abs(read.pitch - source.pitch) < TOLERANCE.angle &&
       read.station === source.station &&
       read.cannonIndex === source.cannonIndex &&
       read.grounded === source.grounded &&
       read.onLadder === source.onLadder &&
       read.atCapstan === source.atCapstan &&
-      // O bit da tábua divide o byte com os outros quatro estados de corpo. Um
+      // O bit da tábua divide o byte com os outros cinco estados de corpo. Um
       // deslocamento de bit ali não desalinha o quadro — ele só faz o corpo do
       // adversário contar a história errada, que é o tipo de defeito que passa
       // meses no ar.
-      read.patching === crewman.interaction.patching;
+      read.patching === crewman.interaction.patching &&
+      read.inWater === source.inWater;
 
     out.push({
       nome: `marujo ${slot} · posição, olhar, posto e estado do corpo`,
-      medido: `"${read.station}" peça ${read.cannonIndex} · chão ${read.grounded} escada ${read.onLadder} cabrestante ${read.atCapstan} tábua ${read.patching}`,
-      esperado: `"${source.station}" peça ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan} ${crewman.interaction.patching}`,
+      medido: `"${read.station}" peça ${read.cannonIndex} · chão ${read.grounded} escada ${read.onLadder} cabrestante ${read.atCapstan} tábua ${read.patching} mar ${read.inWater}`,
+      esperado: `"${source.station}" peça ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan} ${crewman.interaction.patching} ${source.inWater}`,
       erro: ok ? '—' : 'o marujo do outro lado está num lugar, num posto ou numa pose diferente',
       passou: ok,
+    });
+
+    // E um caso só para o rumo, porque o defeito que ele cobre é invisível dentro
+    // do caso acima: o número **satura** em vez de errar por pouco, e saturado ele
+    // continua sendo um ângulo plausível. Quem não normalizasse aqui veria o
+    // adversário com a cabeça travada em 187,7° enquanto suspende a âncora — e
+    // nada, nem um `NaN` nem um estouro, diria que foi isso que aconteceu.
+    out.push({
+      nome: `marujo ${slot} · rumo fora da faixa sobrevive como ângulo equivalente`,
+      medido: `${source.yaw.toFixed(4)} rad → ${read.yaw.toFixed(4)} rad · erro ${yawError.toExponential(1)}`,
+      esperado: `${wrapAngle(source.yaw).toFixed(4)} rad (±${TOLERANCE.angle})`,
+      erro: yawError < TOLERANCE.angle ? '—' : 'o rumo saturou no fio: mais de uma volta não cabe no `i16` desta escala',
+      passou: yawError < TOLERANCE.angle,
     });
   }
 

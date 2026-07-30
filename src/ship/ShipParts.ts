@@ -30,11 +30,21 @@ import {
   deckCamber,
   deckHalfWidth,
   halfWidthAtHeight,
+  hullSurfaceNormal,
+  hullSurfacePoint,
   sampleSection,
+  sectionV,
   tToZ,
   zToT,
   type HullSection,
 } from './ShipDimensions';
+import {
+  BOARDING_LADDERS,
+  BOARDING_RUNG_RADIUS,
+  BOARDING_STILE_RADIUS,
+  boardingLadderX,
+  type BoardingLadderSpec,
+} from './BoardingLadder';
 
 /** Materiais que as peças usam. Cada um vira, no máximo, uma malha. */
 export type PartMaterial =
@@ -217,6 +227,7 @@ export function buildStaticParts(b: PartBuilders): StaticPartsResult {
   buildBowsprit(b);
   buildStaircase(b);
   buildMastLadder(b);
+  buildBoardingLadders(b);
   buildHelmFrame(b);
   buildSternCanopy(b);
   buildBarrels(b);
@@ -700,6 +711,117 @@ function buildMastLadder(b: PartBuilders): void {
         0.016,
         0.016,
         5,
+      );
+    }
+  }
+}
+
+/**
+ * As escadas de embarque: uma por bordo, na popa, ao lado do timão.
+ *
+ * É a peça que devolve o jogador ao navio depois de ele cair no mar, e ela só
+ * serve para isso — descer é pular pelo portaló, o vão na amurada que
+ * `HullGeometry.buildGangways` abre logo acima daqui. Todas as medidas saem de
+ * `BoardingLadder`, que é a fonte única: a mesma folha que a malha lê é a que o
+ * `PlayerController` usa para saber onde a mão agarra.
+ *
+ * Duas coisas nesta função não são como na escada do mastro, e as duas vêm do
+ * fato de a escada estar pendurada num casco curvo em vez de num tronco reto:
+ *
+ * 1. **Os montantes são tornos deitados, não `addTube`.** `addTube` não fecha as
+ *    pontas, e aqui as duas aparecem: a de cima morre no fio da soleira do
+ *    portaló e a de baixo fica debaixo d'água, exatamente onde o nadador chega.
+ *    Um tubo aberto vira um buraco por onde se vê o interior da peça.
+ * 2. **As ferragens saem de `hullSurfacePoint`/`hullSurfaceNormal`**, e não de um
+ *    recuo horizontal da meia boca — é o mesmo motivo de `buildWales` e da nota
+ *    de `deckEdgeHalfWidth`: no bojo o costado corre inclinado, e "13 cm para
+ *    dentro na horizontal" e "13 cm ao longo da normal" são pontos diferentes.
+ *    Com a conta horizontal o pé da braçadeira nasceria fora da madeira.
+ */
+function buildBoardingLadders(b: PartBuilders): void {
+  for (const spec of BOARDING_LADDERS) buildBoardingLadder(b, spec);
+}
+
+/**
+ * Quanto o montante desce abaixo da última barra.
+ *
+ * Não é folga de desenho: é o que impede a barra mais baixa — a que o nadador
+ * agarra às cegas, com a onda passando por cima — de ficar na própria ponta do
+ * montante, onde uma mão que erra dez centímetros não encontra nada.
+ */
+const BOARDING_STILE_FOOT = 0.14;
+
+/** Alturas das braçadeiras que prendem a escada ao costado. Escolhidas pelo que
+ *  elas **não** podem tocar: o cintado de baixo ocupa de 0,925 a 1,115, e a
+ *  soleira do portaló de 1,69 a 1,74. */
+const BOARDING_BRACKET_HEIGHTS: readonly number[] = [0.65, 1.55];
+
+function buildBoardingLadder(b: PartBuilders, spec: BoardingLadderSpec): void {
+  const { side, z, halfWidth, topY, bottomY, rungSpacing, rungCount, tilt } = spec;
+  const stileZ = [z - halfWidth, z + halfWidth];
+
+  // Montantes. O torno gira em +Y, então a peça nasce em pé e um `transformFrom`
+  // a deita no ângulo da escada — o mesmo caminho da verga em `buildYards`.
+  // O topo para no fio de cima da última barra, e não no piso: rente ao piso a
+  // tampa do montante disputaria profundidade com a soleira, e o que se veria
+  // seria um disco de madeira piscando no chão do portaló.
+  const footY = bottomY - BOARDING_STILE_FOOT;
+  const headY = topY + BOARDING_RUNG_RADIUS;
+  const length = (headY - footY) / Math.cos(tilt);
+  for (const z0 of stileZ) {
+    const start = b.spar.vertexCount;
+    b.spar.addLathe({ x: 0, y: 0, z: 0 }, length, () => BOARDING_STILE_RADIUS, {
+      radialSegments: 8,
+      heightSegments: 2,
+      capBottom: true,
+      capTop: true,
+      uvScale: 1.5,
+    });
+    b.spar.transformFrom(
+      start,
+      new THREE.Matrix4()
+        // O tombo é para fora do navio nos dois bordos, e `side` é o que troca o
+        // sinal: sem ele a escada de bombordo se enfiaria no casco ao subir.
+        .makeRotationZ(-side * tilt)
+        .setPosition(side * boardingLadderX(spec, footY), footY, z0),
+    );
+  }
+
+  // Barras. Ficam num plano de X constante para cada altura, então cada uma é um
+  // bastão horizontal correndo de um montante ao outro; as pontas morrem no eixo
+  // dos montantes, enterradas na madeira deles.
+  for (let i = 0; i <= rungCount; i++) {
+    const y = bottomY + rungSpacing * i;
+    const x = side * boardingLadderX(spec, y);
+    b.spar.addTube(
+      new THREE.Vector3(x, y, stileZ[0]!),
+      new THREE.Vector3(x, y, stileZ[1]!),
+      BOARDING_RUNG_RADIUS,
+      BOARDING_RUNG_RADIUS,
+      6,
+      2,
+    );
+  }
+
+  // Braçadeiras: o ferro que amarra cada montante ao costado. O pé entra 3 cm
+  // pela normal adentro, de propósito — a ponta do tubo é aberta, e enterrada no
+  // chapeamento ela some em vez de virar um furo na peça.
+  const section: HullSection = { halfBeam: 0, keelY: 0, sheerY: 0, fullness: 1 };
+  const anchor = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  for (const y of BOARDING_BRACKET_HEIGHTS) {
+    for (const z0 of stileZ) {
+      const t = zToT(z0);
+      const v = sectionV(sampleSection(t, section), y);
+      hullSurfacePoint(t, v, side, anchor);
+      hullSurfaceNormal(t, v, side, normal);
+      b.iron.addTube(
+        anchor.clone().addScaledVector(normal, -0.03),
+        new THREE.Vector3(side * boardingLadderX(spec, y), y, z0),
+        0.018,
+        0.015,
+        6,
+        3,
       );
     }
   }

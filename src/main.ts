@@ -34,6 +34,7 @@ import { downwindHeading, efficiencyAtHeading } from './ship/SailSim';
 import { CameraRig } from './player/CameraRig';
 import { HEAD_CLIP_OFF } from './shaders/headClip';
 import { Prompts } from './ui/Prompts';
+import { Blackout } from './ui/Blackout';
 import { CombatHud } from './ui/CombatHud';
 import { Menu, type Screen } from './ui/Menu';
 import { OnlineSession } from './net/OnlineSession';
@@ -99,6 +100,17 @@ let match!: Match;
 const rig = new CameraRig(camera);
 const prompts = new Prompts(uiRoot);
 const hud = new CombatHud(uiRoot);
+const blackout = new Blackout(uiRoot);
+
+/**
+ * Quantos resgates o marujo local já pediu, na última vez que se olhou.
+ *
+ * O corte para o preto é disparado por **borda**, e não por estado, porque o
+ * resgate acontece dentro de um passo fixo e o quadro que o descobre pode ser o
+ * seguinte — ou o terceiro, numa tela de 30 Hz. Um contador não tem como ser
+ * perdido; uma bandeira de um passo tem. Ver `PlayerController.rescueCount`.
+ */
+let lastRescueCount = 0;
 
 // A conversa com o servidor de sala. Nasce sabendo se há servidor: sem a variável
 // de ambiente, o modo online é apagado na tela de título em vez de falhar depois.
@@ -217,6 +229,9 @@ function syncShell(): void {
   } else {
     if (rig.mode === 'player') rig.cinematic();
     input.exitPointerLock();
+    // Um resgate pedido no último quadro antes de o menu abrir deixaria a órbita
+    // cinematográfica atrás de um pano preto até o corte terminar sozinho.
+    blackout.clear();
   }
 }
 
@@ -399,7 +414,13 @@ function updateDebug(dt: number): void {
         ]
       : []),
     '',
-    `player ${match.player.station}${match.player.onLadder ? ' (ladder)' : ''}${match.player.grounded ? '' : ' (airborne)'}  ·  local x ${match.player.local.x.toFixed(2)}  y ${match.player.local.y.toFixed(2)}  z ${match.player.local.z.toFixed(2)}`,
+    `player ${match.player.station}${match.player.onLadder ? ' (ladder)' : ''}${match.player.grounded ? '' : ' (airborne)'}${match.player.inWater ? ' (swimming)' : ''}  ·  local x ${match.player.local.x.toFixed(2)}  y ${match.player.local.y.toFixed(2)}  z ${match.player.local.z.toFixed(2)}`,
+    // O relógio da água é o único que ainda não desenha nada — `Float` e `Swim`
+    // não existem no GLB, e a pose provisória sai da locomoção. Esta linha é o que
+    // permite conferir peso, braçada e fase **antes** de os clipes existirem, e é
+    // por ela que quem for ligá-los vai saber que o número já está certo. Ver
+    // `PlayerAvatar.updateSwim`.
+    `water ${match.player.inWater ? `${match.player.waterTime.toFixed(1)} s` : 'dry'}  ·  swim w ${match.player.swim.weight.toFixed(2)} stroke ${match.player.swim.stroke.toFixed(2)} phase ${match.player.swim.phase.toFixed(2)} at ${match.player.swim.speed.toFixed(2)} m/s  ·  rescue ${match.player.canRequestRescue() ? 'ready' : '—'}`,
     `body ${match.avatar.root.visible ? 'worn' : 'hidden'}  ·  legs ${(avatar.twist * RAD).toFixed(0)}° ${avatar.reversed ? 'reverse' : 'forward'}  ·  head clip ${avatar.headClip >= HEAD_CLIP_OFF ? 'off' : avatar.headClip.toFixed(2)}  ·  gait w ${avatar.walk.toFixed(2)} r ${avatar.run.toFixed(2)} i ${avatar.idle.toFixed(2)} air ${avatar.air.toFixed(2)} climb ${avatar.climb.toFixed(2)} helm ${avatar.helm.toFixed(2)}`,
     `cannons ${ship.cannons.map((c) => c.state).join(' / ')}  ·  locker ${ship.cannonballs} shot / ${ship.planks} planks  ·  focus ${match.interaction.focus?.id ?? '—'}`,
     `shot in flight ${match.cannonballs.activeCount}  ·  particles ${match.effects.liveCount}`,
@@ -559,6 +580,15 @@ engine.start({
     match.update(dt, alpha, sampler.pendingLookX, sampler.pendingLookY);
     // O desvio de reconciliação some em dois décimos de segundo. Ver `GuestSession`.
     online.guest?.decayOffset(dt);
+
+    // O corte para o preto do resgate, por borda do contador. Fica aqui, e não
+    // dentro do `Match`, porque é apresentação pura: quem tira o marujo da água é
+    // o passo fixo (no duelo em rede, o do host), e este pano só cobre o instante.
+    if (match.player.rescueCount !== lastRescueCount) {
+      lastRescueCount = match.player.rescueCount;
+      blackout.play();
+    }
+    blackout.update(dt);
 
     // A pose interpolada já foi escrita por `match.update`, então a câmera lê a
     // matriz do quadro e não a do anterior — do contrário ela seguiria um frame

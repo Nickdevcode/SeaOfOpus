@@ -140,11 +140,26 @@ const CLOCK_SNAP = 30;
 const ERROR_IGNORE = 0.08;
 const ERROR_SNAP = 1.5;
 
-/** Constante de decaimento do desvio visual. ~0,2 s para sumir. */
-const OFFSET_LAMBDA = 16;
-
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
+/** A pose autoritativa do corpo trazida para mundo. Ver `authoritativePosition`. */
+const _authority = new THREE.Vector3();
+
+/**
+ * Uma predição guardada: **a grandeza que o corpo possuía** naquele passo.
+ *
+ * ⚠️ Não é sempre a mesma grandeza, e essa é a razão de a classe existir. No convés
+ * o corpo possui a posição **local** — ele anda sobre um chão parado e o casco não
+ * entra na conta. Na água ele possui a de **mundo**, e o `local` é derivado dela
+ * pela pose do casco. Guardar sempre o `local` faria a reconciliação comparar, no
+ * caso da água, duas contas feitas com poses de casco diferentes — ver
+ * `GuestSession.reconcile`.
+ */
+interface PredictedStep {
+  readonly position: THREE.Vector3;
+  /** `true` quando `position` é de mundo. */
+  inWater: boolean;
+}
 
 export class GuestSession {
   /**
@@ -209,12 +224,23 @@ export class GuestSession {
   /** Erro de predição do último instantâneo, em metros. Telemetria. */
   predictionError = 0;
 
-  /** Desvio visual que decai, para uma correção pequena não aparecer. */
-  private readonly visualOffset = new THREE.Vector3();
+  /**
+   * O desvio visual **não mora mais aqui**, e a mudança é um conserto.
+   *
+   * Ele era um vetor privado desta classe, com um getter público documentado como
+   * "o desvio visual do corpo, que o desenho soma à posição" — e ninguém, em
+   * nenhum arquivo do projeto, lia aquele getter. A faixa do meio da reconciliação
+   * ficava sem suavização nenhuma. Agora ele é `PlayerController.viewOffset`, que
+   * é onde a pose do quadro é montada e onde ele de fato chega à tela; ver a nota
+   * completa lá.
+   */
+  private get viewOffset(): THREE.Vector3 {
+    return this.match.crew[0].controller.viewOffset;
+  }
 
-  /** Histórico do corpo local, indexado por tick, para reconciliar. */
-  private readonly history = new Map<number, THREE.Vector3>();
-  private readonly historyPool: THREE.Vector3[] = [];
+  /** Histórico do corpo previsto, indexado por tick, para reconciliar. */
+  private readonly history = new Map<number, PredictedStep>();
+  private readonly historyPool: PredictedStep[] = [];
 
   /**
    * A janela de comandos que sai daqui, com a costura que a mantém sem buracos.
@@ -254,6 +280,7 @@ export class GuestSession {
     onLadder: false,
     atCapstan: false,
     patching: false,
+    inWater: false,
   };
 
   /** Passo em que o posto mudou por predição local, à espera do recibo do host. */
@@ -262,6 +289,7 @@ export class GuestSession {
   private lastCannonIndex = -1;
   private lastOnLadder = false;
   private lastAtCapstan = false;
+  private lastInWater = false;
 
   /** `true` quando o host avisou que a janela dele saiu de foco. */
   stalled = false;
@@ -299,7 +327,7 @@ export class GuestSession {
     this.starvedSinceAdjust = 0;
     this.stationPredictedAt = -1;
     this.lead = 4;
-    this.visualOffset.set(0, 0, 0);
+    this.viewOffset.set(0, 0, 0);
     this.releaseHistory(Number.POSITIVE_INFINITY);
     this.outbox.reset();
     this.stalled = false;
@@ -485,15 +513,15 @@ export class GuestSession {
     if (Math.abs(drift) > CLOCK_TOLERANCE) this.localTick += Math.sign(drift);
   }
 
-  /** Desvio visual do corpo, que o desenho soma à posição. */
-  get offset(): THREE.Vector3 {
-    return this.visualOffset;
-  }
-
-  /** Decai o desvio visual. Roda no quadro, com o `dt` real. */
+  /**
+   * Decai o desvio visual. Roda no quadro, com o `dt` real.
+   *
+   * O getter `offset` que existia ao lado disto **foi removido**: era a ponta solta
+   * de uma peça que nunca foi ligada, e mantê-lo publicaria de novo um vetor que
+   * ninguém lê. Quem soma o desvio à pose agora é `PlayerController.syncView`.
+   */
   decayOffset(dt: number): void {
-    const factor = Math.exp(-OFFSET_LAMBDA * dt);
-    this.visualOffset.multiplyScalar(factor);
+    this.match.crew[0].controller.decayViewOffset(dt);
   }
 
   // -- aplicação -----------------------------------------------------------------
@@ -791,6 +819,10 @@ export class GuestSession {
     pose.onLadder = state.onLadder;
     pose.atCapstan = state.atCapstan;
     pose.patching = state.patching;
+    // A água entra na lista dos discretos, e é o certo: interpolar "está no mar"
+    // não significa nada, e adiantá-lo poria o adversário nadando pelo convés no
+    // último passo antes de ele de fato pular.
+    pose.inWater = state.inWater;
 
     // O passo do corpo dele: é aqui que a pose vira passada, pulo, escalada,
     // mãos na roda e tábua na mão. Ver `PlayerController.applyRemoteStep`.
@@ -824,6 +856,12 @@ export class GuestSession {
     mine.cannonIndex = mineState.cannonIndex;
     mine.onLadder = mineState.onLadder;
     mine.atCapstan = mineState.atCapstan;
+    // A água entra pelo mesmo recibo que os outros — cair no mar é previsto aqui, e
+    // o instantâneo que descreve o passado anterior ao salto ainda diz "no convés".
+    // Por um método, e não por atribuição: entrar na água é trocar o corpo de
+    // referencial, e quem sabe fazer isso é o controlador. Ver
+    // `applyAuthoritativeWater`.
+    mine.applyAuthoritativeWater(mineState.inWater, this.match.ships[0]!);
   }
 
   /**
@@ -840,14 +878,16 @@ export class GuestSession {
       mine.station !== this.lastStation ||
       mine.cannonIndex !== this.lastCannonIndex ||
       mine.onLadder !== this.lastOnLadder ||
-      mine.atCapstan !== this.lastAtCapstan;
+      mine.atCapstan !== this.lastAtCapstan ||
+      // Cair no mar e sair dele são previstos aqui como qualquer troca de posto, e
+      // pelo mesmo motivo entram na conta do recibo: sem isto, o instantâneo que
+      // descreve o passado anterior ao salto devolveria o jogador ao convés meia
+      // dúzia de vezes antes de o host confirmar que ele pulou.
+      mine.inWater !== this.lastInWater;
 
     if (changed) this.stationPredictedAt = tick;
 
-    this.lastStation = mine.station;
-    this.lastCannonIndex = mine.cannonIndex;
-    this.lastOnLadder = mine.onLadder;
-    this.lastAtCapstan = mine.atCapstan;
+    this.rememberStation();
   }
 
   /** Depois de `applyCrew`: a autoridade também conta como "o que ficou". */
@@ -857,17 +897,46 @@ export class GuestSession {
     this.lastCannonIndex = mine.cannonIndex;
     this.lastOnLadder = mine.onLadder;
     this.lastAtCapstan = mine.atCapstan;
+    this.lastInWater = mine.inWater;
   }
 
   // -- predição -------------------------------------------------------------------
 
   private rememberPrediction(tick: number): void {
-    const slot = this.historyPool.pop() ?? new THREE.Vector3();
-    slot.copy(this.match.crew[0].controller.local);
+    const controller = this.match.crew[0].controller;
+    const slot = this.historyPool.pop() ?? { position: new THREE.Vector3(), inWater: false };
+    // A grandeza que a predição **possui** neste passo, e não uma escolhida: no
+    // convés é o local, na água é o mundo. Ver `PredictedStep`.
+    slot.inWater = controller.inWater;
+    slot.position.copy(controller.inWater ? controller.worldFeet : controller.local);
     this.history.set(tick, slot);
     // Um segundo de histórico basta: o instantâneo que vai cobrar a predição
     // chega em menos de cem milissegundos.
     this.releaseHistory(tick - 60);
+  }
+
+  /**
+   * A posição do host **em mundo**, reconstruída com a pose do casco do mesmo
+   * instantâneo.
+   *
+   * ⚠️ **A pose tem de ser a do instantâneo, e não a de `ship.body`.** `applyWorld`
+   * escreve em `ship.body` a pose **interpolada**, que fica `INTERP_DELAY` passos
+   * atrás do relógio de desenho — e o relógio de desenho já está `lead` passos
+   * atrás do tick que está sendo cobrado. Usar aquela pose aqui reintroduziria
+   * exatamente o viés que este método existe para tirar. A pose que veio no pacote,
+   * essa sim, é a que o host tinha no tick `to.tick` — a mesma com que ele derivou
+   * o `local` que está sendo comparado.
+   *
+   * A conta é `ShipBody.localToWorld` letra por letra. `centerOfMass` não viaja no
+   * fio e não precisa: ele é uma constante do casco, calculada igual dos dois lados.
+   */
+  private authoritativePosition(local: THREE.Vector3, ship: Ship): THREE.Vector3 {
+    const state = this.to.ships[this.slot]!;
+    return _authority
+      .copy(local)
+      .sub(ship.body.centerOfMass)
+      .applyQuaternion(state.orientation)
+      .add(state.position);
   }
 
   /**
@@ -883,33 +952,79 @@ export class GuestSession {
     const predicted = this.history.get(this.to.tick);
     if (!predicted) return;
 
-    const error = predicted.distanceTo(authoritative.local);
+    const controller = this.match.crew[0].controller;
+
+    // ⚠️ **Os três têm de concordar sobre o referencial, senão não há o que
+    // comparar.** A predição guardou local ou mundo conforme o corpo estivesse no
+    // convés ou no mar; a autoridade descreve o mesmo passo do ponto de vista do
+    // host; e o corpo de agora é quem vai receber a correção. Quando eles divergem
+    // é porque alguém entrou ou saiu da água entre o passo cobrado e este — e aí a
+    // troca já é um teleporte legítimo que o recibo do posto cobre, em `applyCrew`.
+    // Medir a distância entre uma posição de mar e uma de convés daria um número
+    // grande e sem sentido, e o ramo de `ERROR_SNAP` o obedeceria.
+    if (predicted.inWater !== authoritative.inWater) return;
+    if (predicted.inWater !== controller.inWater) return;
+
+    const ship = this.match.ships[0]!;
+    // ⚠️ **A comparação é feita no referencial que a predição possui.**
+    //
+    // Comparar sempre em coordenadas locais parecia natural e escondia um viés
+    // sistemático que só a água revela. No convés não há viés nenhum: o `local` de
+    // quem anda não lê a pose do casco para nada, então os dois lados chegam ao
+    // mesmo número por caminhos independentes. Na água, não — o `local` do nadador
+    // **é** a posição de mundo convertida pela pose do casco, e as duas poses são
+    // diferentes: o host usa a real, o guest usa a interpolada da rede, atrasada de
+    // `lead + INTERP_DELAY` passos (150 a 300 ms, conforme a conexão). Duas
+    // posições de mundo *idênticas* viram `local` diferentes, e a reconciliação
+    // enxergava um erro que não existe no mundo.
+    //
+    // Medido: só a translação do casco a 2,6 m/s dá 0,39 m a 150 ms e 0,78 m a
+    // 300 ms — cinco a dez vezes `ERROR_IGNORE`, do primeiro quadro na água e sem
+    // depender da distância. Com o navio guinando o termo cresce com o **raio**, e
+    // é justamente o cenário do recurso: ficar para trás enquanto o navio navega. A
+    // 0,4 rad/s o viés cruza `ERROR_SNAP` em 11 a 24 m, ou seja em 4 a 9 segundos
+    // de deriva — dentro da janela em que o resgate ainda nem abriu.
+    //
+    // A saída é comparar onde os dois lados fazem a mesma conta com os mesmos
+    // dados: em **mundo**, reconstruindo a posição do host com a pose do casco que
+    // veio no mesmo pacote. Ver `authoritativePosition`.
+    const target = predicted.inWater
+      ? this.authoritativePosition(authoritative.local, ship)
+      : authoritative.local;
+
+    const error = predicted.position.distanceTo(target);
     this.predictionError = error;
     if (error < ERROR_IGNORE) return;
-
-    const controller = this.match.crew[0].controller;
 
     if (error > ERROR_SNAP) {
       // Teleporte legítimo. Ir direto, e sem desvio: arrastar o desenho por um
       // metro e meio seria desenhar o jogador atravessando o convés.
-      controller.local.copy(authoritative.local);
-      this.visualOffset.set(0, 0, 0);
+      controller.applyAuthoritative(target, predicted.inWater, ship);
+      this.viewOffset.set(0, 0, 0);
       this.releaseHistory(Number.POSITIVE_INFINITY);
       return;
     }
 
     // O desvio guarda a diferença **antes** de a posição ser corrigida, e o
-    // desenho o soma de volta — o corpo pula para o lugar certo sem que se veja.
-    this.visualOffset.add(_position.copy(controller.local).sub(authoritative.local));
-    controller.local.copy(authoritative.local);
+    // desenho o soma de volta — o corpo vai para o lugar certo sem que se veja.
+    //
+    // ⚠️ **Em coordenadas do navio, sempre.** A comparação acontece no referencial
+    // que a predição possui, e na água esse referencial é o mundo — mas quem soma
+    // este vetor é `syncView`, que monta uma pose local. Somar um deslocamento de
+    // mundo ali entortaria a correção pelo rumo do casco, e o erro seria máximo
+    // justamente de través, que é a pose mais comum de um navio em combate.
+    _position.copy(predicted.position).sub(target);
+    if (predicted.inWater) ship.body.worldDirToLocal(_position, _position);
+    controller.absorbViewOffset(_position);
+    controller.applyAuthoritative(target, predicted.inWater, ship);
     this.releaseHistory(this.to.tick);
   }
 
   private releaseHistory(upTo: number): void {
-    for (const [tick, vector] of this.history) {
+    for (const [tick, step] of this.history) {
       if (tick > upTo) continue;
       this.history.delete(tick);
-      this.historyPool.push(vector);
+      this.historyPool.push(step);
     }
   }
 

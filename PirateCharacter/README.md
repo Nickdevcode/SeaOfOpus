@@ -233,6 +233,145 @@ alcançar. O prefixo `_` faz o `export.py` descartá-la sozinho.
 
 ---
 
+## 🌊 Os dois clipes de água
+
+> [!warning] Estes dois ainda **não estão no GLB**
+> `Float` e `Swim` estão gerados, medidos e conferidos em vídeo, mas o `.blend` não
+> foi salvo e o `export.py` não rodou: eles entram no jogo depois da aprovação de
+> quem vai olhar o clipe rodando. Até lá, quem nada no Sea of Opus usa a locomoção
+> emprestada. Reconstruir os dois é `anim_float.build()` e `anim_swim.build()`.
+
+Nos clipes de terra `z = 0` é o chão, sob os pés. Nestes dois é a **linha d'água** —
+o corpo fica repartido nela, e é o `root` que o posiciona. Nenhum dos dois anima a
+subida e a descida pela onda: quem ergue o avatar é o runtime, e repetir isso aqui
+daria dois balanços somados.
+
+### 🛟 Float — boiando parado
+
+O `Idle` da água, e o primeiro clipe da pasta **sem um único ponto de contato**.
+
+| | 🛟 Float |
+|---|---|
+| Ciclo | 7,0 s (210 q) — **3 pernadas · 5 varreduras de braço · 2 respirações** |
+| Folga do queixo à superfície | **11,83 cm** no pior quadro |
+| Ombro acima da linha d'água | 11,23 cm |
+| Fração submersa | 56,3%, espalhamento 1,45 pp |
+| Micro-oscilação vertical | 2,48 cm (teto de 3 cm) |
+| Coxa à frente da vertical **do mundo** | 5° – 30° – 53° |
+| Ângulo do joelho | 105° – 117° – 134° |
+| Órbita do tornozelo (lateral / vaivém / vertical) | 47,6 / 35,0 / 17,5 cm |
+| Extensão máxima perna / braço | 92,4% / 90,3% |
+
+Os três períodos são **primos entre si dois a dois**: 3, 5 e 2 só se reencontram
+depois dos 7 segundos inteiros, então o olho não cronometra o laço. É a mesma defesa
+que o `anim_idle` promete no comentário e não entrega — lá o `build` multiplica o
+balanço de volta ao período da respiração.
+
+A pernada é um **eggbeater**: cada perna varre um cone em torno de um eixo que pende
+do quadril, e as duas varrem em **sentidos opostos** — daí o nome, e é dessa oposição
+que vem o cancelamento de torque que mantém o corpo de frente. A abdução é espelhada
+entre os lados; a flexão não é. Só essa assimetria produz a contra-rotação.
+
+> [!warning] A primeira versão desenhou uma cadeira, e o conserto tentado piorou
+> A pernada nasceu como **elipse no plano sagital** — pedalar devagar —, e elipse
+> sagital sempre lê como pedalar *sentado*. O defeito foi identificado, e a tentativa
+> de conserto foi reclinar o tronco de 18° para 22°, anotando que "cada grau de
+> reclinação **tira** um grau da inclinação da coxa no mundo".
+>
+> É o contrário. Reclinar gira o referencial do corpo para trás, e um vetor que
+> apontava para baixo passa a apontar para baixo **e para a frente**: a reclinação
+> **soma**. Medida na action gravada, a coxa não estava a 26° — estava a **71° à
+> frente da vertical do mundo**, 89° no pior quadro, ou seja horizontal. Os 4°
+> compraram 4° a mais de cadeira e ainda abaixaram o queixo, porque a cabeça fica
+> *acima* do pivô de reclinação.
+>
+> O conserto foram três coisas ao mesmo tempo: tirar a perna do plano sagital (joelho
+> para **fora**, como sapo, em vez de para a frente), descrever o tornozelo a **raio
+> quase constante** para o joelho não fechar, e devolver a reclinação a 15°. Coxa:
+> 71° → **30°**. Joelho: 98° → **117°**.
+
+> [!note] Medir no referencial do corpo não prova nada
+> Mesmo defeito de família da nota da escalada, um andar acima: lá a métrica media a
+> pose *construída* em vez da gravada; aqui media o ângulo certo no **referencial
+> errado**. As constantes da perna são escritas no corpo porque é o que faz um clipe
+> sem contato nenhum continuar coerente enquanto o corpo gira — mas a leitura de
+> "sentado" acontece no mundo, que é onde a câmera está. `verify()` passou a devolver
+> `thigh_pitch_deg` e `knee_angle_deg` lidos da action, no mundo.
+
+Os braços fazem **sculling**: varrem a água num oito deitado com a palma virada
+**contra o próprio movimento** e inclinada para baixo. A regra da palma é o que
+sculling *é* — a mão vira remo, e a componente para baixo da força segura o corpo.
+Ela sai da trajetória por diferença finita, então continua certa se alguém mexer no
+oito.
+
+O afundamento é escolhido **acima do equilíbrio físico, de propósito**. Um corpo
+humano boiando parado tem a água no queixo; este fica com a água no peito. O runtime
+só conhece a altura da onda aproximadamente, e o custo de errar para baixo é a cabeça
+entrar na água — a única coisa que o jogo promete que não acontece.
+
+![boiando de lado](preview/float_side_sheet.png)
+![boiando de frente](preview/float_front_sheet.png)
+
+### 🏊 Swim — crawl de cabeça erguida
+
+O jogo não deixa mergulhar, e essa regra escolhe o estilo: crawl de competição
+respira de lado e passa metade do ciclo com o rosto na água, então sobra o **crawl de
+cabeça erguida**, o nado de resgate. Mesma braçada alternada, tronco mais inclinado,
+pescoço estendido, rolamento cortado à metade.
+
+| | 🏊 Swim |
+|---|---|
+| Ciclo | 1,0 s (30 q) — uma braçada, 120 braços/min |
+| Indexado por | **distância percorrida** — 1,32 m por ciclo |
+| **Velocidade nativa** | **1,32 m/s** (jogo: 1,40 → `timeScale` 1,06) |
+| Varredura da mão na água | 110,2 cm por braço |
+| Eficiência propulsiva | 0,599 |
+| Mão na água | 60% do ciclo por braço |
+| Inclinação do tronco | 19,8° (**resolvida**, não escolhida) |
+| Folga do rosto à superfície | 3,51 cm · pescoço +0,39 cm |
+| Corpo submerso | 51,3% – 55,8% |
+| Pernada | 6 batidas/ciclo, 38,2 cm de excursão de tornozelo |
+| Extensão máxima braço / perna | 97,2% / 98,1% |
+| Fecho do laço | **0,000 mm** |
+
+A origem cai sobre o **esterno**, e não sob os pés: girar o corpo sem transladar
+deixaria a origem nos calcanhares e o avatar apareceria um metro e meio à frente da
+posição do jogador.
+
+> [!note] A folga do rosto é **entrada** do problema, não conferência depois
+> `solve_attitude()` não escolhe a atitude do tronco: ele bissecciona sobre ela,
+> posando o corpo, deformando a malha pelo depsgraph e lendo o ponto mais baixo da
+> cabeça, até a folga pedida sair. A extensão cervical fica fixa nos 42° anatômicos
+> porque ela **tem batente** (~70°, e perto dele o pescoço lê como quebrado); quem se
+> ajusta é o tronco, que só custa arrasto — que é exatamente a moeda que este nado
+> gasta.
+
+> [!warning] O cabeceio pivotava nos pés
+> As duas rotações do `root` giram em torno da origem do rig, e antes da translação a
+> origem está **nos pés**. Um cabeceio de 1,4° de braçada em torno de um pivô a 1,13 m
+> do esterno movia o corpo **2,8 cm**: o rosto, com 4,7 cm de folga na pose neutra,
+> encostava na água no quadro 14. Aplicado depois do deslocamento, o pivô vira o
+> próprio esterno e o cabeceio move 1,2 mm.
+
+> [!note] Arquear vale o dobro de estender o pescoço
+> Cada 6° de arco compram 6,5° de inclinação de tronco; cada 10° de pescoço compram 3
+> — arquear gira o corpo inteiro acima da lombar, e a cabeça vai junto. Com arco de 8°
+> a folha de contato mostrava alguém **mergulhando ladeira abaixo**, a 28°. Com 16°
+> são 19,8°, o meio da faixa real do crawl de cabeça erguida (15–25°).
+
+O que faz a braçada ler como água e não como ginástica é a **velocidade irregular ao
+longo do caminho** — a mão entra a 1,6 m/s, o empurrão vai a 4,2 m/s, a recuperação
+cruza solta e desacelera para entrar — e a **palma virando ao longo do gesto**: de
+gume na entrada, para trás na apanhada, para dentro na varredura em S, para cima na
+saída, solta na recuperação. As trilhas interpolam por **Catmull-Rom cíclico** e não
+por `smoothstep` entre chaves: `smoothstep` zera a derivada em cada chave, e onze
+chaves por segundo seriam a mão parando onze vezes por braçada.
+
+![nado](preview/swim_side_sheet.png)
+![nado de cima](preview/swim_top_sheet.png)
+
+---
+
 ## 🎨 Texturas
 
 Os materiais são **procedurais** (ruído + realce nas quinas pelo *pointiness* da

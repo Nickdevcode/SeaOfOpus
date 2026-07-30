@@ -52,7 +52,14 @@ import {
 } from '../shaders/headClip';
 import { STATION_BLEND } from './CameraRig';
 import { FirstPersonBody } from './FirstPersonBody';
-import type { CarryClock, ClimbClock, GaitClock, HelmClock, JumpClock } from './Locomotion';
+import type {
+  CarryClock,
+  ClimbClock,
+  GaitClock,
+  HelmClock,
+  JumpClock,
+  SwimClock,
+} from './Locomotion';
 import { CarriedPlank } from './CarriedPlank';
 import type { PlayerController } from './PlayerController';
 
@@ -372,10 +379,18 @@ export class PlayerAvatar {
       player.carry,
       (1 - climbing - helming) * (1 - player.gait.moving),
     );
+    // A água sai do mesmo orçamento que a escada e o timão, e pelo mesmo motivo —
+    // não há como estar no mar e pendurado numa barra do mastro. Hoje ela devolve
+    // **zero**: os clipes não existem no GLB e a pose da água é desenhada pela
+    // locomoção logo abaixo, que já recebeu a velocidade de nado. Ver `updateSwim`.
+    const swimming = this.updateSwim(player.swim);
     // O que sobra do pulo é o que a locomoção pode ocupar. Os pesos têm de somar
     // 1: o que faltar o Three preenche com a pose de repouso do rig, que é a
     // T-pose de braços abertos.
-    const ground = Math.max(0, 1 - climbing - helming - carrying - this.updateJump(player.jump));
+    const ground = Math.max(
+      0,
+      1 - climbing - helming - carrying - swimming - this.updateJump(player.jump),
+    );
 
     // A torção é exclusiva de quem está dentro do corpo. Visto de fora, o corpo
     // inteiro apontado para onde anda continua sendo o certo — e é essa a pose
@@ -495,9 +510,12 @@ export class PlayerAvatar {
     // em punhos que estão numa posição fixa do navio, e um corpo que gira leva as
     // duas junto. Ver `updateWornFacing`, que paga o preço disso por dentro.
     if (player.onLadder || player.station === 'helm') {
-      this.facing = Math.PI;
+      // O rumo da escada vem do **controlador**, e não é mais um `Math.PI` cravado
+      // aqui: aquele número era o rumo da escada do mastro, a única que existia.
+      // Uma escada de embarque fica no costado e é encarada de fora para dentro.
+      this.facing = player.onLadder ? player.ladderFacing : Math.PI;
       this.facingReady = true;
-      this.root.rotation.y = this.facing;
+      this.applyFacing(player);
       return;
     }
 
@@ -517,7 +535,7 @@ export class PlayerAvatar {
       this.facing = damp(this.facing, this.facing + delta, FACING_LAMBDA, dt);
     }
 
-    this.root.rotation.y = this.facing;
+    this.applyFacing(player);
   }
 
   /**
@@ -546,18 +564,45 @@ export class PlayerAvatar {
     // acompanhar o olhar. Vale a troca justamente onde as mãos estão ocupadas —
     // e `legTarget` já plantava as pernas aqui, então metade dele já era devida.
     if (player.onLadder || player.station === 'helm') {
-      this.facing = Math.PI;
+      this.facing = player.onLadder ? player.ladderFacing : Math.PI;
       this.facingReady = true;
-      this.root.rotation.y = this.facing;
-      this.body.hold(Math.PI);
+      this.applyFacing(player);
+      this.body.hold(this.facing);
       return;
     }
 
     this.facing = player.yaw + Math.PI;
     this.facingReady = true;
-    this.root.rotation.y = this.facing;
+    this.applyFacing(player);
 
     this.body.update(dt, this.facing, this.legTarget(player, walking), walking);
+  }
+
+  /**
+   * Escreve a orientação do corpo: rumo mais **inclinação de escada**.
+   *
+   * É o único escritor de `root.rotation`, e passou a ser por necessidade: a
+   * inclinação vive no eixo X, então um caminho que só escrevesse `.y` deixaria o
+   * corpo deitado 14° depois de o jogador largar a escada de embarque.
+   *
+   * ⚠️ **A inclinação é o que faz aquela escada funcionar.** `ClimbUp` foi
+   * construído para barras numa reta vertical à frente do peito; a escada de
+   * embarque é inclinada 14,11° para acompanhar o bojo, e um corpo em pé nela vê a
+   * barra de cima fugir 14° para o lado — um erro que **cresce com a altura**,
+   * porque a reta se afasta da vertical linearmente. Inclinando o corpo o mesmo
+   * ângulo, a escada volta a ser vertical no referencial dele e a pegada casa em
+   * qualquer barra, de graça.
+   *
+   * A ordem `'YXZ'` compõe `Ry(rumo) · Rx(−inclinação)`: gira primeiro para o bordo
+   * e só então deita o corpo em torno do eixo lateral **dele**. Na escada do mastro
+   * e em terra firme a inclinação é zero, e isto vira o `rotation.y` de sempre.
+   */
+  private applyFacing(player: PlayerController): void {
+    // Negativo porque o modelo olha para +Z local e um `Rx` positivo levaria o
+    // topo do corpo *para a frente*; o que se quer é o topo indo para trás, na
+    // direção em que a escada se afasta do costado.
+    const tilt = player.onLadder ? -player.ladderTilt : 0;
+    this.root.rotation.set(tilt, this.facing, 0, 'YXZ');
   }
 
   /**
@@ -665,6 +710,42 @@ export class PlayerAvatar {
     action.time = clock.phase * (action.getClip().duration || 1);
     action.setEffectiveWeight(clock.weight);
     return clock.weight;
+  }
+
+  /**
+   * A pose da água, quando ela existir. Devolve quanto do corpo ela tomou.
+   *
+   * ## Hoje isto devolve zero, e não é esquecimento
+   *
+   * `Float` e `Swim` **não existem no GLB** — estão sendo animados em paralelo e só
+   * entram depois de aprovados. Enquanto isso, quem desenha a água é a locomoção:
+   * `PlayerController.updateSwim` alimenta o `GaitClock` com a velocidade de nado,
+   * então as pernas batem no ritmo do avanço (fase pela distância, como sempre) e o
+   * parado assume ao boiar. É a pose que menos mente para um corpo em pé submerso
+   * até o peito, e a soma dos pesos continua fechando em 1 sem uma linha de
+   * exceção. Em primeira pessoa a cabeça está recortada e o que se vê é o mar no
+   * rodapé; de fora, o adversário aparece com o tronco fora da água.
+   *
+   * É a mesma política que este arquivo já aplica ao pulo e à escalada quando um
+   * GLB antigo em cache não os traz: sem clipe, peso zero, jogo inteiro.
+   *
+   * ## O que muda quando os dois clipes entrarem
+   *
+   * Exatamente três coisas, e nenhuma delas fora daqui e do controlador:
+   *
+   * 1. **`load`** passa a buscá-los, como já busca `ClimbUp`, e a pôr os dois em
+   *    `setEffectiveTimeScale(0)` — eles são posicionados pela fase, não tocados.
+   * 2. **este método** reparte `clock.weight` entre os dois por `clock.stroke`
+   *    (`Swim` fica com `weight × stroke`, `Float` com o resto), posiciona `.time`
+   *    com `clock.phase` e devolve `clock.weight`.
+   * 3. **`PlayerController.updateSwim`** para de alimentar o `GaitClock` com a
+   *    velocidade de nado. A cadência não muda ao trocar, e é por construção:
+   *    `SWIM_CLIP.distance` é hoje a distância do ciclo de caminhada, e há um caso
+   *    em `tests/locomotion.ts` que prova que as duas fases andam juntas.
+   */
+  private updateSwim(clock: SwimClock): number {
+    void clock;
+    return 0;
   }
 
   /**

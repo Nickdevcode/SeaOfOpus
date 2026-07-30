@@ -36,7 +36,7 @@ const BASE = process.env.ROOM_SERVER ?? 'ws://127.0.0.1:8930';
  * publicado, que é o único dia em que esta verificação teria alguma coisa a
  * dizer.
  */
-const PROTOCOL_VERSION = 6;
+const PROTOCOL_VERSION = 7;
 
 /** Quanto se espera por uma mensagem antes de desistir dela. */
 const TIMEOUT_MS = 8000;

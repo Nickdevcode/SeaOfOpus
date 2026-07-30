@@ -86,6 +86,13 @@ export interface CrewState {
   atCapstan: boolean;
   /** `true` quando ele está com a tábua nas mãos. Ver `Interaction.patching`. */
   patching: boolean;
+  /**
+   * `true` quando ele está no mar.
+   *
+   * O único estado da água que atravessa o fio — o resto se deriva da posição, que
+   * já viaja. Ver `PlayerController.inWater`.
+   */
+  inWater: boolean;
 }
 
 /** O céu e o tempo, como eles chegam do lado que simula. Ver `writeSky`. */
@@ -165,6 +172,7 @@ function createCrewState(): CrewState {
     onLadder: false,
     atCapstan: false,
     patching: false,
+    inWater: false,
   };
 }
 
@@ -426,6 +434,8 @@ function readSnapshot(buffer: ArrayBuffer, target: WorldState): SnapshotHeader |
     crew.onLadder = (packed & (1 << 4)) !== 0;
     crew.atCapstan = (packed & (1 << 5)) !== 0;
     crew.patching = (packed & (1 << 6)) !== 0;
+    // O último bit do byte. Ver a nota do escritor.
+    crew.inWater = (packed & (1 << 7)) !== 0;
   }
 
   readEvents(r, target.events);

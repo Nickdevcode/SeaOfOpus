@@ -16,27 +16,63 @@
  * A gravidade, essa sim, entra rodada para o referencial do navio, então saltar
  * num convés adernado joga o corpo para o lado de baixo.
  *
- * O que é responsabilidade daqui: andar, pular, subir escada, ocupar o timão e
- * ocupar o canhão. Câmera é do `CameraRig`, foco de interação é do `Interaction`.
+ * ## E o que acontece quando o jogador sai do navio
+ *
+ * Cair no mar é o único estado em que a frase de cima deixa de valer, e por uma
+ * razão física: quem está na água **não é levado pelo casco**. Se o corpo
+ * continuasse morando em coordenadas do navio, um marujo boiando parado seria
+ * arrastado a cinco nós atrás da popa de graça — exatamente o efeito que essas
+ * coordenadas existem para produzir no convés.
+ *
+ * A saída é estreita e compatível com tudo que já existe: enquanto se nada, a
+ * posição de verdade é a de **mundo** (`worldFeet`), e `local` é reescrito a
+ * partir dela a cada passo. O navio se afasta, e `local` acompanha sozinho. Nada
+ * a jusante muda de linha — câmera, avatar, interpolação e instantâneo continuam
+ * lendo `local`, sem saber que o número passou a ser derivado em vez de
+ * integrado. O mesmo vale para o rumo da cabeça: ele é ship-relative por
+ * construção (a câmera compõe com a matriz do casco), então nadar exige
+ * descontar a guinada do navio para o olhar ficar parado no mundo. Ver
+ * `updateSwim`.
+ *
+ * ⚠️ **O teto disso é `QUANT.local`:** as posições locais viajam como `i16`
+ * sobre 256, o que satura em **±128 m do navio**. Um nadador abandonado deriva
+ * para fora dessa faixa em pouco menos de meio minuto de navio à vela, e daí em
+ * diante o corpo dele chega grampeado ao outro lado. É aceitável porque o
+ * resgate abre em cinco segundos e o duelo é entre dois cascos, não entre dois
+ * nadadores; deixa de ser aceitável no dia em que alguém quiser ver o adversário
+ * boiando de longe.
+ *
+ * O que é responsabilidade daqui: andar, pular, subir escada, nadar, ocupar o
+ * timão e ocupar o canhão. Câmera é do `CameraRig`, foco de interação é do
+ * `Interaction`.
  */
 
 import * as THREE from 'three';
-import { GRAVITY, TAU, clamp, damp } from '../core/MathUtils';
+import { GRAVITY, TAU, clamp, damp, wrapAngle } from '../core/MathUtils';
 // `JUMP_SPEED` vem de lá porque é o clipe de ar quem mais depende dela: a pose
 // é indexada pela velocidade vertical, e a escala dessa leitura é a velocidade
 // de saída. Ver `JumpClock`.
 import {
   CarryClock,
+  CLIMB_CLIP,
   ClimbClock,
   GaitClock,
   HelmClock,
   JUMP_SPEED,
   JumpClock,
   RUN_CLIP,
+  SwimClock,
 } from './Locomotion';
 import { InputBit, held, pressed, type InputFrame } from '../core/InputFrame';
 import type { Ship } from '../ship/Ship';
 import { HELM_STAND } from '../ship/ShipBuilder';
+import {
+  BOARDING_RUNG_RADIUS,
+  type BoardingLadderSpec,
+  boardingLadderForSide,
+  boardingLadderStandX,
+  insideGangway,
+} from '../ship/BoardingLadder';
 import { BARREL_BLOCKERS, CANOPY_BLOCKERS, CROW_NEST, MAST_LADDER } from '../ship/ShipParts';
 import {
   DECK_Y,
@@ -53,6 +89,7 @@ import {
   walkableY,
   zToT,
 } from '../ship/ShipDimensions';
+import type { WaveField } from '../world/WaveField';
 
 /** Onde o jogador está: solto pelo navio ou operando alguma peça. */
 export type PlayerStation = 'deck' | 'helm' | 'cannon';
@@ -87,13 +124,11 @@ const CLIMB_SPEED = 1.2;
 /**
  * Quanto o jogador fica atrás do plano dos degraus, em metros.
  *
- * Eram 24 cm, e 24 não cabe: o casaco deste pirata avança 24,8 cm à frente do
- * eixo do corpo na altura da faixa, e a barra ainda tem 2,6 cm de raio. Com o
- * número antigo ele atravessava a escada **parado**, antes de qualquer animação.
- * O valor está espelhado em `anim_climb.LADDER_STANDOFF`, que é onde o clipe foi
- * construído — mexer em um sem o outro descasa a mão da barra.
+ * **Lido do clipe, e não escrito aqui.** É a grossura do casaco do pirata, então
+ * quem a possui é o personagem — e ela vale igual para as duas escadas do navio.
+ * Ver `CLIMB_CLIP.standoff` para a história do número.
  */
-const LADDER_STANDOFF = 0.29;
+const LADDER_STANDOFF = CLIMB_CLIP.standoff;
 
 /**
  * Meia largura da zona em que a escada do mastro pode ser agarrada.
@@ -106,6 +141,92 @@ const LADDER_STANDOFF = 0.29;
  * tecla, subir e descer são a mesma escolha explícita, nos dois sentidos.
  */
 const MAST_LADDER_REACH = 0.55;
+
+/**
+ * Meia largura da zona em que a escada de embarque pode ser agarrada, medida no
+ * plano da água a partir de onde o corpo ficaria pendurado.
+ *
+ * **Mais que o dobro do alcance da escada do mastro, e a diferença é o chão.** Ali
+ * o jogador está de pé num convés parado e pode se ajeitar um centímetro por vez,
+ * então 0,55 + 0,30 = 85 cm é folga de sobra. Um nadador não tem isso: a onda o
+ * levanta e o abaixa uns 64 cm de desvio padrão (`getElevationSigma` em brisa) e
+ * a escada balança junto com o casco, então um alcance apertado faria o prompt
+ * piscar no ritmo do mar — e um botão que aparece e desaparece sozinho é pior que
+ * um botão que não existe.
+ *
+ * 1,20 + `PLAYER_RADIUS` dá 1,50 m da barra, que é um corpo de distância: é dali
+ * que uma pessoa de fato agarra a escada de um barco. E continua sendo pouco o
+ * bastante para não pegar do outro bordo — os dois planos de degrau estão a 3,3 m
+ * um do outro em X.
+ */
+const BOARDING_LADDER_REACH = 1.2;
+
+/**
+ * Velocidade de nado na superfície, em m/s.
+ *
+ * **Metade do passo, e não uma fração escolhida.** Andar são 2,8 m/s; nadar de
+ * verdade, de roupa e em mar aberto, fica em 1,2–1,4 m/s para quem sabe nadar
+ * (crawl de cruzeiro), e a metade exata do andar cai justo em cima da ponta
+ * boa dessa faixa. Escrever a razão em vez do número é o que mantém as duas
+ * coisas amarradas se o passo mudar: o mar tem de continuar sendo *o dobro* do
+ * esforço de atravessar o convés.
+ *
+ * **Não há corrida na água**, e é decisão, não falta. Três razões, em ordem de
+ * peso: (1) o `Sprint` na água seria uma segunda velocidade sem custo nenhum —
+ * este jogo não tem fôlego nem energia —, e uma velocidade que nunca vale a pena
+ * *não* usar é um botão que o jogador segura para sempre; (2) as duas velocidades
+ * pedem dois gestos diferentes (peito e crawl), e não há nem um clipe ainda;
+ * (3) o que decide um duelo na água é chegar à escada, e a escada não fica mais
+ * perto por se apertar uma tecla. Nadar é uma penalidade de tempo, e ela tem de
+ * ter um preço só.
+ *
+ * Para calibrar o que isso custa: a Chalupa em popa faz uns 2,6 m/s. Nadar atrás
+ * do próprio navio é impossível de propósito — é para isso que existe o resgate.
+ */
+const SWIM_SPEED = WALK_SPEED / 2;
+
+/**
+ * Quanto o olho fica acima da superfície ao boiar, em metros.
+ *
+ * É daqui que sai a altura dos **pés** na água (`EYE_HEIGHT` menos isto), e não o
+ * contrário: o que se enquadra é a linha d'água na tela, e ela tem de ficar no
+ * rodapé — alta o bastante para se ver para onde nadar, baixa o bastante para o
+ * mar dominar a vista e a situação parecer o que é. 22 cm é onde os olhos de uma
+ * pessoa batendo pernas ficam de fato.
+ */
+const SWIM_EYE_HEIGHT = 0.22;
+
+/**
+ * Convergência do corpo à altura da onda, em 1/s.
+ *
+ * É o número que decide se o nadador **flutua** ou **corre num trilho**, e ele se
+ * escolhe pelo espectro do mar. Um amortecedor de primeira ordem contra uma
+ * senoide entrega `λ/√(λ²+ω²)` da amplitude com `atan(ω/λ)` de atraso; o espectro
+ * em brisa vai de T = 5,2 s (ω 1,22 — as duas ondas longas, que carregam a maior
+ * parte dos 64 cm de desvio padrão) a T = 2,6 s (ω 2,39, a marulhada curta).
+ *
+ * Com 8: as longas passam com 98,9% e 8,6° de atraso — o corpo sobe a onda
+ * grande praticamente colado nela, que é o que se quer; a marulhada curta passa
+ * com 95,8% e 16,6°, o que lê como a onda pequena **passando pelo corpo** em vez
+ * de carregá-lo, que é exatamente o que uma pessoa boiando faz.
+ *
+ * Abaixo de ~5 a marulhada começa a ser achatada de verdade (a cabeça afunda na
+ * crista); acima de ~15 o corpo fica soldado à superfície e o movimento vertical
+ * deixa de ler como flutuação.
+ */
+const SWIM_BOB_LAMBDA = 8;
+
+/**
+ * Segundos na água antes de o resgate ser oferecido.
+ *
+ * Cinco. O tempo não é enfeite e não é castigo: é o que separa "escorreguei do
+ * portaló" de "perdi o navio". Nesses cinco segundos um nadador cobre 7 m, o que
+ * é mais do que suficiente para alcançar a escada de embarque se ele caiu perto
+ * dela — e é a diferença entre um jogador que aprende a subir de volta e um que
+ * aprende a apertar o botão. Oferecer o resgate no primeiro quadro tornaria a
+ * escada decorativa.
+ */
+const RESCUE_DELAY = 5;
 
 /**
  * Convergência do amortecimento do degrau, em 1/s.
@@ -217,6 +338,42 @@ const DECK_SPAWN = new THREE.Vector3(0, DECK_Y, 1.2);
 const SPAWN_YAW = -0.42;
 
 /**
+ * Convergência do desvio de reconciliação, em 1/s. ~200 ms para sumir.
+ *
+ * Com 16, o que sobra depois de dois décimos de segundo é `e^(-3,2)` — 4% do
+ * desvio, ou seja invisível. Veio de `GuestSession`, onde ele já estava escrito;
+ * o que mudou é que agora ele **é usado**.
+ */
+const OFFSET_LAMBDA = 16;
+
+/**
+ * Maior desvio de reconciliação que a vista aceita deslizar, em metros.
+ *
+ * ⚠️ **É um teto de enjoo, e o número é derivado.** Um desvio que decai
+ * exponencialmente arranca a `λ·|desvio|` no primeiro instante: com λ = 16, um
+ * desvio de 1,4 m — que cabe folgado na faixa que a reconciliação suaviza — põe a
+ * câmera de primeira pessoa a **22 m/s** por algumas dezenas de milissegundos.
+ * Translação rápida de câmera sem o jogador ter pedido é o gatilho clássico de
+ * enjoo, e ali ela seria pior que o solavanco que se está tentando esconder.
+ *
+ * O teto é a velocidade que o jogador **já conhece do próprio corpo**: correr.
+ * `RUN_SPEED / OFFSET_LAMBDA` é o maior desvio cujo arranque não passa de uma
+ * corrida, e uma câmera que desliza no máximo tão rápido quanto o personagem
+ * corre não tem como incomodar mais do que correr.
+ *
+ * O excesso acima disso **não** é deslizado: ele entra seco. É a mesma decisão de
+ * `absorbStep` com `STEP_HEIGHT`, e pela mesma razão escrita lá — acima de certo
+ * tamanho, alisar deixa de ser cortesia e vira esconder do jogador que alguma
+ * coisa aconteceu. Um erro de trinta centímetros é predição; um de um metro e
+ * meio é discordância, e discordância se mostra.
+ *
+ * Na prática o teto quase nunca morde: o erro que sobra numa conexão saudável é
+ * de centímetros (ver `GuestSession.reconcile`), e desde que o nadador passou a
+ * ser comparado em mundo ele é de milímetros.
+ */
+const OFFSET_LIMIT = RUN_SPEED / OFFSET_LAMBDA;
+
+/**
  * Convergência do balanço de passo, em 1/s.
  *
  * **Era 16, e 16 tinha um erro que só aparecia de dentro do corpo.** Um
@@ -290,6 +447,15 @@ export interface RemoteCrewPose {
   readonly atCapstan: boolean;
   /** `true` quando ele está com a tábua nas mãos. Ver `Interaction.patching`. */
   readonly patching: boolean;
+  /**
+   * `true` quando ele está no mar.
+   *
+   * É o único estado da água que atravessa o fio. Todo o resto se deriva da
+   * posição, que já viaja: a altura do corpo em relação à onda, o rumo do nado —
+   * e até **em qual das duas escadas de embarque** ele está pendurado, porque as
+   * duas estão a sete metros uma da outra em Z. Ver `boardingLadder`.
+   */
+  readonly inWater: boolean;
 }
 
 /**
@@ -307,8 +473,72 @@ const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _pivot = new THREE.Vector3();
 /** Deslocamento do marujo remoto neste passo. Ver `applyRemoteStep`. */
 const _remoteStep = new THREE.Vector3();
+/** Rascunho de mundo, para as idas e vindas do nado. Ver `updateSwim`. */
+const _world = new THREE.Vector3();
 /** Eixo de caminhada do passo. Reaproveitado: nada aqui aloca por tick. */
 const _move = { x: 0, y: 0 };
+
+/**
+ * `true` quando (x, z) cai **fora da borda do convés** — do lado de fora do
+ * costado, onde não há piso nem costado que segure ninguém.
+ *
+ * ## Por que a régua é a borda do convés, e não o casco na altura do corpo
+ *
+ * Porque a segunda não é monótona e a primeira é. O casco muda de largura com a
+ * altura: no tombadilho ele já recolheu (a amurada tomba para dentro) e mais
+ * abaixo ele volta a abrir até a boca máxima. Testar contra a largura *da altura
+ * do corpo* faria um corpo que caiu a prumo do portaló voltar a estar "dentro"
+ * do casco no meio da queda, e os resolvedores o pescariam de volta para dentro
+ * do porão. Contra uma régua que não depende de `y`, quem saiu está fora e
+ * continua fora até tocar a água.
+ *
+ * E ela é conservadora nos dois sentidos, o que foi medido: o porão nunca é mais
+ * largo que a borda do convés na mesma estação (o pior caso é 5 cm **a menos**,
+ * na proa), então ninguém no porão é lido como estando fora do navio.
+ */
+function outsideHull(x: number, z: number): boolean {
+  return Math.abs(x) > deckHalfWidth(zToT(z));
+}
+
+/** O que `surfaceAt` devolve onde não há piso. Ver a nota lá. */
+const NO_FLOOR = Number.NEGATIVE_INFINITY;
+
+/**
+ * Até onde a soleira do portaló avança para fora do costado, em `|x|`.
+ *
+ * ⚠️ **Espelha `HullGeometry.buildGangways`**, e o espelho é obrigatório: aquela
+ * tábua é a única coisa que atravessa os 18 cm entre o costado e a escada, e sem
+ * ela a barra de topo fica pendurada sobre o mar. Se a malha parasse antes daqui,
+ * o jogador andaria sobre o vazio até a beirada dela; se parasse depois, ele
+ * cairia em cima de uma tábua desenhada.
+ *
+ * A conta é a de lá, letra por letra: a soleira morre no **fio de dentro** da
+ * barra de topo, que é onde o focinho do degrau começa.
+ */
+function gangwaySillX(spec: BoardingLadderSpec): number {
+  return spec.topX - BOARDING_RUNG_RADIUS;
+}
+
+/**
+ * Altura da soleira do portaló sob (x, z), ou `null` onde ela não está.
+ *
+ * ⚠️ **A guarda de `outsideHull` é a que impede a soleira de virar teto do
+ * porão.** Ela é uma tábua de 42 cm que começa *na* borda do convés e avança para
+ * fora dele — dentro do costado, na mesma faixa de Z, quem manda continua sendo o
+ * convés (ou o assoalho do porão, para quem está lá embaixo). Sem a guarda, um
+ * marujo bombeando no porão sob o portaló seria erguido 2,3 m e plantado em cima
+ * de uma tábua que está do lado de fora do navio.
+ *
+ * A junta com o convés é lisa por construção: o abaulamento (`deckCamber`) vale
+ * zero exatamente na borda, então os dois pisos se encontram em `QUARTERDECK_Y`
+ * sem degrau. Quem atravessa o portaló não sente nada — que é o certo, porque a
+ * madeira lá é contínua.
+ */
+function gangwaySurface(x: number, z: number): number | null {
+  if (!insideGangway(z) || !outsideHull(x, z)) return null;
+  const spec = boardingLadderForSide(x);
+  return Math.abs(x) <= gangwaySillX(spec) ? spec.exitY : null;
+}
 
 export class PlayerController {
   station: PlayerStation = 'deck';
@@ -325,8 +555,74 @@ export class PlayerController {
   pitch = 0;
 
   grounded = true;
-  /** `true` enquanto o jogador está pendurado na escada do mastro. */
+  /**
+   * `true` enquanto o jogador está pendurado numa escada — a do mastro ou uma
+   * das duas de embarque.
+   *
+   * Qual delas **não** é guardado aqui: `boardingLadder` deriva isso da posição,
+   * e é por isso que o instantâneo não gasta um bit com a pergunta.
+   */
   onLadder = false;
+  /**
+   * `true` enquanto o jogador está no mar, boiando ou nadando.
+   *
+   * Não há punição nenhuma atrelada a isto: nem afogamento, nem morte, nem
+   * relógio de fim. O navio segue navegando sozinho e o jogador volta a bordo
+   * pela escada de embarque ou pelo resgate. Cair no mar é uma perda de *tempo* e
+   * de posição no duelo, e isso já é caro o bastante.
+   */
+  inWater = false;
+  /**
+   * Segundos ininterruptos na água. É o relógio do resgate.
+   *
+   * Zerado ao sair do mar por qualquer caminho, e é essa parte que importa: quem
+   * sobe a escada, cai de novo e sobe outra vez não acumula crédito de resgate
+   * entre as quedas.
+   */
+  waterTime = 0;
+  /**
+   * Velocidade com que o corpo entrou na água neste passo, em m/s, ou 0.
+   *
+   * Consumida por `Match`, que a transforma no **mesmo** evento de respingo que a
+   * bala usa — e por isso ela sai daqui em vez de o controlador falar com os
+   * efeitos: o evento já sabe virar fumaça, som e bytes de rede, então o
+   * adversário vê o respingo de quem caiu sem um campo novo no instantâneo.
+   */
+  splashSpeed = 0;
+  /** Onde, no mundo, esse respingo aconteceu. Ver `splashSpeed`. */
+  readonly splashAt = new THREE.Vector3();
+  /**
+   * Quantos resgates este marujo pediu. Muda a cada pedido atendido.
+   *
+   * Um contador, e não uma bandeira: quem desenha o apagão da tela precisa de uma
+   * **borda**, e uma bandeira que dura um passo é perdida por qualquer quadro que
+   * não caia em cima dele. Ver `Blackout`.
+   */
+  rescueCount = 0;
+  /**
+   * Posição dos pés em **mundo**, mantida enquanto se nada.
+   *
+   * É a posição de verdade na água: `local` passa a ser derivado dela a cada
+   * passo, e não o contrário. Ver o cabeçalho do arquivo.
+   *
+   * Pública porque a reconciliação de rede precisa dela: na água é **esta** a
+   * grandeza que a predição possui, e comparar a derivada seria comparar duas
+   * contas feitas com poses de casco diferentes. Ver `GuestSession.reconcile`.
+   * Só vale com `inWater`.
+   */
+  readonly worldFeet = new THREE.Vector3();
+  /**
+   * Velocidade do nado em **mundo**, em m/s.
+   *
+   * É ela que integra `worldFeet`, e ela existe separada de `velocity` porque as
+   * duas medem coisas diferentes na água: esta é o que o corpo faz contra o mar,
+   * e `velocity` continua sendo o que ele faz contra o navio — que é o que todo o
+   * resto do jogo lê, do rumo do corpo ao relógio da passada. Fora da água ela
+   * não vale nada.
+   */
+  private readonly worldVelocity = new THREE.Vector3();
+  /** Rumo do casco no passo anterior, para descontar a guinada dele no nado. */
+  private shipHeading = 0;
   /**
    * Resto de degrau ainda não absorvido pela vista, em metros.
    *
@@ -334,6 +630,34 @@ export class PlayerController {
    * e alcança), negativo quando desceu. Ver `STEP_SMOOTH_LAMBDA`.
    */
   private stepOffset = 0;
+  /**
+   * Desvio que **só a vista** deve, em coordenadas locais do navio.
+   *
+   * É irmão do `stepOffset` logo acima: uma dívida que a simulação criou e que o
+   * olho paga devagar, sem que a posição simulada saiba. A diferença é a origem —
+   * ali é um degrau, aqui é a rede corrigindo uma predição.
+   *
+   * ## ⚠️ A peça existia inteira e nunca esteve ligada em nada
+   *
+   * Este desvio era calculado, acumulado e decaído dentro de `GuestSession` desde
+   * que a reconciliação existe, com um getter público documentado como "o desvio
+   * visual do corpo, que o desenho soma à posição" — e **nenhum arquivo do projeto
+   * lia aquele getter**. O `decayOffset` era chamado todo quadro pelo laço
+   * principal, então a dívida nascia e morria certinho, sem nunca chegar a um pixel.
+   *
+   * O efeito é o oposto do que o comentário de lá promete: a faixa do meio da
+   * reconciliação — de 8 cm a 1,5 m, que é onde mora quase toda correção real —
+   * não era suavizada por **nada**. O que acontecia era escrita crua na posição,
+   * quinze vezes por segundo, no convés e na água. É o tipo de defeito que não dá
+   * erro, não some do código e ainda tem um comentário jurando que funciona; ficou
+   * anos no ar porque a única evidência dele é um `grep` que não acha ninguém.
+   *
+   * Fica aqui, e não no `GuestSession`, por dois motivos: é `syncView` quem monta
+   * a pose do quadro (somar de fora exigiria alcançar `eyeLocal` entre duas
+   * chamadas do laço principal e torcer para a ordem nunca mudar), e aqui ele fica
+   * testável sem `Match` — que precisa de um canvas e não roda fora do navegador.
+   */
+  readonly viewOffset = new THREE.Vector3();
   /**
    * Voltas de barra empurradas no cabrestante neste quadro.
    *
@@ -417,6 +741,16 @@ export class PlayerController {
    * vê o rombo e o botão no mesmo quadro. Ver `Match.update`.
    */
   readonly carry = new CarryClock();
+
+  /**
+   * O relógio da água, público como os outros cinco. Ele lê a velocidade de nado,
+   * que é a grandeza do mundo mais barata que existe aqui.
+   *
+   * ⚠️ Hoje ele **não desenha nada** — os clipes `Float` e `Swim` não existem no
+   * GLB, e a pose provisória da água é a locomoção alimentada com a mesma
+   * velocidade. Ver `SwimClock` e `PlayerAvatar.updateSwim`.
+   */
+  readonly swim = new SwimClock();
   private bobOffset = 0;
   /** Para onde o jogador volta ao largar o timão ou o canhão. */
   private readonly stationReturn = new THREE.Vector3();
@@ -464,9 +798,76 @@ export class PlayerController {
     );
   }
 
-  /** `true` quando o jogador está abaixo do convés principal. */
+  /**
+   * `true` quando o jogador está abaixo do convés principal.
+   *
+   * A água é excluída de propósito, e não por zelo: os pés do nadador ficam 1,44 m
+   * abaixo da superfície, o que em coordenadas do navio é bem abaixo do convés —
+   * e sem esta cláusula um marujo boiando ao largo passaria a ser lido como
+   * estando no porão. Todo mundo que pergunta isto (o teto do porão, os estorvos
+   * do convés, o pavimento do foco de interação) daria a resposta errada.
+   */
   get inHold(): boolean {
-    return this.local.y < DECK_Y - STEP_HEIGHT;
+    return !this.inWater && this.local.y < DECK_Y - STEP_HEIGHT;
+  }
+
+  /**
+   * `true` quando o corpo está fora do costado — no vão do portaló ou além dele.
+   *
+   * É a pergunta que libera os três resolvedores de uma vez: fora do casco não há
+   * chão, não há costado e não há estorvo. Ver `outsideHull`.
+   */
+  private get overboard(): boolean {
+    return outsideHull(this.local.x, this.local.z);
+  }
+
+  /**
+   * A escada de embarque em que o jogador está pendurado, ou `null` quando a
+   * escada é a do mastro.
+   *
+   * **Derivada da posição, e é por isso que o instantâneo não gasta um bit com
+   * ela.** As duas escadas do navio estão a 7,16 m uma da outra em Z — a do mastro
+   * em −0,86, as de embarque em +6,30 —, e `insideGangway` é exatamente a mesma
+   * pergunta que o portaló já faz. Guardar a resposta num campo seria guardar algo
+   * que a posição já diz, com o custo de mais um estado a sincronizar; derivar
+   * custa duas comparações e vale igual para o corpo do adversário, que só recebe
+   * posições.
+   */
+  private get boardingLadder(): BoardingLadderSpec | null {
+    if (!this.onLadder || !insideGangway(this.local.z)) return null;
+    return boardingLadderForSide(this.local.x);
+  }
+
+  /**
+   * Rumo que a escada impõe ao corpo, em radianos. Só vale com `onLadder`.
+   *
+   * Existe porque havia um `Math.PI` cravado no `PlayerAvatar`, e aquele número
+   * era o rumo da **escada do mastro** — a única que existia. Uma escada de
+   * embarque fica no costado e é encarada de fora para dentro, então o corpo tem
+   * de virar um quarto de volta para o bordo dela.
+   */
+  get ladderFacing(): number {
+    const spec = this.boardingLadder;
+    if (!spec) return Math.PI;
+    // O corpo está por **fora** do plano dos degraus (o afastamento soma em |x|),
+    // então ele encara o navio: −X em boreste, +X em bombordo. O modelo olha para
+    // +Z local depois do giro, e (sen f, cos f) = (−1, 0) dá f = −π/2.
+    return spec.side > 0 ? -Math.PI / 2 : Math.PI / 2;
+  }
+
+  /**
+   * Inclinação que a escada impõe ao corpo, em radianos. Só vale com `onLadder`.
+   *
+   * ⚠️ **Sem isto o clipe põe a mão fora da barra, e o erro cresce com a altura.**
+   * `ClimbUp` foi construído para uma escada **a prumo**: as barras estão numa
+   * reta vertical à frente do peito. A escada de embarque é inclinada 14,11° para
+   * seguir o bojo, então relativo a um corpo em pé a barra de cima sai 14° para o
+   * lado — e o desvio acumula com a subida, porque a reta se afasta da vertical de
+   * forma linear. Inclinando o corpo o mesmo ângulo, a escada volta a ser vertical
+   * *no referencial dele* e a pegada casa por construção, em qualquer barra.
+   */
+  get ladderTilt(): number {
+    return this.boardingLadder?.tilt ?? 0;
   }
 
   /** Ajusta o campo de visão a pé. Vem das preferências do jogador. */
@@ -482,6 +883,9 @@ export class PlayerController {
     this.onLadder = false;
     this.atCapstan = false;
     this.grounded = true;
+    this.inWater = false;
+    this.waterTime = 0;
+    this.splashSpeed = 0;
     this.local.copy(DECK_SPAWN);
     this.velocity.set(0, 0, 0);
     this.yaw = SPAWN_YAW;
@@ -491,16 +895,28 @@ export class PlayerController {
     this.climb.reset();
     this.carry.reset();
     this.helm.reset();
+    this.swim.reset();
     this.bobOffset = 0;
     this.stepOffset = 0;
+    // Renascer é o maior teleporte que existe: um desvio guardado de antes dele
+    // arrastaria a vista para o lugar em que o corpo estava afogado.
+    this.viewOffset.set(0, 0, 0);
     this.fov = this.baseFov;
     this.stationChangeCount++;
     this.updateEye();
   }
 
-  /** Assume o timão. Sem efeito se já estiver em alguma estação. */
+  /**
+   * Assume o timão. Sem efeito se já estiver em alguma estação — ou na água.
+   *
+   * A água entra na guarda das três estações porque `station` continua sendo
+   * `'deck'` para quem está boiando: o posto não muda ao cair no mar, e sem esta
+   * cláusula um nadador na popa assumiria o leme de dentro do oceano. O foco de
+   * interação já não oferece a peça (o mar é um pavimento próprio — ver
+   * `Interactable.level`), mas quem chama isto não é só ele.
+   */
   takeHelm(): void {
-    if (this.station !== 'deck') return;
+    if (this.station !== 'deck' || this.inWater) return;
     this.saveReturn();
     this.station = 'helm';
     this.local.copy(HELM_STAND);
@@ -531,9 +947,9 @@ export class PlayerController {
     this.stationChangeCount++;
   }
 
-  /** Monta um canhão pelo índice em `ship.cannons`. */
+  /** Monta um canhão pelo índice em `ship.cannons`. Ver a guarda de `takeHelm`. */
   mountCannon(index: number): void {
-    if (this.station !== 'deck') return;
+    if (this.station !== 'deck' || this.inWater) return;
     this.saveReturn();
     this.station = 'cannon';
     this.cannonIndex = index;
@@ -565,7 +981,7 @@ export class PlayerController {
    * faz "subir" e "descer" serem o mesmo gesto em sentidos opostos.
    */
   canGrabMastLadder(): boolean {
-    if (this.station !== 'deck' || this.onLadder || !this.grounded) return false;
+    if (this.station !== 'deck' || this.onLadder || !this.grounded || this.inWater) return false;
 
     // No cesto, **estar no cesto** já é estar ao pé da escada: ele tem 98 cm de
     // raio, o corpo ocupa 30 e o portaló é a única saída. Cobrar alinhamento ali
@@ -612,6 +1028,133 @@ export class PlayerController {
   }
 
   /**
+   * A escada de embarque ao alcance da mão de quem está na água, ou `null`.
+   *
+   * **Só da água**, e é decisão de projeto: a escada serve para *subir*. Para ir ao
+   * mar o jogador pula pelo portaló, que é o vão que existe no falcaseio
+   * justamente para isso. Uma escada agarrável de bordo daria a um duelo dois
+   * jeitos de fazer a mesma coisa, e o pior deles seria o que prende o jogador num
+   * modo por encostar na amurada — o defeito que a escada do mastro já pagou uma
+   * vez para consertar (ver `MAST_LADDER_REACH`).
+   *
+   * O alcance é medido no plano da água, da posição em que o corpo **ficaria
+   * pendurado** na barra de baixo — e não do plano dos degraus. A diferença é o
+   * afastamento do casaco (29 cm), e usar o plano dos degraus deixaria o prompt
+   * acender 29 cm mais longe do que a mão chega.
+   */
+  reachableBoardingLadder(): BoardingLadderSpec | null {
+    if (!this.inWater || this.onLadder || this.station !== 'deck') return null;
+
+    const spec = boardingLadderForSide(this.local.x);
+    const grip = boardingLadderStandX(spec, spec.bottomY);
+    const dx = Math.abs(this.local.x) - grip;
+    const dz = this.local.z - spec.z;
+    const reach = BOARDING_LADDER_REACH + PLAYER_RADIUS;
+    return dx * dx + dz * dz <= reach * reach ? spec : null;
+  }
+
+  /**
+   * Agarra a escada de embarque e sai da água. Chamado pelo botão de interação.
+   *
+   * A altura é a que o corpo já tinha, grampeada na escada: quem chega nadando
+   * está com os pés 1,44 m abaixo da superfície, ou seja **abaixo da barra mais
+   * funda**, e o grampo é o gesto de puxar-se para cima até o primeiro apoio. O
+   * grampo de cima existe pelo mesmo motivo que na escada do mastro — sem ele a
+   * saída pelo alto dispararia no mesmo quadro do agarrão.
+   */
+  grabBoardingLadder(spec: BoardingLadderSpec): void {
+    this.leaveWater();
+    this.onLadder = true;
+    this.atCapstan = false;
+    this.velocity.set(0, 0, 0);
+    this.grounded = false;
+    this.stepOffset = 0;
+    this.local.y = clamp(this.local.y, spec.bottomY, spec.topY - 0.25);
+    this.local.x = spec.side * boardingLadderStandX(spec, this.local.y);
+    this.local.z = spec.z;
+    // O mesmo alinhamento único da escada do mastro, com a grade **desta** escada.
+    // Ela não arredondou o espaçamento (ver `BOARDING_RUNG_SPACING`), então a
+    // fase cai ainda mais exata: a subida por ciclo é dois vãos por construção.
+    this.climb.align(this.local.y, spec.bottomY, spec.rungSpacing);
+  }
+
+  /**
+   * Escreve a posição autoritativa que chegou pela rede, no referencial em que ela
+   * foi comparada.
+   *
+   * ⚠️ **Existe porque na água a posição de verdade é a de mundo.** `local` é
+   * derivado dela a cada passo, então corrigir só o derivado seria uma correção
+   * desfeita no passo seguinte — o erro de predição de um nadador nunca fecharia.
+   * E o inverso também vale: no convés quem manda é `local`, e escrever mundo ali
+   * seria traduzir por uma pose de casco que não é a de ninguém.
+   *
+   * @param world `true` quando `position` é de mundo. Quem decide é
+   *   `GuestSession.reconcile`, que comparou uma das duas coisas.
+   */
+  applyAuthoritative(position: THREE.Vector3, world: boolean, ship: Ship): void {
+    if (world) {
+      this.worldFeet.copy(position);
+      ship.body.worldToLocal(this.worldFeet, this.local);
+      return;
+    }
+    this.local.copy(position);
+    if (this.inWater) ship.body.localToWorld(this.local, this.worldFeet);
+  }
+
+  /**
+   * Escreve o estado de água que o host confirmou.
+   *
+   * Só age na **mudança**, e só a entrada tem trabalho a fazer: passar a nadar
+   * exige semear a posição de mundo, que é onde o corpo passa a viver. Sair é só
+   * desligar — quem devolve o corpo a algum lugar é o teleporte que veio junto
+   * (a escada, o resgate), e ele chega por `applyAuthoritative`.
+   *
+   * O relógio do resgate é zerado nos dois sentidos de propósito: se o host
+   * discordou de onde este marujo estava, a contagem daqui descrevia outro
+   * mergulho.
+   */
+  applyAuthoritativeWater(inWater: boolean, ship: Ship): void {
+    if (inWater === this.inWater) return;
+    this.inWater = inWater;
+    this.waterTime = 0;
+    if (!inWater) return;
+    this.grounded = true;
+    this.velocity.set(0, 0, 0);
+    this.worldVelocity.set(0, 0, 0);
+    ship.body.localToWorld(this.local, this.worldFeet);
+  }
+
+  /**
+   * `true` quando o jogador já está na água há tempo bastante para pedir socorro.
+   *
+   * Ver `RESCUE_DELAY` para o porquê dos cinco segundos.
+   */
+  canRequestRescue(): boolean {
+    return this.inWater && this.waterTime >= RESCUE_DELAY;
+  }
+
+  /**
+   * Volta a bordo: a tripulação joga um cabo e o corpo reaparece no ponto de
+   * partida do navio dele.
+   *
+   * **No duelo em rede quem executa isto é o host**, como tudo que mexe em
+   * posição autoritativa. O guest chama o mesmo método no mesmo passo (é o mesmo
+   * `Crewman.fixedUpdate` dos dois lados) e prevê o teleporte; o instantâneo
+   * seguinte descreve um passado anterior ao pedido, então a posição que chega
+   * ainda é a da água — e a diferença passa de um metro e meio, o que cai na faixa
+   * de teleporte legítimo da reconciliação e é resolvida com um salto único em vez
+   * de uma oscilação. Ver `GuestSession.reconcile`.
+   *
+   * O apagão da tela é **local e visual**: ele não decide nada, só cobre o
+   * instante em que o corpo troca de lugar. Ver `rescueCount` e `Blackout`.
+   */
+  requestRescue(): void {
+    if (!this.canRequestRescue()) return;
+    this.spawn();
+    this.rescueCount++;
+  }
+
+  /**
    * Põe as mãos nas barras do cabrestante.
    *
    * **É um modo, e não um botão segurado.** Suspender o ferro segurando o botão
@@ -622,7 +1165,7 @@ export class PlayerController {
    * volta após volta. Ver `pushCapstan`.
    */
   enterCapstan(): void {
-    if (this.station !== 'deck' || this.onLadder || this.inHold) return;
+    if (this.station !== 'deck' || this.onLadder || this.inHold || this.inWater) return;
     this.atCapstan = true;
     this.velocity.set(0, 0, 0);
   }
@@ -649,13 +1192,16 @@ export class PlayerController {
    * **por passo**, o que fazia suspender a âncora depender do FPS. A 144 quadros
    * o cabrestante recebia mais do que o passo conseguia gastar; a 30, menos.
    */
-  fixedUpdate(dt: number, frame: InputFrame, ship: Ship): void {
+  fixedUpdate(dt: number, frame: InputFrame, ship: Ship, waves: WaveField): void {
     // Zerado todo passo: quem quiser virar o cabrestante ou bombear tem de pedir
     // de novo. Soltar o `F` para de agir no mesmo passo, sem inércia de comando.
     ship.controls.capstanTurns = 0;
     ship.controls.pumping = false;
     ship.controls.wheel = 0;
     this.capstanTurns = 0;
+    // Idem: o respingo é do passo em que o corpo cruzou a superfície, e quem o
+    // consome é `Match`, no mesmo passo. Ver `splashSpeed`.
+    this.splashSpeed = 0;
 
     // A pose do passo anterior, guardada antes de qualquer coisa mexer nela: é
     // dela que `syncView` interpola. Mesma técnica de `ShipBody.previousCom`, e
@@ -676,10 +1222,14 @@ export class PlayerController {
         this.updateCannon(dt, frame, ship);
         break;
       default:
-        this.updateOnFoot(dt, frame, ship);
+        this.updateOnFoot(dt, frame, ship, waves);
         break;
     }
 
+    // No fim do passo, e depois de o corpo já ter se mexido: o rumo do casco é a
+    // referência que o nado usa para descontar a guinada, e ele precisa ser o do
+    // **passo anterior** quando `updateSwim` roda. Ver lá.
+    this.shipHeading = ship.heading;
     this.updateEye();
   }
 
@@ -746,19 +1296,43 @@ export class PlayerController {
     this.grounded = pose.grounded;
     this.onLadder = pose.onLadder;
     this.atCapstan = pose.atCapstan;
+    this.inWater = pose.inWater;
 
     // Na escada e nas estações o corpo está preso a alguma coisa, e a passada
     // tem de se apagar — é a mesma regra de `settleBob` e de `updateLadder`.
     const onFoot = this.station === 'deck' && !this.onLadder;
-    const speed = onFoot ? Math.hypot(this.velocity.x, this.velocity.z) : 0;
+    // ⚠️ **Na água a velocidade é medida no mundo, e não no navio.** Em qualquer
+    // outro lugar as duas são a mesma coisa, porque o corpo anda *sobre* o casco;
+    // no mar não são, porque o casco vai embora. Um adversário boiando parado tem a
+    // posição local correndo para a popa à velocidade do navio — 2,6 m/s em popa
+    // cheia —, e alimentar a passada com esse número põe o náufrago **em disparada
+    // pela água**, com o clipe de corrida, sem sair do lugar.
+    //
+    // A conta é a soma que a derivada exige: a velocidade local rodada para o mundo
+    // mais a do próprio casco. Ela ignora `ω × r`, e pode: a chalupa gira no máximo
+    // 0,4 rad/s, e um náufrago a dez metros do centro ganharia daí 0,3 m/s no pior
+    // caso — abaixo do limiar de movimento da passada.
+    const speed = onFoot ? this.remoteSpeed(this.inWater ? ship : null) : 0;
     this.gait.update(dt, speed, onFoot ? this.grounded : true);
+    // A água entra pelo mesmo caminho, com a mesma velocidade derivada: é a
+    // locomoção que desenha o nado hoje, e a linha de cima já a alimentou. Aqui
+    // fica só o relógio da água, que é o que os clipes `Float`/`Swim` vão consumir
+    // quando existirem. Ver `PlayerAvatar.updateSwim`.
+    this.swim.update(dt, this.inWater, this.inWater ? speed : 0);
 
     // A escada é indexada pela **altura vencida**, como do lado de quem simula.
     // O alinhamento com a grade de barras é feito uma vez, ao agarrar, e daí em
     // diante se sustenta sozinho — sem ele a mão do outro jogador flutuaria
     // entre dois enfrechates pelo resto da subida.
+    //
+    // ⚠️ **E a grade é a da escada em que ele está**, que sai da posição e não do
+    // fio: as duas escadas do navio têm espaçamentos que diferem no quinto decimal
+    // (0,30333 contra 0,30334), o que ao longo de nove metros de mastro daria meio
+    // vão de erro. Ver `boardingLadder`.
     if (grabbedLadder) {
-      this.climb.align(this.local.y, MAST_LADDER.bottomY, MAST_LADDER.rungSpacing);
+      const spec = this.boardingLadder;
+      if (spec) this.climb.align(this.local.y, spec.bottomY, spec.rungSpacing);
+      else this.climb.align(this.local.y, MAST_LADDER.bottomY, MAST_LADDER.rungSpacing);
     }
     this.climb.update(dt, this.onLadder, this.onLadder && !teleported ? _remoteStep.y : 0);
 
@@ -778,9 +1352,23 @@ export class PlayerController {
     this.updateEye();
   }
 
+  /**
+   * Velocidade horizontal com que os relógios do marujo remoto são alimentados.
+   *
+   * @param ship o casco quando a medida tem de ser feita **no mundo** (só na
+   *   água), ou `null` quando o referencial do navio é o certo — que é o caso em
+   *   todo lugar onde o corpo pisa nele. Ver a nota em `applyRemoteStep`.
+   */
+  private remoteSpeed(ship: Ship | null): number {
+    if (!ship) return Math.hypot(this.velocity.x, this.velocity.z);
+    ship.body.localDirToWorld(this.velocity, _world);
+    _world.add(ship.body.velocity);
+    return Math.hypot(_world.x, _world.z);
+  }
+
   // -- a pé --------------------------------------------------------------------
 
-  private updateOnFoot(dt: number, frame: InputFrame, ship: Ship): void {
+  private updateOnFoot(dt: number, frame: InputFrame, ship: Ship, waves: WaveField): void {
     this.applyLook(frame);
     this.fov = damp(this.fov, this.baseFov, 10, dt);
     // Antes de qualquer coisa mexer no corpo: o resto de degrau do passo
@@ -792,7 +1380,15 @@ export class PlayerController {
     const move = _move;
 
     if (this.onLadder) {
-      this.updateLadder(dt, frame, move.y);
+      this.updateLadder(dt, frame, move.y, ship, waves);
+      return;
+    }
+
+    // A água vem antes do cabrestante e depois da escada, e a ordem é a das
+    // exclusões: quem está pendurado numa barra não está no mar (é a escada que
+    // tira do mar), e quem está no mar não tem barra de cabrestante que alcance.
+    if (this.inWater) {
+      this.updateSwim(dt, frame, move, ship, waves);
       return;
     }
 
@@ -828,6 +1424,174 @@ export class PlayerController {
     this.resolveBlockers();
     this.resolveGround();
     this.resolveCeiling();
+    // Depois dos resolvedores, e é obrigatório: são eles que decidem se este passo
+    // acabou com o corpo do lado de fora do costado, e é essa a única situação em
+    // que a superfície do mar tem algo a dizer. Ver `checkWaterEntry`.
+    this.checkWaterEntry(ship, waves);
+    this.updateBob(dt);
+  }
+
+  // -- a água ------------------------------------------------------------------
+
+  /**
+   * Detecta o cruzamento da superfície do mar, do lado de fora do casco.
+   *
+   * ⚠️ **A guarda de `overboard` não é zelo — sem ela o porão vira mar.** O piso
+   * do porão está em −0,55 no navio e o navio tem calado: em coordenadas de mundo
+   * aquele assoalho fica **abaixo** da linha d'água. Um pulinho no porão cruzaria a
+   * superfície do oceano sem ninguém ter saído do navio, e o jogador se veria
+   * nadando dentro do próprio casco. A água do porão é outra coisa (é
+   * `ShipDamage`), e ela nunca passa por aqui.
+   *
+   * A velocidade de entrada é guardada para o respingo. Ela é a **vertical**, e não
+   * o módulo: o que levanta coluna d'água é o corpo furando a superfície, e um
+   * mergulho raso a cinco metros por segundo horizontais é um deslize, não um
+   * tombo.
+   */
+  private checkWaterEntry(ship: Ship, waves: WaveField): void {
+    if (this.inWater || this.onLadder || !this.overboard) return;
+
+    ship.body.localToWorld(this.local, _world);
+    const surface = waves.sampleHeight(_world.x, _world.z);
+    if (_world.y > surface) return;
+
+    this.splashAt.set(_world.x, surface, _world.z);
+    this.splashSpeed = Math.max(-this.velocity.y, 0);
+    this.enterWater(_world, surface);
+  }
+
+  /**
+   * Passa o corpo para o referencial de mundo e liga o estado de nado.
+   *
+   * `grounded` fica **verdadeiro**, e é de propósito: o bit não quer dizer "há
+   * convés embaixo do pé", quer dizer "o corpo tem apoio" — e o mar apoia. É ele
+   * que impede o clipe de ar de grudar no personagem pelo resto da nadada e que
+   * evita um pouso disparado ao sair da água. Mesma leitura que `JumpClock.settle`
+   * faz para a escada, resolvida um nível acima.
+   *
+   * @param world posição dos pés no mundo, no instante da entrada.
+   * @param surface altura da água ali, em mundo.
+   */
+  private enterWater(world: THREE.Vector3, surface: number): void {
+    this.inWater = true;
+    this.waterTime = 0;
+    this.grounded = true;
+    this.onLadder = false;
+    this.atCapstan = false;
+    this.stepOffset = 0;
+    // As duas: a que o navio lê e a que o mar integra. O tombo não vira impulso de
+    // nado — quem entra na água entra parado, e o primeiro braço é dele.
+    this.velocity.set(0, 0, 0);
+    this.worldVelocity.set(0, 0, 0);
+    // O corpo emerge na pose de boia já assentada, e não no ponto de impacto: o
+    // que se vê é a cabeça saindo da água, e cair dois metros e meio para depois
+    // subir 1,44 m amortecendo seria o corpo ricocheteando na superfície.
+    this.worldFeet.set(world.x, surface - (EYE_HEIGHT - SWIM_EYE_HEIGHT), world.z);
+  }
+
+  /**
+   * Devolve o corpo ao referencial do navio. Chamado por quem tira o marujo da
+   * água — a escada de embarque, o resgate, o renascimento.
+   */
+  private leaveWater(): void {
+    this.inWater = false;
+    this.waterTime = 0;
+  }
+
+  /**
+   * Nadar e boiar na superfície.
+   *
+   * ## O que é escrito, e em que referencial
+   *
+   * A posição de verdade é a de **mundo** (`worldFeet`): é ela que recebe o
+   * deslocamento, e `local` é reescrito a partir dela no fim do passo. É isso que
+   * faz o navio ir embora sem levar o nadador — ver o cabeçalho do arquivo, e o
+   * teto de ±128 m que a quantização impõe.
+   *
+   * ## A vertical não é física, é vínculo
+   *
+   * O corpo é **amarrado** à altura da onda com amortecimento, e a velocidade
+   * vertical fica em zero. Não há gravidade, não há empuxo integrado e não há
+   * pulo: um amortecedor que só se aproxima do alvo nunca o ultrapassa, então
+   * **não se mergulha por construção** — não há um grampo separado dizendo "não
+   * afunde", há uma equação que não tem como afundar. Ver `SWIM_BOB_LAMBDA` para o
+   * porquê do número.
+   *
+   * ## E a cabeça tem de ficar parada no mundo
+   *
+   * `yaw` é medido no referencial do casco (a câmera compõe com a matriz dele), o
+   * que no convés é exatamente o que se quer e na água é o oposto: um navio
+   * guinando 30° arrastaria a vista de quem está boiando 30° junto, sem ninguém ter
+   * mexido no mouse. Descontar a guinada do casco do rumo da cabeça devolve um
+   * olhar que fica onde foi deixado. É o mesmo gesto de `followCapstan`, ao
+   * contrário: lá o corpo gira e a cabeça acompanha, aqui o mundo gira e a cabeça
+   * se recusa.
+   *
+   * ⚠️ Só no caminho de **delta**. Quando o olhar chega absoluto (todo quadro que
+   * veio pela rede), ele já é o ângulo que o outro lado calculou *com* a
+   * compensação dentro — descontar de novo giraria a cabeça do adversário duas
+   * vezes por cada guinada.
+   */
+  private updateSwim(
+    dt: number,
+    frame: InputFrame,
+    move: { x: number; y: number },
+    ship: Ship,
+    waves: WaveField,
+  ): void {
+    this.waterTime += dt;
+
+    if (!frame.absoluteView) {
+      this.yaw -= wrapAngle(ship.heading - this.shipHeading);
+    }
+
+    // O rumo do nado é o do olhar, **em mundo**: o corpo vai para onde a cabeça
+    // aponta, e a cabeça já está descontada da guinada do casco. Somar o rumo do
+    // navio traz o ângulo local de volta para o mundo.
+    const heading = this.yaw + this.shipHeading;
+    const sin = Math.sin(heading);
+    const cos = Math.cos(heading);
+    _moveDir.set(-sin * move.y + cos * move.x, 0, -cos * move.y - sin * move.x);
+    if (_moveDir.lengthSq() > 1) _moveDir.normalize();
+
+    // ⚠️ **A velocidade do nado é integrada em mundo, e não no navio.** É a mesma
+    // razão da posição: a água não gira com o casco, e um amortecedor cujo alvo
+    // roda junto com a proa faria o náufrago descrever uma curva toda vez que o
+    // navio guinasse. Sem `Sprint`: ver `SWIM_SPEED`. E o amortecimento é o do ar,
+    // e não o do chão — a água não dá tração para trocar de direção num quadro, e
+    // `AIR_CONTROL` já é a constante de "o corpo demora a obedecer" deste arquivo.
+    this.worldVelocity.x = damp(this.worldVelocity.x, _moveDir.x * SWIM_SPEED, AIR_CONTROL, dt);
+    this.worldVelocity.z = damp(this.worldVelocity.z, _moveDir.z * SWIM_SPEED, AIR_CONTROL, dt);
+    this.worldVelocity.y = 0;
+
+    this.worldFeet.x += this.worldVelocity.x * dt;
+    this.worldFeet.z += this.worldVelocity.z * dt;
+
+    const surface = waves.sampleHeight(this.worldFeet.x, this.worldFeet.z);
+    this.worldFeet.y = damp(
+      this.worldFeet.y,
+      surface - (EYE_HEIGHT - SWIM_EYE_HEIGHT),
+      SWIM_BOB_LAMBDA,
+      dt,
+    );
+
+    // E `local` vira o que a posição de mundo diz que ele é. Daqui para a frente
+    // câmera, corpo, interpolação e instantâneo leem o de sempre — inclusive a
+    // **velocidade**, que volta a ser a do referencial do navio como em todo o
+    // resto do arquivo. Sem esta volta, o rumo do corpo (`PlayerAvatar`) leria um
+    // vetor de mundo como se fosse local, e o náufrago apareceria nadando de lado
+    // sempre que o casco não estivesse apontado para o norte.
+    ship.body.worldToLocal(this.worldFeet, this.local);
+    ship.body.worldDirToLocal(this.worldVelocity, this.velocity);
+    this.pushOutOfHull(ship);
+    this.grounded = true;
+
+    const speed = Math.hypot(this.velocity.x, this.velocity.z);
+    this.swim.update(dt, true, speed);
+    // ⚠️ **E a passada recebe a mesma velocidade** — é ela que desenha a água
+    // enquanto `Float` e `Swim` não existirem no GLB. Ver `PlayerAvatar.updateSwim`
+    // para as três linhas que mudam no dia em que os clipes entrarem; a fase de lá
+    // já mede o mesmo que a de cá (ver `SWIM_CLIP`), então a cadência não muda.
     this.updateBob(dt);
   }
 
@@ -992,12 +1756,30 @@ export class PlayerController {
   }
 
   /**
-   * Sobe e desce a escada do mastro. Frente sobe, ré desce.
+   * Sobe e desce **uma** escada. Frente sobe, ré desce.
    *
    * Chama-se `updateLadder` e não `climb` porque `climb` agora é o **relógio**
    * da escalada, ao lado de `gait` e `jump`.
+   *
+   * ## Duas escadas, um passo
+   *
+   * Era cravado em `MAST_LADDER`, e generalizar em vez de duplicar não é gosto: o
+   * que faz a mão cair na barra é o casamento entre a fase do clipe e a **grade**
+   * da escada (ver `ClimbClock.align`), e uma segunda cópia deste método seria uma
+   * segunda chance de aquele casamento divergir. O que muda entre as duas escadas é
+   * pouco e está isolado em três lugares — a reta que o corpo segue, a saída de
+   * cima e a saída de baixo. O resto é idêntico por construção.
+   *
+   * Qual escada é a de agora sai de `boardingLadder`, ou seja **da posição**. Ver
+   * lá para o porquê de não haver campo nem bit de rede para isso.
    */
-  private updateLadder(dt: number, frame: InputFrame, forward: number): void {
+  private updateLadder(
+    dt: number,
+    frame: InputFrame,
+    forward: number,
+    ship: Ship,
+    waves: WaveField,
+  ): void {
     // Solta no meio do caminho — daí em diante é queda.
     //
     // O botão de interação larga a escada tanto quanto o de sair: é ele que
@@ -1010,8 +1792,7 @@ export class PlayerController {
       pressed(frame, InputBit.Exit) ||
       pressed(frame, InputBit.Interact)
     ) {
-      this.onLadder = false;
-      this.grounded = false;
+      this.releaseLadder(ship, waves);
       return;
     }
 
@@ -1029,11 +1810,18 @@ export class PlayerController {
     // mão na barra em qualquer velocidade e o que faz descer ser o mesmo gesto
     // ao contrário, sem clipe separado.
     this.climb.update(dt, true, rise);
+    this.velocity.set(0, 0, 0);
+    this.grounded = false;
+
+    const boarding = this.boardingLadder;
+    if (boarding) {
+      this.followBoardingLadder(dt, boarding, ship, waves);
+      return;
+    }
+
     // Centraliza nos montantes: subir torto lê como bug.
     this.local.x = damp(this.local.x, 0, 10, dt);
     this.local.z = damp(this.local.z, MAST_LADDER.z + LADDER_STANDOFF, 10, dt);
-    this.velocity.set(0, 0, 0);
-    this.grounded = false;
 
     // Chegou ao cesto: entra pelo portaló e vira gente de pé outra vez.
     //
@@ -1053,6 +1841,127 @@ export class PlayerController {
       this.local.y = this.surfaceAt(this.local.x, this.local.z, MAST_LADDER.bottomY + 0.3);
       this.grounded = true;
     }
+  }
+
+  /**
+   * O costado empurrando quem está encostado nele, por fora.
+   *
+   * ⚠️ **Sem isto o nadador atravessa o casco.** `resolveHull` está desligado na
+   * água de propósito (ele *carrega* o corpo com o navio, que é justamente o que
+   * não se quer), e o que sobrou foi um marujo que nada para dentro do costado e
+   * vai parar submerso dentro do porão, vendo o mundo de dentro da madeira.
+   *
+   * A diferença entre este empurrão e aquele grampo é toda: aquele escreve a
+   * posição do corpo em todo quadro, este só resolve a **penetração** — quando o
+   * corpo está fora, ele não faz nada, e o navio segue embora sem levar ninguém.
+   * O que sobra continua vivendo em `worldFeet`, e é por isso que a posição de
+   * mundo é reescrita no fim: sem essa volta, o empurrão seria desfeito no passo
+   * seguinte pela conversão de mundo para local.
+   *
+   * A largura é medida **na linha d'água** e não na altura dos pés, e é a escolha
+   * certa por dois motivos: é ali que o tronco do nadador está (os pés ficam 1,44 m
+   * abaixo, onde o casco já afinou para a quilha), e é a seção mais larga que ele
+   * pode encontrar — o que faz o empurrão errar sempre para o lado seguro.
+   */
+  private pushOutOfHull(ship: Ship): void {
+    const half = halfWidthAtHeight(zToT(this.local.z), 0) + PLAYER_RADIUS;
+    const distance = Math.abs(this.local.x);
+    if (distance >= half) return;
+
+    // Colado na linha de centro (por baixo da quilha) escolhe um bordo em vez de
+    // dividir por zero — é a mesma saída de `pushOutOf`.
+    this.local.x = distance > 1e-4 ? Math.sign(this.local.x) * half : half;
+    ship.body.localToWorld(this.local, this.worldFeet);
+
+    // A componente que entrava no casco morre; a que desliza rente a ele fica. É o
+    // que faz contornar a popa a nado parecer contornar, e não travar. A volta para
+    // o mundo é obrigatória: é `worldVelocity` que integra a posição, e matar só a
+    // cópia local deixaria o corpo empurrando a madeira para sempre.
+    const outward = Math.sign(this.local.x);
+    if (this.velocity.x * outward >= 0) return;
+    this.velocity.x = 0;
+    ship.body.localDirToWorld(this.velocity, this.worldVelocity);
+  }
+
+  /**
+   * Larga a escada no meio do caminho — daí em diante é queda.
+   *
+   * Na escada do mastro isso é só soltar as mãos. Numa escada de embarque, largar
+   * é **cair no mar**, porque do lado de fora do costado não existe convés — e o
+   * pé dela pede um cuidado a mais: `boardingLadderStandX` volta para dentro da
+   * régua da borda do convés abaixo de y ≈ −0,21 (o corpo fica em 1,64 contra
+   * 1,76), então ali `checkWaterEntry` não reconheceria o corpo como estando fora
+   * do navio e `resolveGround` o plantaria no assoalho do porão. Abaixo daquela
+   * altura a escada é submersa de qualquer forma, então o que há embaixo do corpo
+   * é mar e ele é entregue direto à água. Mais acima, a queda corre normal e a
+   * superfície o pega.
+   */
+  private releaseLadder(ship: Ship, waves: WaveField): void {
+    // Lido **antes** de desligar `onLadder`: é dele que o getter depende.
+    const boarding = this.boardingLadder;
+    this.onLadder = false;
+    this.grounded = false;
+    if (!boarding || this.overboard) return;
+    ship.body.localToWorld(this.local, _world);
+    this.enterWater(_world, waves.sampleHeight(_world.x, _world.z));
+  }
+
+  /**
+   * O corpo seguindo a reta inclinada de uma escada de embarque, com as duas
+   * saídas dela.
+   *
+   * O corpo persegue `boardingLadderStandX` na altura em que está — a reta medida
+   * na **perpendicular** ao plano dos degraus, e não na horizontal. A inclinação
+   * que o corpo assume para casar com essa reta é `ladderTilt`, e quem a desenha é
+   * o `PlayerAvatar`; ver lá e em `ladderTilt` o que acontece sem ela.
+   *
+   * As duas pontas são o oposto uma da outra, e é isso que a peça é: em cima
+   * termina **de pé no tombadilho**, em baixo termina **no mar**. A barra mais
+   * funda é submersa de propósito (`BOARDING_RUNG_COUNT`), então descer até ela é
+   * entrar na água — e entregar o corpo à água aqui, em vez de largá-lo em queda,
+   * é obrigatório: no pé da escada o corpo ainda está 12 cm **dentro** da borda do
+   * convés (1,64 contra 1,76), então `checkWaterEntry` não o reconheceria como
+   * estando fora do navio e `resolveGround` o plantaria no assoalho do porão.
+   */
+  private followBoardingLadder(
+    dt: number,
+    spec: BoardingLadderSpec,
+    ship: Ship,
+    waves: WaveField,
+  ): void {
+    // Saída pelo alto: **de pé na soleira do portaló**, que é o piso que a barra
+    // de topo encosta. Não é no convés lá dentro, e a diferença importa: entre a
+    // barra de topo e a borda do convés há 28 cm de plataforma (a escada ficou 18
+    // cm fora do costado para a madeira dela não atravessar a popa que afina), e
+    // teleportar o corpo por cima dela seria pular justamente o degrau que a peça
+    // existe para dar. Quem sobe pisa na tábua e depois entra.
+    //
+    // O corpo fica um raio para dentro do fio da soleira, que é o mais para fora
+    // que ele cabe sem o cilindro passar da tábua — e continua sendo `spec.exitY`
+    // porque a soleira é rasada com o tombadilho. Ver `gangwaySurface`.
+    if (this.local.y >= spec.topY) {
+      this.onLadder = false;
+      this.local.y = spec.exitY;
+      this.local.z = spec.z;
+      this.local.x = spec.side * Math.max(gangwaySillX(spec) - PLAYER_RADIUS, 0);
+      this.grounded = true;
+      this.velocity.set(0, 0, 0);
+      return;
+    }
+
+    this.local.x = damp(
+      this.local.x,
+      spec.side * boardingLadderStandX(spec, this.local.y),
+      10,
+      dt,
+    );
+    this.local.z = damp(this.local.z, spec.z, 10, dt);
+
+    // Saída por baixo: passou da última barra, está no mar.
+    if (this.local.y > spec.bottomY) return;
+    this.local.y = spec.bottomY;
+    ship.body.localToWorld(this.local, _world);
+    this.enterWater(_world, waves.sampleHeight(_world.x, _world.z));
   }
 
   // -- estações ----------------------------------------------------------------
@@ -1116,6 +2025,22 @@ export class PlayerController {
     const nest = this.crowNestSurface(x, z, feetY);
     if (nest !== null) return nest;
 
+    // A soleira do portaló é a segunda plataforma do navio, e a única que fica do
+    // lado de **fora** do costado. Vem antes da linha seguinte porque é justamente
+    // ela a exceção a ela.
+    const sill = gangwaySurface(x, z);
+    if (sill !== null) return sill;
+
+    // ⚠️ **Fora do costado não há piso nenhum, e é isso que faz o portaló ser uma
+    // porta.** Antes desta linha `surfaceAt` nunca devolvia "sem chão": o convés
+    // valia para qualquer x, e o único motivo pelo qual ninguém caía do navio era
+    // `resolveHull` grampear o corpo dentro do casco em todo quadro. Abrindo o vão
+    // no falcaseio sem abrir esta exceção, o jogador andaria sobre o mar.
+    //
+    // `-Infinity`, e não um número baixo: `resolveGround` compara com tolerância, e
+    // qualquer piso finito seria um chão invisível a alguma altura sobre a água.
+    if (outsideHull(x, z)) return NO_FLOOR;
+
     const t = zToT(z);
     const deck = walkableY(t) + deckCamber(x, deckHalfWidth(t));
 
@@ -1172,6 +2097,33 @@ export class PlayerController {
     this.stepOffset = clamp(this.stepOffset + rise, -STEP_HEIGHT, STEP_HEIGHT);
   }
 
+  /**
+   * Guarda uma correção de rede para a vista alcançar, em vez de saltar com ela.
+   *
+   * Chamado pela reconciliação **antes** de a posição ser corrigida: o desvio é a
+   * diferença que vai deixar de existir na simulação e passar a existir só no
+   * desenho. Some por si em ~200 ms (ver `OFFSET_LAMBDA`).
+   *
+   * O grampo é o que separa predição de discordância — ver `OFFSET_LIMIT` para a
+   * conta de enjoo que o define, e `absorbStep`, que faz o mesmo com degraus.
+   *
+   * @param delta a diferença, em coordenadas locais do navio.
+   */
+  absorbViewOffset(delta: THREE.Vector3): void {
+    this.viewOffset.add(delta);
+    if (this.viewOffset.lengthSq() > OFFSET_LIMIT * OFFSET_LIMIT) {
+      this.viewOffset.setLength(OFFSET_LIMIT);
+    }
+  }
+
+  /**
+   * Apaga o desvio da vista. Roda no **quadro**, com o `dt` real — a suavização é
+   * de desenho, então ela tem de correr na taxa do monitor e não na do passo fixo.
+   */
+  decayViewOffset(dt: number): void {
+    this.viewOffset.multiplyScalar(Math.exp(-OFFSET_LAMBDA * dt));
+  }
+
   private decayStep(dt: number): void {
     const magnitude = Math.abs(this.stepOffset);
     if (magnitude < 1e-4) {
@@ -1197,7 +2149,10 @@ export class PlayerController {
    * escotilha não há teto nenhum, que é por onde se sobe.
    */
   private resolveCeiling(): void {
-    if (!this.inHold) return;
+    // Fora do costado não há teto, e a guarda é obrigatória: quem cai pelo portaló
+    // cruza a altura do porão a caminho da água, e sem ela o convés — que ali é
+    // *ao lado* do corpo, não acima dele — pescaria o jogador no meio da queda.
+    if (this.overboard || !this.inHold) return;
 
     const t = zToT(this.local.z);
     if (isOverHatch(this.local.x, this.local.z)) return;
@@ -1230,6 +2185,11 @@ export class PlayerController {
       return;
     }
 
+    // Na água o casco não tem nada a dizer: o corpo está no mar e `local` é só a
+    // tradução da posição de mundo dele. Grampear aqui arrastaria o nadador de
+    // volta para dentro do navio no primeiro quadro. Ver `updateSwim`.
+    if (this.inWater) return;
+
     const hold = this.inHold;
     const range = hold ? this.holdRange : this.deckRange;
     this.local.z = clamp(this.local.z, range.min, range.max);
@@ -1238,6 +2198,21 @@ export class PlayerController {
     const half = hold
       ? halfWidthAtHeight(t, HOLD_FLOOR_Y + 0.5) - HULL_THICKNESS
       : deckHalfWidth(t);
+
+    // ⚠️ **O portaló é a exceção deste resolvedor, como a gávea é a exceção do
+    // resolvedor inteiro.** Sem uma das duas, este método é geometricamente
+    // incontornável — ele grampeia x dentro do costado em *todo* quadro, e é só por
+    // isso que sair do navio era impossível. O vão no falcaseio é o único lugar em
+    // que o grampo não vale, e a largura dele é escolhida para que ninguém caia por
+    // acidente: quem passa por ali fez força para isso (ver
+    // `BOARDING_GANGWAY_HALF_WIDTH`).
+    if (!hold && insideGangway(this.local.z)) return;
+    // E quem já está do lado de fora não é trazido de volta pelo costado. É o que
+    // permite atravessar o portaló em diagonal: o corpo sai por dentro do vão, o Z
+    // continua andando e sai da faixa dele, e sem esta linha o casco o teleportaria
+    // para dentro do convés no meio da queda.
+    if (Math.abs(this.local.x) > half) return;
+
     const limit = Math.max(half - PLAYER_RADIUS, 0);
     this.local.x = clamp(this.local.x, -limit, limit);
   }
@@ -1262,6 +2237,12 @@ export class PlayerController {
       this.pushOutOf(0, CROW_NEST.z, CROW_NEST.mastRadius + 0.04);
       return;
     }
+
+    // Fora do costado não há estorvo: as peças do convés são todas de dentro, e o
+    // cilindro de colisão do canhão chega a passar 55 cm além da borda — um corpo
+    // caindo rente ao casco na altura das amuras seria empurrado por um canhão que
+    // está do outro lado da madeira.
+    if (this.overboard) return;
 
     const hold = this.inHold;
 
@@ -1348,6 +2329,9 @@ export class PlayerController {
     // dois se equilibrariam com meio timoneiro na tela — e a outra metade do
     // orçamento de pesos iria para o parado, de mãos no vazio.
     if (this.station !== 'helm') this.helm.update(dt, false, 0);
+    // Numa estação não se está no mar — não há como assumir o leme boiando (ver a
+    // guarda de `takeHelm`), então aqui a água só tem como se apagar.
+    this.swim.update(dt, false, 0);
     // `settle` e não `update`: quem assume o timão em pleno salto não aterrissa,
     // é teleportado para trás da roda. Um pouso disparado ali sairia com o
     // personagem se agachando de pé no posto.
@@ -1368,6 +2352,11 @@ export class PlayerController {
     // E o mesmo com o timão, que é o que faz o timoneiro largar a roda ao sair
     // do posto em vez de sair andando pelo convés de mãos em concha.
     this.helm.update(dt, false, 0);
+    // A água é a exceção, e a guarda é obrigatória pela mesma razão que a do timão
+    // em `settleBob`: quem está nadando já alimentou este relógio neste passo (em
+    // `updateSwim`), e um segundo `damp` no mesmo quadro puxaria o peso de volta
+    // para baixo — os dois se equilibrariam com meia água no corpo.
+    if (!this.inWater) this.swim.update(dt, false, 0);
     // Depois de `resolveGround`, de propósito: é ele quem decide se este quadro
     // é voo ou contato, e o relógio do pulo precisa da resposta já tomada.
     this.jump.update(dt, this.velocity.y, this.grounded);
@@ -1433,6 +2422,17 @@ export class PlayerController {
     this.visualLocal.lerpVectors(this.previousVisualLocal, this.simVisualLocal, alpha);
     this.eyeLocal.lerpVectors(this.previousEyeLocal, this.simEyeLocal, alpha);
 
+    // E o desvio de reconciliação por cima dos dois, **depois** da interpolação.
+    //
+    // Depois, e não dentro, porque ele não é uma grandeza do passo: ele decai no
+    // relógio do quadro, então interpolá-lo entre duas poses de simulação seria
+    // misturar duas taxas diferentes. As três dívidas da vista somam aqui sem se
+    // atropelar, e cada uma numa direção própria — o degrau (`stepOffset`) só na
+    // vertical e já dentro de `updateEye`, o balanço (`bobOffset`) só no olho, e
+    // este nos dois, porque uma correção de rede move o corpo inteiro.
+    this.visualLocal.add(this.viewOffset);
+    this.eyeLocal.add(this.viewOffset);
+
     _euler.set(
       clamp(this.pitch - residualY, -PITCH_LIMIT, PITCH_LIMIT),
       this.yaw - residualX,
@@ -1460,10 +2460,15 @@ export class PlayerController {
 
     cannon.getBarrelQuaternion(this.eyeQuaternion, alpha);
     cannon.getPivotLocal(_pivot);
+    // O desvio de reconciliação **não** entra aqui, e é a única vista em que ele
+    // não entra: a câmera está presa à peça, e a peça é do navio. Um erro de
+    // predição do *corpo* não tem o que dizer sobre onde o cano está apontado —
+    // somá-lo ali arrastaria a mira de quem está mirando.
     this.eyeLocal.set(0, 0.45, 1.35).applyQuaternion(this.eyeQuaternion).add(_pivot);
     // Os pés continuam onde o passo os deixou: quem os desenha é o corpo, e ele
-    // não acompanha a culatra.
+    // não acompanha a culatra. Esse sim leva o desvio, como em `syncView`.
     this.visualLocal.lerpVectors(this.previousVisualLocal, this.simVisualLocal, alpha);
+    this.visualLocal.add(this.viewOffset);
     return true;
   }
 

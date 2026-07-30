@@ -75,8 +75,23 @@
  * madeira ia surgindo pregada no casco sozinha. Quem sabe disso é a
  * `Interaction` — só ela vê o buraco e o botão segurado no mesmo passo —, e o
  * outro lado não tem como deduzir.
+ *
+ * **7** — o marujo passou a dizer se está **no mar**. É o último bit livre do
+ * byte de estado do corpo (o de número 7, que agora fecha o byte), e ele é o
+ * único estado da água que precisa viajar: a *posição* já vai, e dela se deriva
+ * o resto — inclusive **em qual das duas escadas de embarque** o adversário está
+ * pendurado, porque as duas ficam a sete metros uma da outra em Z e
+ * `insideGangway` é a mesma pergunta que o portaló já faz. Sem este bit, quem
+ * caísse na água aparecia do outro lado *andando pelo mar* com a pose de convés,
+ * e a escada de embarque não tinha como acender a mão certa.
+ *
+ * Nesta mesma versão o **rumo da cabeça no instantâneo passou a ser
+ * normalizado** antes de quantizar, como o do quadro de entrada já era. Não é
+ * mudança de formato — os bytes são os mesmos —, mas a versão sobe junto porque
+ * ela conserta o que aqueles bytes *significam* na borda da faixa. Ver a nota em
+ * `encodeSnapshot`.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /** Casas do código de sala. */
 export const CODE_LENGTH = 4;

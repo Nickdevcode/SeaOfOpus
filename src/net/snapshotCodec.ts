@@ -409,24 +409,54 @@ export function encodeSnapshot(match: Match, options: EncodeOptions): ArrayBuffe
   for (const crewman of match.crew) {
     const c = crewman.controller;
     w.local(c.local, QUANT.local);
-    w.i16(quantize(c.yaw, QUANT.angle));
+    // ⚠️ **Normalizado, como no caminho da entrada — e por muito tempo não era.**
+    //
+    // Os dois caminhos nasceram em momentos diferentes e só um deles aprendeu a
+    // lição: `encodeInput` wrappa desde que o olhar passou a viajar absoluto (ver a
+    // nota lá), e este ficou para trás porque a pergunta parecia outra — "o rumo do
+    // meu próprio marujo" soa como um número pequeno, e num jogador que só olha em
+    // volta ele é.
+    //
+    // Só que `PlayerController.yaw` **nunca** é normalizado: ele integra o olhar do
+    // mouse, que cresce sem limite para quem gira sempre para o mesmo lado, e ainda
+    // por cima **acumula uma volta inteira por volta de cabrestante**
+    // (`followCapstan` soma o ângulo varrido direto no rumo). Nesta escala o `i16`
+    // satura em ±3,2767 rad, ou seja em ±187,7°: suspender o ferro é passar disso
+    // na primeira volta. O que o outro lado via era a cabeça e o rumo do corpo do
+    // adversário **travados** no batente enquanto ele dava voltas no cabrestante, e
+    // o corpo dele parado de lado em vez de acompanhando a barra.
+    //
+    // O conserto fica aqui, e não na origem, de propósito: normalizar `yaw` dentro
+    // do controlador é seguro (tudo que consome aquele ângulo já trabalha por
+    // caminho curto — `damp` com `wrapAngle`, `setFromEuler`, `foldLegHeading`),
+    // mas seria uma mudança de comportamento em cinco arquivos para consertar um
+    // defeito que existe em um. Aqui é onde o número entra na faixa em que ele não
+    // cabe, e é aqui que ele é posto de volta nela.
+    w.i16(quantize(wrapAngle(c.yaw), QUANT.angle));
     w.i16(quantize(c.pitch, QUANT.angle));
     const station = c.station === 'deck' ? 0 : c.station === 'helm' ? 1 : 2;
-    // Estação, canhão e os quatro estados de corpo cabem num byte: são 2 + 1 + 4
-    // bits de informação, e um campo por coisa custaria cinco bytes por marujo
-    // em cada um dos quinze instantâneos por segundo.
+    // Estação, canhão e os cinco estados de corpo **fecham o byte**: são 2 + 1 + 5
+    // bits de informação, e um campo por coisa custaria seis bytes por marujo em
+    // cada um dos quinze instantâneos por segundo. Não sobra mais bandeira aqui —
+    // a próxima paga um byte.
     //
     // A tábua na mão é o único deles que **não** sai do controlador: quem vê o
     // rombo e o botão segurado no mesmo passo é a `Interaction`. Sem este bit o
     // adversário tapava rombo de mãos vazias — ver a nota da versão 6 do
     // protocolo.
+    //
+    // O mar é o último, e é o único estado da água que viaja: a posição já vai, e
+    // dela se deriva o resto — inclusive **em qual escada de embarque** ele está
+    // pendurado, porque as duas ficam a sete metros uma da outra em Z. Ver
+    // `PlayerController.boardingLadder`.
     w.u8(
       station |
         ((c.cannonIndex < 0 ? 0 : c.cannonIndex) << 2) |
         (c.grounded ? 1 << 3 : 0) |
         (c.onLadder ? 1 << 4 : 0) |
         (c.atCapstan ? 1 << 5 : 0) |
-        (crewman.interaction.patching ? 1 << 6 : 0),
+        (crewman.interaction.patching ? 1 << 6 : 0) |
+        (c.inWater ? 1 << 7 : 0),
     );
   }
 

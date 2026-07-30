@@ -93,8 +93,27 @@ const smoothstep = (t: number): number => t * t * (3 - 2 * t);
  *
  * `footRung` é a altura, dentro do clipe, da barra que o pé esquerdo toma na
  * fase 0, medida a partir dos pés do jogador. É a âncora do alinhamento.
+ *
+ * `standoff` é o quanto o corpo fica atrás do plano dos degraus, em metros, e ele
+ * mora aqui — e não em cada escada — porque **quem dita é o personagem**. Eram 24
+ * cm, e 24 não cabe: o casaco deste pirata avança 24,8 cm à frente do eixo do
+ * corpo na altura da faixa, e a barra ainda tem 2,6 cm de raio; com o número
+ * antigo ele atravessava a escada **parado**, antes de qualquer animação. O valor
+ * está espelhado em `anim_climb.LADDER_STANDOFF`, que é onde o clipe foi
+ * construído — mexer em um sem o outro descasa a mão da barra.
+ *
+ * ⚠️ **Uma constante só para as duas escadas do navio**, e é de propósito: a do
+ * mastro e a de embarque afastam o corpo pela mesma razão física (a grossura do
+ * casaco), e enquanto o número existia duas vezes — uma em `PlayerController`,
+ * outra em `BoardingLadder` — nenhum dos dois testes de alinhamento reprovaria uma
+ * divergência entre elas, porque cada um lia a cópia do próprio lado.
  */
-export const CLIMB_CLIP = { rise: 0.60667, footRung: 0.33, cycle: 1.0 } as const;
+export const CLIMB_CLIP = {
+  rise: 0.60667,
+  footRung: 0.33,
+  cycle: 1.0,
+  standoff: 0.29,
+} as const;
 
 /**
  * O relógio da escada: a mesma ideia da passada, de pé.
@@ -261,6 +280,75 @@ export class CarryClock {
   reset(): void {
     this.phase = 0;
     this.weight = 0;
+  }
+}
+
+/**
+ * Distância que um ciclo de braçada cobre na água, em metros.
+ *
+ * ⚠️ **É o único número emprestado deste arquivo.** Todos os outros saem do
+ * Blender e são propriedade do clipe; este sai do clipe de *caminhada*, porque
+ * `Float` e `Swim` ainda não existem no GLB e é a locomoção que desenha a água
+ * hoje (ver `SwimClock`). Enquanto for assim, a braçada tem de medir exatamente o
+ * que a passada mede — senão a chegada dos clipes de verdade mudaria a cadência
+ * das pernas, e a água deixaria de se parecer com o que já se viu dela.
+ *
+ * Quando `anim_swim.py` existir, isto passa a ser `speed × cycle` dele, como em
+ * `WALK_CLIP`, e o número deixa de ser emprestado.
+ */
+export const SWIM_CLIP = { distance: WALK_DISTANCE } as const;
+
+/**
+ * O relógio da água: a mesma ideia da passada, com o corpo na superfície.
+ *
+ * A fase avança pela **distância nadada**, não pelo tempo, pelo mesmo motivo de
+ * sempre — é o que faz a braçada ser um gesto de avanço em qualquer velocidade,
+ * em vez de um filme rodando por cima de um corpo que desliza. `stroke` é o
+ * equivalente do `moving` da passada: acima do limiar de movimento o corpo
+ * nada, abaixo dele boia.
+ *
+ * ## Por que ele existe antes dos clipes
+ *
+ * Porque a água já é um estado do jogo — dá para cair nela, nadar até a escada e
+ * voltar a bordo —, e o corpo tem de mostrar *algo* enquanto `Float` e `Swim`
+ * não chegam. A pose provisória é a locomoção existente, que é o que menos mente
+ * com um corpo de pé submerso até o peito: as pernas batem no ritmo do avanço e
+ * o parado assume ao boiar. O que este relógio guarda é o que os clipes de
+ * verdade vão consumir — e o teste de `SWIM_CLIP` prova que a troca não muda a
+ * cadência.
+ *
+ * Ver `PlayerAvatar.updateSwim`, que lista em três linhas exatamente o que muda
+ * no dia em que os dois clipes entrarem no GLB.
+ */
+export class SwimClock {
+  /** Onde a braçada está, em [0, 1). */
+  phase = 0;
+  /** Quanto do corpo a água ocupa — sobe ao cair no mar, cai ao sair dele. */
+  weight = 0;
+  /** Quanto da pose é braçada em vez de boia, em [0, 1]. */
+  stroke = 0;
+  /** Velocidade horizontal na água no último quadro, em m/s. Diagnóstico. */
+  speed = 0;
+
+  /**
+   * @param inWater se o corpo está no mar neste quadro.
+   * @param speed velocidade horizontal na água, em m/s.
+   */
+  update(dt: number, inWater: boolean, speed: number): void {
+    this.speed = speed;
+    const swimming = inWater && speed > MOVE_THRESHOLD;
+    this.weight = damp(this.weight, inWater ? 1 : 0, BLEND_LAMBDA, dt);
+    this.stroke = damp(this.stroke, swimming ? 1 : 0, BLEND_LAMBDA, dt);
+    // Boiando a fase congela, como na escada: o corpo fica onde a última braçada
+    // o deixou em vez de continuar remando parado.
+    if (swimming) this.phase = (this.phase + (speed * dt) / SWIM_CLIP.distance) % 1;
+  }
+
+  reset(): void {
+    this.phase = 0;
+    this.weight = 0;
+    this.stroke = 0;
+    this.speed = 0;
   }
 }
 

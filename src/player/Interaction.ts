@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { InputBit, held as isHeld, pressed, type InputFrame } from '../core/InputFrame';
 import { clamp, clamp01 } from '../core/MathUtils';
 import type { Ship } from '../ship/Ship';
+import { boardingLadderForSide, boardingLadderPoint } from '../ship/BoardingLadder';
 import { DECK_Y, STATIONS, tToZ } from '../ship/ShipDimensions';
 import {
   BILGE_PUMP,
@@ -50,8 +51,14 @@ export interface Interactable {
    *
    * É a checagem barata que substitui o raycast que este arquivo faz questão de
    * não ter: o navio só tem dois pavimentos, e nenhuma peça pertence aos dois.
+   *
+   * **O mar é o terceiro**, e ele existe pela mesma razão que os outros dois, com
+   * o sinal trocado: quem está boiando na popa fica a menos de dois metros do
+   * timão, com o cone aberto e o prompt aceso — e assumiria o leme de dentro do
+   * oceano. Um pavimento próprio faz essa classe inteira de defeito ser
+   * impossível, em vez de exigir uma guarda em cada peça do navio.
    */
-  readonly level: 'deck' | 'hold';
+  readonly level: 'deck' | 'hold' | 'water';
   /**
    * Texto do prompt agora. `null` esconde a peça — é assim que o canhão some da
    * lista quando o jogador já está em outro canhão.
@@ -232,7 +239,7 @@ export class Interaction {
   }
 
   private findFocus(player: PlayerController): Interactable | null {
-    const level = player.inHold ? 'hold' : 'deck';
+    const level = player.inWater ? 'water' : player.inHold ? 'hold' : 'deck';
     _inverseEye.copy(player.eyeQuaternion).invert();
 
     let best: Interactable | null = null;
@@ -403,6 +410,72 @@ export function createShipInteractables(ship: Ship, player: PlayerController): I
     press: () => player.grabMastLadder(),
   };
   items.push(ladderItem);
+
+  // As duas peças do mar. Vivem no pavimento `'water'`, o que já as esconde de
+  // quem está a bordo e esconde o navio inteiro de quem está na água — ver
+  // `Interactable.level`.
+  //
+  // A escada de embarque é **uma entrada que se muda de bordo**, e não duas: quem
+  // está na água só pode alcançar a do próprio lado do casco, então a segunda
+  // nunca teria como estar em foco. É a mesma economia dos rombos, logo abaixo.
+  const ladderPoint = new THREE.Vector3();
+  const boardingItem: Interactable = {
+    id: 'boarding-ladder',
+    local: ladderPoint,
+    // Da posição do olho de quem boia até a barra: são ~0,9 m na vertical (o olho
+    // fica 22 cm acima da superfície, o alvo 40 cm abaixo dela) mais o alcance de
+    // 1,5 m no plano da água. 2,4 m cobre a diagonal com folga, e continua sendo o
+    // alcance padrão das peças do navio.
+    range: 2.4,
+    level: 'water',
+    refresh: (p) => {
+      const spec = boardingLadderForSide(p.local.x);
+      // O alvo é a barra logo **acima** da linha d'água, e não a barra mais funda:
+      // é para ela que um nadador olha, e é ela que está desenhada fora do mar.
+      boardingLadderPoint(spec, 0.4, ladderPoint);
+    },
+    // Quem decide se dá para agarrar é o controlador, que é quem sabe o alcance da
+    // mão e onde o corpo ficaria pendurado. Aqui só se pergunta.
+    label: () => (player.reachableBoardingLadder() ? 'Climb aboard' : null),
+    press: () => {
+      const spec = player.reachableBoardingLadder();
+      if (spec) player.grabBoardingLadder(spec);
+    },
+  };
+  items.push(boardingItem);
+
+  // O resgate. É a única peça do jogo que **não é uma peça**: não há para onde
+  // apontar, porque a decisão não mora em lugar nenhum do mundo — o navio está
+  // longe e é justamente por isso que se pede socorro.
+  //
+  // O Nicolas pediu "um botão para clicar"; o jogo roda com o ponteiro travado, e
+  // um botão de tela ali significaria destravar o mouse no meio da partida. A
+  // tradução é esta: o mesmo prompt de ação de todo o resto, com a mesma tecla.
+  const rescueItem: Interactable = {
+    id: 'rescue',
+    local: new THREE.Vector3(),
+    range: 2,
+    level: 'water',
+    refresh: (p) => {
+      // O alvo acompanha o olhar, um metro à frente do olho: assim ele está sempre
+      // dentro do cone e dentro do alcance, e o prompt aparece por **estar na água
+      // há tempo bastante**, que é a única condição que existe. Fixá-lo no casco
+      // faria o socorro depender de o nadador estar olhando para um navio que já
+      // desapareceu no horizonte.
+      _aim.set(0, 0, -1).applyQuaternion(p.eyeQuaternion);
+      rescueItem.local.copy(p.eyeLocal).addScaledVector(_aim, 1);
+    },
+    // **A escada ganha do resgate**, e não é questão de pontuação: subir por si
+    // mesmo é sempre melhor que a tela preta, e um alvo colado no centro da vista
+    // venceria o da escada em qualquer disputa de mira. Some enquanto houver barra
+    // ao alcance.
+    label: () =>
+      player.canRequestRescue() && !player.reachableBoardingLadder()
+        ? 'Signal for a rope'
+        : null,
+    press: () => player.requestRescue(),
+  };
+  items.push(rescueItem);
 
   // Rombos: uma entrada só, que se muda para o buraco mais próximo. São até 24
   // ao mesmo tempo e nascem em posições imprevisíveis — cadastrar um item por

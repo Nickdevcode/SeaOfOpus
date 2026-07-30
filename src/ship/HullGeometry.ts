@@ -35,8 +35,10 @@ import {
   sectionHalfWidth,
   sectionV,
   tToZ,
+  zToT,
   type HullSection,
 } from './ShipDimensions';
+import { BOARDING_LADDERS, BOARDING_RUNG_RADIUS } from './BoardingLadder';
 
 /** Estações longitudinais da malha. 72 dá ~22 cm entre balizas — a curva fica lisa. */
 const LENGTH_SEGMENTS = 72;
@@ -76,6 +78,53 @@ const FLOOR_OVERLAP = 0.16;
  * a um palmo do forro. Com ela, a borda morre enfiada na madeira do costado.
  */
 const CEILING_OUTSET = 0.09;
+
+// -- o portaló ---------------------------------------------------------------
+//
+// O vão na amurada por onde se pula no mar, um por bordo, logo acima da escada
+// de embarque. Ele não é uma peça: é um **buraco**, e por isso mora aqui e não
+// em `ShipParts` — quem tem de deixar de existir é o costado, o forro e a capa.
+//
+// A faixa é a mesma nos dois bordos (a escada é simétrica), então o `t` sai uma
+// vez só. `BoardingLadder` é a fonte: mudar a estação da escada lá move o vão
+// aqui, e é isso que impede a escada de subir para uma amurada fechada.
+
+const GANGWAY_SPEC = BOARDING_LADDERS[0]!;
+/** Borda de ré do vão (menor `t`, maior Z) e borda de vante (maior `t`). */
+const GANGWAY_T_FROM = zToT(GANGWAY_SPEC.z + GANGWAY_SPEC.gangwayHalfWidth);
+const GANGWAY_T_TO = zToT(GANGWAY_SPEC.z - GANGWAY_SPEC.gangwayHalfWidth);
+
+/**
+ * Quanto o **forro** é cortado abaixo do costado, no vão.
+ *
+ * Os dois não podem ser cortados na mesma linha, e a razão é a de sempre neste
+ * casco: o forro é deslocado ao longo da normal, não na horizontal. Na amurada
+ * de popa a normal aponta ligeiramente para baixo (n·y = −0,07), então o ponto
+ * do forro na mesma estação `v` do costado sai **9 mm mais alto** — cortar os
+ * dois em `v` igual deixaria um friso de forro atravessado no meio do piso do
+ * portaló, do lado de dentro. Dois centímetros de sobra põem o fio do forro em
+ * y ≈ 1,729: abaixo do piso e dentro da espessura da soleira, que o cobre.
+ */
+const GANGWAY_LINER_DROP = 0.02;
+
+/** Espessura da soleira do portaló. Cabe dentro de `DECK_THICKNESS` de propósito:
+ *  a ponta de dentro dela morre embutida no próprio convés. */
+const GANGWAY_SILL_THICKNESS = 0.05;
+
+/** `true` quando a estação cai dentro do vão, nos dois bordos. */
+function inGangway(t: number): boolean {
+  return t > GANGWAY_T_FROM && t < GANGWAY_T_TO;
+}
+
+/** `v` em que o **costado** morre no vão: a linha do piso do tombadilho. */
+function gangwaySillV(t: number): number {
+  return sectionV(sampleSection(t, sectionScratchB), QUARTERDECK_Y);
+}
+
+/** `v` em que o **forro** morre no vão — ver `GANGWAY_LINER_DROP`. */
+function gangwayLinerV(t: number): number {
+  return sectionV(sampleSection(t, sectionScratchB), QUARTERDECK_Y - GANGWAY_LINER_DROP);
+}
 
 const sectionScratchB: HullSection = { halfBeam: 0, keelY: 0, sheerY: 0, fullness: 1 };
 
@@ -126,6 +175,7 @@ export function buildHullGeometry(): HullGeometrySet {
   buildInnerShell(interior);
   buildHoldFloor(interior);
   buildCapRail(deck);
+  buildGangways(deck);
   buildDeck(deck, interior);
   buildQuarterdeck(deck, interior);
   buildHatchCoaming(deck);
@@ -150,14 +200,38 @@ export function buildHullGeometry(): HullGeometrySet {
  * entre duas superfícies — e o madeirame da quilha cobre a costura.
  */
 function buildShell(builder: GeometryBuilder): void {
+  // Não é mais uma varredura só por causa do portaló: as bordas do vão entram
+  // como estações explícitas (senão o corte nasceria serrilhado no passo da
+  // malha) e as faixas de dentro dele param na linha do piso.
+  const rows = deckRows(0, 1, LENGTH_SEGMENTS, [GANGWAY_T_FROM, GANGWAY_T_TO]);
+
   for (const side of [1, -1]) {
-    builder.addSurface(
-      LENGTH_SEGMENTS,
-      GIRTH_SEGMENTS,
-      (s, v) => hullVertex(s, v, side, 0),
-      side > 0,
-    );
+    for (let i = 0; i < rows.length - 1; i++) {
+      const tA = rows[i]!;
+      const tB = rows[i + 1]!;
+      const cut = inGangway((tA + tB) * 0.5);
+      builder.addStrip(girthRow(tA, side, cut), girthRow(tB, side, cut), side > 0);
+    }
   }
+}
+
+/**
+ * Uma fileira da quilha à borda, opcionalmente decepada na soleira do portaló.
+ *
+ * O corte é um **grampeamento** de `v`, e não uma fileira mais curta: assim os
+ * vértices abaixo da soleira caem exatamente nos mesmos `v` da faixa vizinha
+ * intacta, e as duas se encontram sem fresta. O que sobra acima do grampo são
+ * quadriláteros de área zero, que o `GeometryBuilder` já descarta sozinho na hora
+ * de somar as normais — é o preço, barato, de não ter duas amostragens diferentes
+ * da mesma curva encostando uma na outra.
+ */
+function girthRow(t: number, side: number, cut: boolean): Vertex[] {
+  const maxV = cut ? gangwaySillV(t) : 1;
+  const row: Vertex[] = [];
+  for (let j = 0; j <= GIRTH_SEGMENTS; j++) {
+    row.push(hullVertex(t, Math.min(j / GIRTH_SEGMENTS, maxV), side, 0));
+  }
+  return row;
 }
 
 /**
@@ -224,25 +298,38 @@ function buildTransom(outer: GeometryBuilder, inner: GeometryBuilder): void {
  * separando o que se vê de pé no convés do que se vê descendo pela escotilha.
  */
 function buildInnerShell(builder: GeometryBuilder): void {
+  const rows = deckRows(SHELL_T_FROM, SHELL_T_TO, LENGTH_SEGMENTS, [
+    GANGWAY_T_FROM,
+    GANGWAY_T_TO,
+  ]);
+
   for (const side of [1, -1]) {
-    builder.addSurface(
-      LENGTH_SEGMENTS,
-      GIRTH_SEGMENTS,
-      (s, w) => {
-        const t = SHELL_T_FROM + s * (SHELL_T_TO - SHELL_T_FROM);
-        const section = sampleSection(t, sectionScratchB);
-        // O piso do porão sobe acima da quilha no meio do navio e a alcança nas
-        // pontas; abaixo dele não há forro para desenhar. Começar um palmo
-        // *abaixo* dele é de propósito: o assoalho pousa por cima do forro, como
-        // numa embarcação de verdade, e a junta some debaixo da tábua em vez de
-        // depender de dois cálculos independentes baterem no milímetro.
-        const vFloor = Math.max(sectionV(section, HOLD_FLOOR_Y - FLOOR_OVERLAP), 0);
-        const v = vFloor + (1 - vFloor) * w;
-        return hullVertex(t, v, side, -HULL_THICKNESS);
-      },
-      side < 0,
-    );
+    for (let i = 0; i < rows.length - 1; i++) {
+      const tA = rows[i]!;
+      const tB = rows[i + 1]!;
+      const cut = inGangway((tA + tB) * 0.5);
+      builder.addStrip(innerRow(tA, side, cut), innerRow(tB, side, cut), side < 0);
+    }
   }
+}
+
+/** Uma fileira do forro, com o mesmo grampeamento de `girthRow` no portaló. */
+function innerRow(t: number, side: number, cut: boolean): Vertex[] {
+  const section = sampleSection(t, sectionScratchB);
+  // O piso do porão sobe acima da quilha no meio do navio e a alcança nas
+  // pontas; abaixo dele não há forro para desenhar. Começar um palmo *abaixo*
+  // dele é de propósito: o assoalho pousa por cima do forro, como numa
+  // embarcação de verdade, e a junta some debaixo da tábua em vez de depender de
+  // dois cálculos independentes baterem no milímetro.
+  const vFloor = Math.max(sectionV(section, HOLD_FLOOR_Y - FLOOR_OVERLAP), 0);
+  const maxV = cut ? gangwayLinerV(t) : 1;
+
+  const row: Vertex[] = [];
+  for (let j = 0; j <= GIRTH_SEGMENTS; j++) {
+    const v = vFloor + (1 - vFloor) * (j / GIRTH_SEGMENTS);
+    row.push(hullVertex(t, Math.min(v, maxV), side, -HULL_THICKNESS));
+  }
+  return row;
 }
 
 /**
@@ -292,37 +379,63 @@ function buildHoldFloor(builder: GeometryBuilder): void {
  * tempo todo rente a ela — então ela ganha o carvalho claro do convés em vez do
  * alcatrão do costado, que é o que a Rare faz na Chalupa.
  */
+/**
+ * A capa **desce** um pouco pelas duas faces em vez de pousar em cima delas.
+ *
+ * A versão anterior era uma tira plana no topo exato da amurada, subida 12 mm
+ * para não brigar em profundidade com o costado. Esses 12 mm eram uma fenda
+ * aberta em toda a volta do navio, dos dois lados — e o convés é justamente onde
+ * o jogador encosta o nariz na amurada. Descendo 2,5 cm por fora e por dentro a
+ * peça abraça a quina, cobre a costura em vez de pairar sobre ela, e ainda ganha
+ * a espessura que uma tábua de capa realmente tem.
+ */
+const CAP_RAIL_DROP = 0.025;
+
+/**
+ * Um ponto da capa da amurada. `w` atravessa a peça: 0 na saia externa, 0,5 no
+ * topo, 1 na saia interna.
+ *
+ * Está numa função própria porque o batente do portaló precisa terminar
+ * **exatamente** neste perfil. A capa é interrompida no vão, e o corte da
+ * amurada aparece por baixo dela: se o batente parasse na linha reta do topo do
+ * costado, sobraria 1,4 cm de fresta sob a coroa da capa no meio da peça e 1,1 cm
+ * de aba sobrando na quina de fora. Lendo o mesmo perfil, as duas peças se
+ * encontram no fio por construção.
+ */
+function capRailVertex(t: number, w: number, side: number): Vertex {
+  const across = Math.min(w, 1 - w) * 2;
+  const point = hullVertex(t, 1, side, -w * HULL_THICKNESS);
+  return vertex(
+    point.x,
+    // Sobe no meio e desce nas duas bordas: um perfil de tampo arredondado.
+    point.y + 0.014 - CAP_RAIL_DROP * (1 - across),
+    point.z,
+    (t * HULL_LENGTH) / DECK_PLANK_TILE,
+    (w * HULL_THICKNESS * side) / DECK_BAND_TILE,
+  );
+}
+
+/** Divisões da capa na travessia. O batente do portaló usa as mesmas. */
+const CAP_RAIL_SEGMENTS = 6;
+
+function capRailRow(t: number, side: number): Vertex[] {
+  const row: Vertex[] = [];
+  for (let j = 0; j <= CAP_RAIL_SEGMENTS; j++) row.push(capRailVertex(t, j / CAP_RAIL_SEGMENTS, side));
+  return row;
+}
+
 function buildCapRail(builder: GeometryBuilder): void {
-  // A capa **desce** um pouco pelas duas faces em vez de pousar em cima delas.
-  //
-  // A versão anterior era uma tira plana no topo exato da amurada, subida 12 mm
-  // para não brigar em profundidade com o costado. Esses 12 mm eram uma fenda
-  // aberta em toda a volta do navio, dos dois lados — e o convés é justamente
-  // onde o jogador encosta o nariz na amurada. Descendo 2,5 cm por fora e por
-  // dentro a peça abraça a quina, cobre a costura em vez de pairar sobre ela, e
-  // ainda ganha a espessura que uma tábua de capa realmente tem.
-  const drop = 0.025;
+  // Interrompida no portaló: é a capa que faz a amurada ser um muro, e deixá-la
+  // passar por cima do vão daria uma janela em vez de uma saída.
+  const rows = deckRows(0.004, 0.996, LENGTH_SEGMENTS, [GANGWAY_T_FROM, GANGWAY_T_TO]);
 
   for (const side of [1, -1]) {
-    builder.addSurface(
-      LENGTH_SEGMENTS,
-      6,
-      (s, w) => {
-        const t = 0.004 + s * 0.992;
-        // `w` atravessa a peça: 0 na saia externa, 0,5 no topo, 1 na saia interna.
-        const across = Math.min(w, 1 - w) * 2;
-        const point = hullVertex(t, 1, side, -w * HULL_THICKNESS);
-        return vertex(
-          point.x,
-          // Sobe no meio e desce nas duas bordas: um perfil de tampo arredondado.
-          point.y + 0.014 - drop * (1 - across),
-          point.z,
-          (t * HULL_LENGTH) / DECK_PLANK_TILE,
-          (w * HULL_THICKNESS * side) / DECK_BAND_TILE,
-        );
-      },
-      side > 0,
-    );
+    for (let i = 0; i < rows.length - 1; i++) {
+      const tA = rows[i]!;
+      const tB = rows[i + 1]!;
+      if (inGangway((tA + tB) * 0.5)) continue;
+      builder.addStrip(capRailRow(tA, side), capRailRow(tB, side), side > 0);
+    }
   }
 
   // Painel de popa: sem esta tampa a amurada morre numa aresta de 13 cm de
@@ -340,13 +453,76 @@ function buildCapRail(builder: GeometryBuilder): void {
   for (let i = 0; i <= columns; i++) {
     const u = (i / columns) * 2 - 1;
     outerRow.push(
-      vertex(u * outerHalf, top - drop, zOuter, (u * outerHalf) / DECK_BAND_TILE, 0),
+      vertex(u * outerHalf, top - CAP_RAIL_DROP, zOuter, (u * outerHalf) / DECK_BAND_TILE, 0),
     );
     innerRow.push(
       vertex(u * innerHalf, top + 0.014, zInner, (u * innerHalf) / DECK_BAND_TILE, 0.4),
     );
   }
   builder.addStrip(outerRow, innerRow, true);
+}
+
+/**
+ * Os dois portalós: os batentes que fecham o corte da amurada e a soleira.
+ *
+ * **Aqui é onde a lição da gávea e a do convés se pagam.** O costado, o forro e
+ * a capa são superfícies de face única: recortá-los deixa a amurada com 13 cm de
+ * espessura escancarados, e madeira de face única não existe vista de lado —
+ * pelo vão apareceria o mar através da própria parede. As duas faces do corte
+ * precisam ser desenhadas, e é o que os batentes são: uma tira ligando o costado
+ * ao forro em cada borda do vão, do fio da soleira ao perfil da capa.
+ *
+ * A soleira é uma peça só de propósito, e vai do convés até o pé da escada de
+ * embarque. Seriam naturalmente duas — a que tampa a espessura da amurada e a
+ * plataforma que atravessa os 18 cm entre o costado e a escada —, mas duas peças
+ * de piso na mesma altura encostadas no fio piscam uma contra a outra em
+ * profundidade. Uma tábua só não tem junta, e ainda é a coisa certa a bordo: o
+ * portaló de um navio tem uma plataforma, senão o primeiro passo de quem embarca
+ * é no vazio.
+ */
+function buildGangways(builder: GeometryBuilder): void {
+  for (const spec of BOARDING_LADDERS) {
+    const { side } = spec;
+
+    for (const isFore of [false, true]) {
+      const t = isFore ? GANGWAY_T_TO : GANGWAY_T_FROM;
+      // O batente nasce na linha do **forro**, e não na do costado: ele é a mais
+      // baixa das duas (ver `GANGWAY_LINER_DROP`), e começar na outra deixaria
+      // 2 cm de forro sem batente na quina de dentro. A sobra some sob a soleira.
+      const vLow = gangwayLinerV(t);
+      builder.addSurface(
+        1,
+        CAP_RAIL_SEGMENTS,
+        (w, k) =>
+          k >= 1
+            ? capRailVertex(t, w, side)
+            : hullVertex(t, vLow + (1 - vLow) * k, side, -w * HULL_THICKNESS),
+        // A face olha para dentro do vão: para vante na borda de ré e vice-versa.
+        isFore ? side < 0 : side > 0,
+      );
+    }
+
+    // Soleira. Mais comprida que o vão nas duas pontas para as faces de topo
+    // morrerem dentro da amurada em vez de encostarem no plano dos batentes; o
+    // que sobra para fora do costado é a lateral da plataforma, que é peça vista.
+    const xIn = Math.min(deckEdgeHalfWidth(GANGWAY_T_FROM), deckEdgeHalfWidth(GANGWAY_T_TO)) - 0.05;
+    // Para no fio de dentro da barra de topo da escada: a barra sobra 2,6 cm
+    // acima da tábua e vira o focinho do degrau, que é o que se vê num portaló.
+    const xOut = spec.topX - BOARDING_RUNG_RADIUS;
+    builder.addBox(
+      {
+        x: side * (xIn + xOut) * 0.5,
+        y: QUARTERDECK_Y - GANGWAY_SILL_THICKNESS * 0.5,
+        z: spec.z,
+      },
+      {
+        x: xOut - xIn,
+        y: GANGWAY_SILL_THICKNESS,
+        z: (spec.gangwayHalfWidth + 0.02) * 2,
+      },
+      1 / DECK_BAND_TILE,
+    );
+  }
 }
 
 /**
@@ -687,10 +863,31 @@ function buildBackbone(builder: GeometryBuilder): void {
  * lisa do costado e dão à silhueta a linha de tosadura que se lê de longe, que é
  * o que faz a Chalupa parecer a Chalupa mesmo a duzentos metros.
  */
+/**
+ * Os dois cintados se interrompem no vão do portaló, e não é enfeite: é o que
+ * deixa a escada de embarque existir.
+ *
+ * O de baixo (y = 1,02) avança 5,5 cm da madeira e passa **por trás** do plano
+ * dos degraus — na estação do montante de vante ele chega a 1,84 m contra os
+ * 1,85 m do montante, ou seja, um centímetro de folga para uma peça de 4 cm de
+ * raio. Aumentar o recuo da escada custaria os 5,5 cm inteiros em distância do
+ * costado (ver `BOARDING_LADDER_CLEARANCE`); interromper o cintado custa uma
+ * falha de 84 cm que um portaló de verdade tem de qualquer forma. É o mesmo
+ * recurso da braçola da escotilha, aberta a ré para a escada do porão subir.
+ *
+ * O de cima (y = 1,92) cai dentro do vão pelo mesmo motivo geométrico e por um
+ * mais óbvio: com o costado recortado ali, ele ficaria atravessado no meio da
+ * porta, pendurado em nada.
+ *
+ * As pontas do corte são **tampadas**. O cintado é uma varredura de seção
+ * fechada, ou seja, um tubo: cortá-lo sem tampa deixaria dois furos por onde se
+ * vê o avesso da peça — a mesma armadilha da face única, agora numa peça sólida.
+ */
 function buildWales(builder: GeometryBuilder): void {
   const steps = 56;
   const height = 0.19;
   const stand = 0.055;
+  const rows = deckRows(0.01, 0.975, steps, [GANGWAY_T_FROM, GANGWAY_T_TO]);
 
   for (const waleY of WALE_HEIGHTS) {
     for (const side of [1, -1]) {
@@ -718,12 +915,22 @@ function buildWales(builder: GeometryBuilder): void {
         return row;
       };
 
-      let previous = ringAt(0.01);
-      for (let i = 1; i <= steps; i++) {
-        const t = 0.01 + (i / steps) * 0.965;
-        const row = ringAt(t);
-        builder.addStrip(previous, row, side > 0);
-        previous = row;
+      for (let i = 0; i < rows.length - 1; i++) {
+        const tA = rows[i]!;
+        const tB = rows[i + 1]!;
+        if (inGangway((tA + tB) * 0.5)) continue;
+        builder.addStrip(ringAt(tA), ringAt(tB), side > 0);
+      }
+
+      // As tampas das duas pontas do corte. A ordem direta dos quatro cantos dá
+      // a normal para +Z a boreste e para −Z a bombordo (o percurso do perfil se
+      // espelha junto com o casco), e cada ponta tem de olhar para fora do
+      // pedaço que sobrou — daí a comparação entre o bordo e qual das pontas é.
+      for (const isFore of [false, true]) {
+        const corners = ringAt(isFore ? GANGWAY_T_TO : GANGWAY_T_FROM);
+        const [a, b, c, d] = corners as [Vertex, Vertex, Vertex, Vertex];
+        if (isFore === (side > 0)) builder.addQuad(a, b, c, d);
+        else builder.addQuad(d, c, b, a);
       }
     }
   }

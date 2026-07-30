@@ -495,9 +495,12 @@ export class Match {
 
     // 2. Quem comanda, antes dos navios que eles comandam. Timão, pontaria e
     //    gatilho deste passo têm de valer neste passo, e não no seguinte.
-    this.crew[0].fixedUpdate(dt, inputs.player);
-    if (inputs.enemy) this.crew[1].fixedUpdate(dt, inputs.enemy);
+    this.crew[0].fixedUpdate(dt, inputs.player, waves);
+    if (inputs.enemy) this.crew[1].fixedUpdate(dt, inputs.enemy, waves);
     else this.ai?.fixedUpdate(dt, this.playerShip, waves);
+    // Logo depois deles, enquanto o respingo ainda é deste passo. Ver
+    // `PlayerController.splashSpeed`.
+    this.drainSplashes();
 
     // 3. Os navios.
     for (const ship of this.ships) {
@@ -599,7 +602,14 @@ export class Match {
     this.tick++;
     this.stats.duration += dt;
 
-    this.crew[0].fixedUpdate(dt, frame);
+    const waves = this.environment.waveField;
+    this.crew[0].fixedUpdate(dt, frame, waves);
+    // ⚠️ **O respingo do próprio tombo é descartado aqui**, pela mesma razão que a
+    // fila de tiros logo abaixo: o host anuncia esse evento no instantâneo, e
+    // levantar a coluna d'água dos dois lados daria dois respingos no mesmo ponto.
+    // O preço é o respingo aparecer meia ida-e-volta depois do salto; a alternativa
+    // é ele aparecer duas vezes.
+    this.crew[0].controller.splashSpeed = 0;
 
     // ⚠️ **Depois do marujo, e é o que faz o timão funcionar deste lado.** Ele
     // acabou de escrever `controls.wheel`; sem alguém integrando esse comando, a
@@ -610,7 +620,6 @@ export class Match {
     // dele fica em zero aqui), e a pose autoritativa dele é escrita logo em
     // seguida por `GuestSession.applyShipParts`, que roda depois deste método e
     // ganha de qualquer coisa que se tenha calculado.
-    const waves = this.environment.waveField;
     for (const ship of this.ships) ship.fixedUpdateRemote(dt, waves);
 
     for (const ship of this.ships) ship.pendingShots.length = 0;
@@ -624,6 +633,29 @@ export class Match {
     // de fim de quem não simula mostrava quatro zeros — o duelo inteiro sem
     // número nenhum.
     this.countNewBreaches();
+  }
+
+  /**
+   * Transforma um marujo caindo no mar no **mesmo** evento de respingo da bala.
+   *
+   * Reaproveitar o evento em vez de inventar um segundo é o que faz o tombo já
+   * chegar pronto: `Effects.waterSplash` levanta a coluna d'água, `GameAudio.splash`
+   * toca, e o instantâneo carrega o evento para o outro lado sem um byte novo — o
+   * adversário vê o respingo de quem caiu porque ele já sabia ver respingo.
+   *
+   * Percorre os **dois** marujos porque no host os dois são simulados aqui.
+   */
+  private drainSplashes(): void {
+    for (const crewman of this.crew) {
+      const controller = crewman.controller;
+      if (controller.splashSpeed <= 0) continue;
+      this.events.push({
+        kind: 'splash',
+        position: controller.splashAt.clone(),
+        speed: controller.splashSpeed,
+      });
+      controller.splashSpeed = 0;
+    }
   }
 
   /**
