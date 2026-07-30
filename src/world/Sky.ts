@@ -1,55 +1,54 @@
 /**
- * Céu: LUT atmosférica + domo + sol, lua, estrelas e nuvens.
+ * The sky: atmospheric LUT + dome + sun, moon, stars and clouds.
  *
- * O espalhamento atmosférico é caro demais para rodar por pixel de tela, então
- * ele é avaliado numa LUT equirretangular 256×128 e só quando o sol se move o
- * suficiente para importar. O domo do céu e o reflexo do oceano amostram essa
- * mesma LUT — é isso que faz o mar refletir exatamente o céu que está acima
- * dele, inclusive durante o poente.
+ * Atmospheric scattering is far too expensive to run per screen pixel, so it is evaluated
+ * into a 256×128 equirectangular LUT and only when the sun has moved enough to matter.
+ * The sky dome and the ocean's reflection sample that same LUT — that is what makes the
+ * sea reflect exactly the sky above it, sunset included.
  *
- * As nuvens são projetadas num plano alto com fBm animado, sem raymarch. É a
- * mesma escolha que a Rare fez em Sea of Thieves: nuvem barata, com silhueta
- * dirigida pela arte, em vez de volume fisicamente correto e lento.
+ * The clouds are projected onto a high plane with animated fBm, with no raymarch. It is
+ * the same choice Rare made in Sea of Thieves: a cheap cloud, with an art-directed
+ * silhouette, instead of a physically correct and slow volume.
  */
 
 import * as THREE from 'three';
 import { ATMOSPHERE_GLSL, EQUIRECT_GLSL } from '../shaders/atmosphere';
 import { NOISE_GLSL } from '../shaders/noise';
 
-// 0.35° por texel na vertical. Parece exagero para um gradiente suave, mas o
-// mar amostra a LUT em ângulos rasantes, onde a cor muda depressa: com 128
-// linhas a interpolação linear desenhava faixas de Mach visíveis nas ondas.
+// 0.35° per texel vertically. It looks like overkill for a smooth gradient, but the sea
+// samples the LUT at grazing angles, where the color changes fast: with 128 rows the
+// linear interpolation drew Mach bands visible on the waves.
 const LUT_WIDTH = 1024;
 const LUT_HEIGHT = 512;
-/** Ângulo mínimo (radianos) que o sol precisa andar para recomputar a LUT. */
+/** Minimum angle (radians) the sun has to travel before the LUT is recomputed. */
 const LUT_UPDATE_THRESHOLD = 0.004;
 
-/** Raio do domo. Fica dentro do far plane da câmera. */
+/** The dome's radius. It stays inside the camera's far plane. */
 const DOME_RADIUS = 9000;
 
 /**
- * Intensidade da lua cheia na LUT, na mesma escala do sol (que vai a 22).
- * Calibrada no olho: ver `update` para o porquê de não ser o valor físico.
+ * Intensity of the full moon in the LUT, on the same scale as the sun (which goes to 22).
+ * Calibrated by eye: see `update` for why it is not the physical value.
  */
 const MOON_INTENSITY = 0.26;
 
 export class Sky {
   readonly dome: THREE.Mesh;
-  /** Malha pequena na direção do sol — alvo do efeito de god rays. */
+  /** A small mesh in the sun's direction — the god rays effect's target. */
   readonly sunMesh: THREE.Mesh;
 
-  /** Textura equirretangular do céu, consumida pelo shader do oceano. */
+  /** The sky's equirectangular texture, consumed by the ocean's shader. */
   get lutTexture(): THREE.Texture {
     return this.lutTarget.texture;
   }
 
   /**
-   * Quantas vezes a LUT já foi redesenhada.
+   * How many times the LUT has been redrawn.
    *
-   * A textura é sempre a mesma instância, então nada em volta consegue perceber
-   * que o conteúdo mudou. Quem tem trabalho caro a refazer a partir dela — o
-   * `SkyEnvironment` e sua cadeia de mips — compara este número com o que viu da
-   * última vez em vez de refazer tudo a cada frame por precaução.
+   * The texture is always the same instance, so nothing around it can tell the content
+   * changed. Whoever has expensive work to redo from it — `SkyEnvironment` and its mip
+   * chain — compares this number against what it saw last time instead of redoing
+   * everything every frame just in case.
    */
   lutGeneration = 0;
 
@@ -65,8 +64,8 @@ export class Sky {
 
   constructor() {
     this.lutTarget = new THREE.WebGLRenderTarget(LUT_WIDTH, LUT_HEIGHT, {
-      // HalfFloat: o céu tem faixa dinâmica alta (sol x zênite) e 8 bits
-      // produziria banding grosseiro no gradiente do poente.
+      // HalfFloat: the sky has a high dynamic range (sun vs. zenith) and 8 bits would
+      // produce coarse banding in the sunset's gradient.
       type: THREE.HalfFloatType,
       format: THREE.RGBAFormat,
       minFilter: THREE.LinearFilter,
@@ -108,12 +107,12 @@ export class Sky {
           vec3 dir = equirectToDirection(vUv);
           vec3 color = nightGlow(dir) * uNightFactor;
 
-          // A lua ilumina o céu pela mesma física do sol — é luz solar refletida
-          // atravessando o mesmo ar. Rodar o espalhamento duas vezes dobraria o
-          // custo da LUT se as duas fontes coexistissem, mas elas mal se
-          // cruzam: fora da meia hora de crepúsculo, uma das duas intensidades é
-          // exatamente zero. E como o teste é sobre uniform, a GPU decide o
-          // desvio uma vez para a textura inteira, sem divergência.
+          // The moon lights the sky by the same physics as the sun — it is reflected
+          // sunlight crossing the same air. Running the scattering twice would double
+          // the LUT's cost if the two sources coexisted, but they barely overlap:
+          // outside the half hour of twilight, one of the two intensities is exactly
+          // zero. And since the test is on a uniform, the GPU decides the branch once
+          // for the whole texture, with no divergence.
           if (uSunIntensity > 0.0) {
             color += atmosphere(dir, uSunDirection, uSunIntensity);
           }
@@ -135,11 +134,10 @@ export class Sky {
     this.domeMaterial = this.createDomeMaterial();
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(DOME_RADIUS, 64, 32), this.domeMaterial);
     this.dome.frustumCulled = false;
-    // O domo desenha por último entre os opacos, sem escrever profundidade: o
-    // teste de Z já descarta cada pixel coberto pelo mar ou pelo navio. Isso
-    // importa muito aqui, porque o fragment do céu é caro (nuvens em fBm e
-    // estrelas) e desenhá-lo primeiro significaria pagar a tela inteira para
-    // depois cobrir metade dela.
+    // The dome draws last among the opaques, without writing depth: the Z test already
+    // discards every pixel covered by the sea or the ship. That matters a lot here,
+    // because the sky's fragment is expensive (fBm clouds and stars) and drawing it first
+    // would mean paying for the whole screen and then covering half of it.
     this.dome.renderOrder = 1000;
     this.dome.matrixAutoUpdate = false;
 
@@ -147,11 +145,11 @@ export class Sky {
       fog: false,
       transparent: true,
       depthWrite: false,
-      // Aditivo, e não substituição: o halo de Mie em volta do sol é HDR (dezenas
-      // de vezes o branco), então um disco em cor LDR desenhado por cima dele
-      // vira um buraco escuro no meio do sol depois do tone mapping. Somando, o
-      // disco só pode clarear o que já está lá. A cor vem de `update`, em
-      // radiância bem acima de 1 — é ela que alimenta o bloom.
+      // Additive, and not replacement: the Mie halo around the sun is HDR (tens of times
+      // white), so an LDR-colored disc drawn over it becomes a dark hole in the middle of
+      // the sun after tone mapping. By adding, the disc can only brighten what is already
+      // there. The color comes from `update`, in radiance well above 1 — it is what feeds
+      // the bloom.
       blending: THREE.AdditiveBlending,
     });
     this.sunMesh = new THREE.Mesh(new THREE.SphereGeometry(90, 16, 12), this.sunMaterial);
@@ -180,8 +178,8 @@ export class Sky {
         varying vec3 vDirection;
         void main() {
           vDirection = normalize(position);
-          // A projeção usa apenas a rotação da câmera: o domo acompanha o
-          // jogador sem nunca ser alcançado.
+          // The projection uses only the camera's rotation: the dome follows the player
+          // without ever being reached.
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mvPosition;
         }
@@ -206,20 +204,20 @@ export class Sky {
         ${NOISE_GLSL}
 
         /**
-         * Campo de estrelas procedural: divide a esfera em células e sorteia
-         * uma estrela por célula. Sem geometria, sem textura, e a densidade
-         * acompanha a resolução automaticamente.
+         * A procedural star field: it splits the sphere into cells and draws one star
+         * per cell. No geometry, no texture, and the density follows the resolution
+         * automatically.
          *
-         * O que separa "céu estrelado" de "chuvisco de televisão" não é a
-         * quantidade, é a **distribuição de magnitude**. No céu real cada degrau
-         * de brilho tem cerca de três vezes mais estrelas que o degrau acima
-         * dele: umas poucas dominam a cena e a esmagadora maioria é quase
-         * invisível. Sortear brilho uniforme — que é o erro fácil aqui — produz
-         * milhares de pontinhos idênticos, e o olho lê ruído.
+         * What separates "a starry sky" from "television static" is not the count, it is
+         * the **magnitude distribution**. In the real sky each step of brightness has
+         * about three times more stars than the step above it: a few dominate the scene
+         * and the overwhelming majority is nearly invisible. Drawing brightness
+         * uniformly — which is the easy mistake here — produces thousands of identical
+         * dots, and the eye reads noise.
          */
         vec3 starField(vec3 dir) {
-          // Extinção atmosférica: rasante, a luz da estrela atravessa dezenas de
-          // vezes mais ar. Perto do horizonte só as mais brilhantes sobrevivem.
+          // Atmospheric extinction: at a grazing angle, the star's light crosses tens
+          // of times more air. Near the horizon only the brightest survive.
           float extinction = smoothstep(-0.01, 0.3, dir.y);
           if (extinction <= 0.0) return vec3(0.0);
 
@@ -230,43 +228,44 @@ export class Sky {
             vec3 cell = floor(dir * scale);
             float rnd = hash21(cell.xy + cell.z * 37.0);
 
-            // A densidade cai com a escala porque a contagem de células cresce
-            // com o quadrado dela — sem isso a camada fina afogaria as outras.
+            // The density falls with the scale because the cell count grows with its
+            // square — without this the fine layer would drown the others.
             float density = 0.006 - float(layer) * 0.0015;
             if (rnd > density) continue;
 
-            // Sorteio remapeado para [0,1] e passado pela lei de potência que
-            // faz a distribuição de magnitude.
+            // The draw remapped to [0,1] and put through the power law that makes the
+            // magnitude distribution.
             float magnitude = pow(rnd / density, 6.0);
 
-            // Estrela brilhante ocupa mais pixels: é o próprio olho (e aqui o
-            // bloom) espalhando a luz, não um disco maior no céu.
+            // A bright star takes up more pixels: it is the eye itself (and here the
+            // bloom) spreading the light, not a larger disc in the sky.
             float radius = 0.0011 + magnitude * 0.0020;
             vec3 center = (cell + 0.5) / scale;
             float dist = length(normalize(center) - dir);
             float brightness = smoothstep(radius, 0.0, dist);
             if (brightness <= 0.0) continue;
 
-            // Cintilação: é turbulência do ar, então some no zênite e domina
-            // rasante — exatamente onde a extinção já está comendo o brilho.
+            // Twinkle: it is air turbulence, so it disappears at the zenith and
+            // dominates at grazing angles — exactly where the extinction is already
+            // eating the brightness.
             float flicker = 0.5 + 0.5 * sin(uTime * (1.4 + rnd * 400.0) + rnd * 900.0);
             float twinkle = mix(flicker, 1.0, extinction);
 
-            // Temperatura de cor variando de azulada a alaranjada.
+            // Color temperature ranging from bluish to orange.
             vec3 tint = mix(vec3(0.75, 0.83, 1.0), vec3(1.0, 0.86, 0.7), hash11(rnd * 91.0));
             color += tint * brightness * twinkle * extinction * (0.25 + magnitude * 5.5);
           }
           return color;
         }
 
-        /** Disco lunar com terminador de fase e crateras em ruído. */
+        /** The moon's disc, with a phase terminator and noise craters. */
         vec3 moonDisc(vec3 dir) {
           float cosAngle = dot(dir, uMoonDirection);
           if (cosAngle < 0.9993) return vec3(0.0);
 
           float disc = smoothstep(0.99955, 0.99975, cosAngle);
 
-          // Base local para mapear a superfície do disco.
+          // A local basis to map the disc's surface.
           vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), uMoonDirection));
           vec3 up = cross(uMoonDirection, right);
           vec2 local = vec2(dot(dir, right), dot(dir, up)) * 900.0;
@@ -274,15 +273,15 @@ export class Sky {
           float craters = fbm(vec3(local * 2.4, 0.0), 4, 2.1, 0.55) * 0.5 + 0.5;
           float surface = mix(0.72, 1.0, craters);
 
-          // Terminador: a fase corta o disco com uma borda suave.
+          // The terminator: the phase cuts the disc with a soft edge.
           float terminator = smoothstep(-0.25, 0.25, local.x / 900.0 * 4.0 - (uMoonPhase * 2.0 - 1.0) * 2.2);
 
           return vec3(0.92, 0.94, 1.0) * disc * surface * terminator * 2.4;
         }
 
         /**
-         * Nuvens em camada: o raio é projetado num plano alto e amostrado com
-         * fBm. Duas camadas em velocidades diferentes dão paralaxe sem volume.
+         * Layered clouds: the ray is projected onto a high plane and sampled with fBm.
+         * Two layers at different speeds give parallax without volume.
          */
         vec4 clouds(vec3 dir) {
           if (dir.y < 0.015) return vec4(0.0);
@@ -295,25 +294,26 @@ export class Sky {
           float detail = fbm(vec3(uv * 1.9 + drift * 1.7, uTime * 0.02), 4, 2.3, 0.5);
 
           float density = base * 0.78 + detail * 0.22;
-          // A cobertura empurra o limiar: 0 = céu limpo, 1 = encoberto.
+          // The coverage pushes the threshold: 0 = clear sky, 1 = overcast.
           //
-          // O piso desceu de 0,32 para 0,10 porque 0,32 nunca fechava o céu: no
-          // temporal ainda sobravam rasgos de azul entre as nuvens, e um
-          // temporal com céu aberto no meio não é um temporal. E a transição
-          // aperta junto (de 0,22 para 0,08 de largura) — nuvem de tempestade
-          // tem borda dura, ao contrário do algodão de tarde de verão.
+          // The floor came down from 0.32 to 0.10 because 0.32 never closed the sky: in
+          // a storm there were still rips of blue between the clouds, and a storm with
+          // open sky in the middle is not a storm. And the transition tightens along
+          // with it (from 0.22 to 0.08 of width) — a storm cloud has a hard edge,
+          // unlike a summer afternoon's cotton.
           float threshold = mix(0.72, 0.10, uCloudCoverage);
           float edge = mix(0.22, 0.08, uCloudCoverage);
           float alpha = smoothstep(threshold, threshold + edge, density);
 
-          // Some no horizonte para não revelar a borda do plano projetado.
+          // It fades out at the horizon so as not to reveal the projected plane's
+          // edge.
           alpha *= smoothstep(0.02, 0.2, dir.y);
 
-          // Iluminação barata: o gradiente do próprio ruído aproxima a normal.
+          // Cheap lighting: the noise's own gradient approximates the normal.
           float lit = smoothstep(0.35, 0.85, detail * 0.5 + 0.5);
           float sunAlign = max(dot(dir, uSunDirection), 0.0);
           vec3 color = mix(uCloudShadowColor, uCloudSunColor, lit);
-          // Borda iluminada quando a nuvem está na frente do sol.
+          // A lit rim when the cloud is in front of the sun.
           color += uCloudSunColor * pow(sunAlign, 8.0) * (1.0 - alpha) * 0.9;
 
           return vec4(color, alpha);
@@ -322,30 +322,30 @@ export class Sky {
         void main() {
           vec3 dir = normalize(vDirection);
 
-          // A LUT é amostrada com a direção **espelhada** para cima quando o raio
-          // aponta para baixo do horizonte.
+          // The LUT is sampled with the direction **mirrored** upward when the ray
+          // points below the horizon.
           //
-          // Abaixo da linha do horizonte a integral atmosférica vai a zero e a
-          // LUT devolve preto. Isso não aparecia enquanto a névoa era rala, mas
-          // o mar acaba em 8 km e o horizonte geométrico está em quase 11: entre
-          // os dois há uma faixa em que se vê o domo, e ela se pintava de preto,
-          // costurando uma tarja escura entre a água e o céu na tempestade.
+          // Below the horizon line the atmospheric integral goes to zero and the LUT
+          // returns black. That did not show while the fog was thin, but the sea ends
+          // at 8 km and the geometric horizon is at nearly 11: between the two there is
+          // a band where the dome is visible, and it painted itself black, stitching a
+          // dark stripe between the water and the sky in a storm.
           //
-          // Espelhar é a aproximação certa: o que existe logo abaixo do horizonte
-          // é mar refletindo o céu logo acima dele, então a cor é praticamente a
-          // mesma. O erro é imperceptível e a costura some.
+          // Mirroring is the right approximation: what exists just below the horizon is
+          // sea reflecting the sky just above it, so the color is practically the same.
+          // The error is imperceptible and the seam disappears.
           vec3 lutDir = vec3(dir.x, abs(dir.y) * 0.35 + 0.002, dir.z);
           vec3 sky = texture2D(uSkyLut, directionToEquirect(normalize(lutDir))).rgb;
           if (dir.y > 0.0) {
             sky = texture2D(uSkyLut, directionToEquirect(dir)).rgb;
           }
 
-          // Estrelas e lua ficam atrás da atmosfera: somam apenas onde o céu
-          // já está escuro, então o dia as apaga naturalmente.
+          // Stars and moon sit behind the atmosphere: they only add where the sky is
+          // already dark, so daylight puts them out naturally.
           sky += starField(dir) * uNightFactor;
           sky += moonDisc(dir) * mix(0.35, 1.0, uNightFactor);
 
-          // Halo do sol: complementa o disco geométrico com o brilho difuso.
+          // The sun's halo: it complements the geometric disc with the diffuse glow.
           float sunAlign = max(dot(dir, uSunDirection), 0.0);
           sky += vec3(1.0, 0.88, 0.68) * pow(sunAlign, 900.0) * 14.0;
           sky += vec3(1.0, 0.7, 0.42) * pow(sunAlign, 42.0) * 0.25;
@@ -360,8 +360,8 @@ export class Sky {
   }
 
   /**
-   * Atualiza o estado do céu.
-   * `nightFactor` vai de 0 (dia pleno) a 1 (noite fechada).
+   * Updates the sky's state.
+   * `nightFactor` runs from 0 (full daylight) to 1 (full night).
    */
   update(
     sunDirection: THREE.Vector3,
@@ -377,8 +377,8 @@ export class Sky {
     this.domeMaterial.uniforms.uTime!.value = time;
     this.domeMaterial.uniforms.uWindDirection!.value.copy(windDirection);
 
-    // A LUT só é recomputada quando o sol andou o suficiente para mudar a cor
-    // de forma perceptível — economiza ~30 renders de LUT por segundo.
+    // The LUT is only recomputed when the sun has moved enough to change the color
+    // perceptibly — it saves ~30 LUT renders per second.
     if (sunDirection.distanceToSquared(this.lastLutSunDirection) > LUT_UPDATE_THRESHOLD * LUT_UPDATE_THRESHOLD) {
       this.lutDirty = true;
     }
@@ -388,44 +388,44 @@ export class Sky {
     this.lutMaterial.uniforms.uMoonDirection!.value.copy(moonDirection);
     this.lutMaterial.uniforms.uNightFactor!.value = nightFactor;
 
-    // A lua é o sol de novo, quatrocentas mil vezes mais fraca. Esse número
-    // exato deixaria a noite invisível: o olho humano se adapta ao escuro e a
-    // tela não, então todo jogo exagera a lua. MOON_INTENSITY é a dose que
-    // deixa o mar legível sem transformar a noite em tarde azul.
+    // The moon is the sun again, four hundred thousand times weaker. That exact number
+    // would leave the night invisible: the human eye adapts to the dark and the screen
+    // does not, so every game exaggerates the moon. MOON_INTENSITY is the dose that keeps
+    // the sea legible without turning night into a blue afternoon.
     this.lutMaterial.uniforms.uMoonIntensity!.value =
       MOON_INTENSITY *
       nightFactor *
       THREE.MathUtils.smoothstep(moonDirection.y, -0.06, 0.18);
 
-    // O disco do sol acompanha a direção, sempre longe o bastante para não
-    // colidir com nada da cena.
+    // The sun's disc follows the direction, always far enough away not to collide with
+    // anything in the scene.
     this.sunMesh.position.copy(sunDirection).multiplyScalar(DOME_RADIUS * 0.85);
 
-    // A radiância do disco vive na cor, não na opacidade: com mistura aditiva as
-    // duas fariam exatamente a mesma coisa, e um botão só é mais fácil de
-    // calibrar. Ela precisa ficar acima do halo de Mie que a LUT já desenha em
-    // volta do sol, senão o olho lê "mancha clara" em vez de "sol".
+    // The disc's radiance lives in the color, not in the opacity: with additive blending
+    // the two would do exactly the same thing, and a single knob is easier to calibrate.
+    // It has to sit above the Mie halo the LUT already draws around the sun, or else the
+    // eye reads "pale smudge" instead of "sun".
     //
-    // Cai perto do horizonte porque a extinção rasante é real — é o mesmo motivo
-    // de dar para encarar o poente e não o meio-dia — e some primeiro no azul,
-    // o que deixa o disco alaranjado no fim da tarde sem tabela de cor à mão.
+    // It falls near the horizon because grazing extinction is real — it is the same
+    // reason you can look at the sunset and not at noon — and it dies first in the blue,
+    // which leaves the disc orange in the late afternoon with no color table on hand.
     const horizonFade = THREE.MathUtils.smoothstep(sunDirection.y, 0, 0.2);
     const radiance = THREE.MathUtils.lerp(2.4, 26, horizonFade);
     this.sunMaterial.color.setRGB(
       radiance,
       radiance * THREE.MathUtils.lerp(0.5, 0.97, horizonFade),
       radiance * THREE.MathUtils.lerp(0.2, 0.92, horizonFade),
-      // Linear explícito: são valores de radiância, não uma cor de paleta, e
-      // passá-los como sRGB aplicaria a curva de transferência por cima.
+      // Explicitly linear: these are radiance values, not a palette color, and passing
+      // them as sRGB would apply the transfer curve on top.
       THREE.LinearSRGBColorSpace,
     );
 
-    // A opacidade cuida só do sumiço abaixo da linha do horizonte.
+    // The opacity only takes care of the fade-out below the horizon line.
     this.sunMaterial.opacity = THREE.MathUtils.clamp(sunDirection.y * 40 + 1, 0, 1);
     this.sunMesh.visible = this.sunMaterial.opacity > 0.01;
   }
 
-  /** Reposiciona o domo e o sol em torno do observador. */
+  /** Repositions the dome and the sun around the observer. */
   follow(cameraPosition: THREE.Vector3): void {
     this.dome.position.copy(cameraPosition);
     this.dome.updateMatrix();
@@ -433,7 +433,7 @@ export class Sky {
     this.sunMesh.position.add(cameraPosition);
   }
 
-  /** Renderiza a LUT se necessário. Deve rodar antes do render principal. */
+  /** Renders the LUT if needed. It has to run before the main render. */
   renderLut(renderer: THREE.WebGLRenderer): void {
     if (!this.lutDirty) return;
     this.lutDirty = false;

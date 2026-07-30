@@ -1,13 +1,13 @@
 /**
- * A conversa com o servidor de sala, do ponto de vista do jogo.
+ * The conversation with the room server, from the game's point of view.
  *
- * É a peça que o menu observa e a que o laço principal consulta. Ela junta três
- * coisas que só fazem sentido juntas: a máquina de estados do lobby (que o menu
- * desenha), a decisão de quem simula (que vem da sala) e a sessão de jogo
- * correspondente — `HostSession` ou `GuestSession`.
+ * It is the piece the menu watches and the one the main loop queries. It brings together
+ * three things that only make sense together: the lobby's state machine (which the menu
+ * draws), the decision of who simulates (which comes from the room) and the matching game
+ * session — `HostSession` or `GuestSession`.
  *
- * Nada de socket, protocolo ou byte atravessa a fronteira daqui para o menu: ele
- * recebe um `OnlineViewState` e nada mais.
+ * No socket, protocol or byte crosses the border from here to the menu: it receives an
+ * `OnlineViewState` and nothing else.
  */
 
 import type { JoinIntent, ServerMessage } from '../../shared/protocol';
@@ -20,23 +20,23 @@ import { HostSession } from './HostSession';
 import { RoomClient, measurePerformance } from './RoomClient';
 import type { OnlinePhase, OnlineViewState } from '../ui/OnlineMenu';
 
-/** O quadro de "minha janela saiu de foco". Um byte, montado uma vez. */
+/** The "my window lost focus" frame. One byte, built once. */
 const STALL_FRAME = new Uint8Array([MessageType.Stall]).buffer;
 
-/** O que o jogo precisa saber quando o duelo começa. */
+/** What the game has to know when the duel begins. */
 export interface MatchConfig {
   seed: number;
   role: 'host' | 'guest';
   slot: 0 | 1;
   opponent: string;
   /**
-   * O tempo e a hora com que o duelo abre, ditados pela sala.
+   * The weather and the hour the duel opens with, dictated by the room.
    *
-   * Vinham na mensagem de `start` desde sempre e eram **jogados fora aqui**: o
-   * `MatchConfig` não os carregava, e o jogo seguia com o clima e o relógio que
-   * cada jogador tinha na tela de título — um começando ao meio-dia com céu
-   * limpo e o outro ao entardecer sob chuva. Como o vento entra na força da
-   * vela, isso não era só estranho de ver: era vantagem.
+   * They had always come in the `start` message and were **thrown away here**:
+   * `MatchConfig` did not carry them, and the game went on with the weather and the clock
+   * each player had on the title screen — one starting at noon under a clear sky and the
+   * other at dusk in the rain. Since the wind enters the sail's force, that was not only
+   * strange to see: it was an advantage.
    */
   weather: WeatherMode;
   timeOfDay: number;
@@ -56,47 +56,47 @@ export class OnlineSession {
   private startListener: ((config: MatchConfig) => void) | null = null;
   private overListener: ((won: boolean, reason: string) => void) | null = null;
 
-  /** A sessão de jogo, quando há uma. Só uma das duas existe por vez. */
+  /** The game session, when there is one. Only one of the two exists at a time. */
   host: HostSession | null = null;
   guest: GuestSession | null = null;
 
   private role: 'host' | 'guest' | null = null;
   /**
-   * Como se entrou nesta sala.
+   * How this room was entered.
    *
-   * Guardado porque é o que decide **qual tela de espera** o jogador vê quando o
-   * servidor responde. Sem ele, a fase saltava de `connecting` direto para
-   * `hosting` nos três caminhos: quem clicava em "procurar capitão" recebia a
-   * tela de "sua sala está aberta, passe o código adiante", e quem digitava um
-   * código também. Duas telas erradas de três, e a certa aparecia por acidente.
+   * Kept because it is what decides **which waiting screen** the player sees when the
+   * server answers. Without it, the phase jumped from `connecting` straight to `hosting`
+   * on all three paths: whoever clicked "find a captain" got the "your room is open, pass
+   * the code along" screen, and so did whoever typed a code. Two wrong screens out of
+   * three, and the right one showed up by accident.
    */
   private intent: JoinIntent | null = null;
   private announcedSecond = -1;
-  /** Taxa de quadros observada, para a nota de desempenho. */
+  /** Observed frame rate, for the performance rating. */
   private fps = 60;
-  /** Rede ruim de mentira, reaplicada a cada conexão nova. */
+  /** A fake bad network, reapplied on every new connection. */
   private lag = { latencyMs: 0, jitterMs: 0, lossPercent: 0 };
 
   constructor(
     private readonly serverUrl: string | undefined,
     private readonly match: Match,
   ) {
-    // Ver `announceStall`. O ouvinte é do documento e não do jogo: ele precisa
-    // disparar justamente quando o laço de quadros para.
+    // See `announceStall`. The listener belongs to the document and not to the game: it
+    // has to fire precisely when the frame loop stops.
     document.addEventListener('visibilitychange', () => this.announceStall());
   }
 
   /**
-   * Avisa o outro lado quando a janela de quem simula sai de foco.
+   * Tells the other side when the simulating window loses focus.
    *
-   * `requestAnimationFrame` é congelado numa aba em segundo plano, e com ele
-   * param a física, os instantâneos e tudo o mais. Do lado de lá isso é
-   * indistinguível de uma queda de rede: o mundo simplesmente para. O quadro de
-   * `Stall` é a diferença entre "o adversário minimizou o jogo" e "a partida
-   * quebrou" — e é a última coisa que este lado consegue mandar, porque o evento
-   * de visibilidade ainda roda quando o laço já não roda.
+   * `requestAnimationFrame` is frozen in a background tab, and with it the physics, the
+   * snapshots and everything else stop. From over there that is indistinguishable from a
+   * network drop: the world simply stops. The `Stall` frame is the difference between
+   * "the opponent minimized the game" and "the match broke" — and it is the last thing
+   * this side manages to send, because the visibility event still runs when the loop
+   * already does not.
    *
-   * Só o host manda: o guest que sai de foco não interrompe simulação nenhuma.
+   * Only the host sends it: a guest losing focus interrupts no simulation at all.
    */
   private announceStall(): void {
     if (!this.host || !this.client) return;
@@ -108,7 +108,7 @@ export class OnlineSession {
     return Boolean(this.serverUrl);
   }
 
-  /** `true` quando um duelo em rede está em curso. */
+  /** `true` when a networked duel is underway. */
   get playing(): boolean {
     return this.role !== null && this.state.phase === 'ready';
   }
@@ -117,7 +117,7 @@ export class OnlineSession {
     return this.state.opponent ?? '';
   }
 
-  /** Telemetria para o painel do F3. */
+  /** Telemetry for the F3 panel. */
   get telemetry(): {
     rtt: number;
     jitter: number;
@@ -125,7 +125,7 @@ export class OnlineSession {
     starves: number;
     error: number;
     lead: number;
-    /** `true` quando o host avisou que a janela dele saiu de foco. */
+    /** `true` when the host has said their window lost focus. */
     stalled: boolean;
   } | null {
     if (!this.client) return null;
@@ -152,7 +152,7 @@ export class OnlineSession {
     this.overListener = listener;
   }
 
-  // -- ações do menu --------------------------------------------------------------
+  // -- menu actions ---------------------------------------------------------------
 
   queue(nickname: string): void {
     this.connect('queue', nickname);
@@ -166,7 +166,7 @@ export class OnlineSession {
     this.connect('join', nickname, code);
   }
 
-  /** Desistir do que estiver em curso. Idempotente — ver `Menu.back`. */
+  /** Give up on whatever is underway. Idempotent — see `Menu.back`. */
   leave(): void {
     this.client?.disconnect();
     this.client = null;
@@ -183,39 +183,39 @@ export class OnlineSession {
     });
   }
 
-  /** Liga a latência artificial na conexão em curso. Ver `RoomClient`. */
+  /** Turns on the artificial latency on the current connection. See `RoomClient`. */
   setSimulatedLag(latencyMs: number, jitterMs = 0, lossPercent = 0): void {
     this.lag = { latencyMs, jitterMs, lossPercent };
     this.client?.setSimulatedLag(latencyMs, jitterMs, lossPercent);
   }
 
-  /** Roda todo quadro. Avança o cronômetro e mede a taxa de quadros. */
+  /** Runs every frame. It advances the timer and measures the frame rate. */
   update(dt: number): void {
     if (dt > 0) this.fps += (1 / dt - this.fps) * 0.05;
 
     if (this.state.phase !== 'queued' && this.state.phase !== 'hosting') return;
     this.state.waitingSeconds += dt;
 
-    // Só avisa quando o dígito vira: repintar o menu 144 vezes por segundo para
-    // mudar um número que muda uma vez arrisca o foco do d-pad por nada.
+    // It only announces when the digit turns: repainting the menu 144 times a second to
+    // change a number that changes once risks the d-pad's focus for nothing.
     const second = Math.floor(this.state.waitingSeconds);
     if (second === this.announcedSecond) return;
     this.announcedSecond = second;
     this.emit();
   }
 
-  // -- passo de simulação ----------------------------------------------------------
+  // -- simulation step -------------------------------------------------------------
 
   /**
-   * A entrada do navio inimigo, quando ela vem da rede.
+   * The enemy ship's input, when it comes from the network.
    *
-   * @returns `null` fora de um duelo hospedado — aí quem pilota é o `ShipAI`.
+   * @returns `null` outside a hosted duel — there what drives is `ShipAI`.
    */
   enemyInput(tick: number): InputFrame | null {
     return this.host ? this.host.enemyInput(tick) : null;
   }
 
-  /** Depois do passo do host: manda o mundo, se for a vez. */
+  /** After the host's step: it sends the world, if it is time. */
   afterHostStep(tick: number): void {
     this.host?.afterStep(tick);
   }
@@ -241,12 +241,12 @@ export class OnlineSession {
   private onLobby(message: ServerMessage): void {
     switch (message.t) {
       case 'welcome':
-        // Sem papel ainda: ele só existe quando houver com quem comparar. Ver a
-        // nota em `ServerMessage.welcome`.
+        // No role yet: it only exists once there is someone to compare against. See the
+        // note in `ServerMessage.welcome`.
         //
-        // A tela de espera sai de **como se entrou**, e não do que a fase era um
-        // instante atrás — que era sempre `connecting`, e por isso caía sempre no
-        // ramo de `hosting`. Ver `intent`.
+        // The waiting screen comes out of **how you got in**, and not out of what the
+        // phase was an instant ago — which was always `connecting`, and that is why it
+        // always fell into the `hosting` branch. See `intent`.
         this.set({
           phase:
             this.intent === 'queue' ? 'queued' : this.intent === 'join' ? 'joining' : 'hosting',
@@ -257,16 +257,16 @@ export class OnlineSession {
       case 'peer':
         this.role = message.role;
         this.set({ phase: 'ready', opponent: message.nickname });
-        // Uma medida de latência fresca antes de começar: o duelo arranca daqui
-        // a menos de um segundo, e é dela que sai o avanço inicial do guest.
+        // A fresh latency measurement before starting: the duel gets going in less than
+        // a second from here, and the guest's initial lead comes out of it.
         this.client?.measureLatency();
-        // Assets já estão em memória: o navio e o corpo são construídos no boot.
+        // The assets are already in memory: the ship and the body are built at boot.
         this.client?.sendLobby({ t: 'ready' });
         return;
 
       case 'start': {
         if (!this.role || !this.client) return;
-        // No fio, o índice 0 é sempre o de quem simula.
+        // On the wire, index 0 is always the simulating side's.
         const slot: 0 | 1 = this.role === 'host' ? 0 : 1;
         this.host = this.role === 'host' ? new HostSession(this.match, this.client) : null;
         this.guest =
@@ -283,12 +283,12 @@ export class OnlineSession {
       }
 
       case 'over': {
-        // O vencedor vem no índice do host; quem é guest tem de traduzir.
+        // The winner comes in the host's index; whoever is guest has to translate.
         const mine: 0 | 1 = this.role === 'host' ? 0 : 1;
-        // Adversário que sai é adversário que perdeu, e esta mensagem só chega a
-        // quem **ficou** — a sala não a manda para quem saiu. Sem a cláusula, o
-        // vencedor vinha `null`, a comparação dava falso e quem estava vencendo
-        // um duelo abandonado recebia a tela de derrota.
+        // An opponent who leaves is an opponent who lost, and this message only reaches
+        // whoever **stayed** — the room does not send it to whoever left. Without the
+        // clause, the winner came in as `null`, the comparison was false and whoever was
+        // winning an abandoned duel got the defeat screen.
         const won = message.reason === 'left' ? true : message.winner === mine;
         this.overListener?.(won, message.reason);
         return;
@@ -304,14 +304,14 @@ export class OnlineSession {
   }
 
   /**
-   * Um quadro binário chegou.
+   * A binary frame arrived.
    *
-   * A cerca de exceção é obrigatória, e não zelo: isto roda dentro do
-   * `onmessage` do socket, e o que escapar daqui sobe para o navegador sem
-   * ninguém para pegar. Um único quadro truncado — uma versão diferente, um
-   * pacote cortado — derrubaria o tratador de rede da partida inteira, e o
-   * sintoma seria o mundo congelando **sem erro nenhum na tela**. Perder um
-   * quadro é barato: o seguinte vem em 33 ms.
+   * The exception fence is mandatory, and not fussiness: this runs inside the socket's
+   * `onmessage`, and whatever escapes from here goes up to the browser with nobody to
+   * catch it. A single truncated frame — a different version, a cut packet — would take
+   * down the whole match's network handler, and the symptom would be the world freezing
+   * **with no error at all on screen**. Losing a frame is cheap: the next one comes in
+   * 33 ms.
    */
   private onFrame(frame: ArrayBuffer): void {
     try {
@@ -333,8 +333,8 @@ export class OnlineSession {
   }
 
   private onClosed(reason: string): void {
-    // Queda durante o duelo é o fim dele: sem reconexão, o outro lado ficaria
-    // num mar que parou de responder sem saber por quê.
+    // A drop during the duel is the end of it: with no reconnection, the other side
+    // would be left in a sea that stopped answering without knowing why.
     if (this.playing) {
       this.overListener?.(false, 'left');
       return;
@@ -352,5 +352,5 @@ export class OnlineSession {
   }
 }
 
-/** Um estado inicial, para o menu ter o que desenhar antes de qualquer conexão. */
+/** An initial state, so the menu has something to draw before any connection. */
 export type { OnlinePhase };

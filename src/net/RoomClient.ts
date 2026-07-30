@@ -1,26 +1,25 @@
 /**
- * O socket: uma conexão com a sala, e o que passa por ela.
+ * The socket: one connection to the room, and what goes through it.
  *
- * Não sabe nada de navio nem de instantâneo — recebe e entrega bytes. Quem os
- * interpreta são `HostSession` e `GuestSession`.
+ * It knows nothing about ships or snapshots — it receives and delivers bytes. What
+ * interprets them are `HostSession` and `GuestSession`.
  *
- * ## Latência simulada, e por que ela é obrigatória
+ * ## Simulated latency, and why it is mandatory
  *
- * Netcode escrito e testado só em `localhost` funciona em `localhost`. Zero
- * milissegundos de ida e volta escondem **todos** os problemas que o netcode
- * existe para resolver: o buffer de jitter nunca passa fome, a interpolação nunca
- * tem o que interpolar, a predição nunca erra e a reconciliação nunca roda. O
- * primeiro jogador de verdade encontra os quatro de uma vez.
+ * Netcode written and tested only on `localhost` works on `localhost`. Zero milliseconds
+ * of round trip hide **every** problem netcode exists to solve: the jitter buffer never
+ * starves, the interpolation never has anything to interpolate, the prediction never
+ * misses and the reconciliation never runs. The first real player finds all four at once.
  *
- * Daí `setSimulatedLag`, ligada em desenvolvimento e acessível pela bancada:
+ * Hence `setSimulatedLag`, switched on in development and reachable from the console:
  *
  * ```js
- * __game.net.setSimulatedLag(150, 40, 2)   // 150 ms, 40 de jitter, 2% de perda
+ * __game.net.setSimulatedLag(150, 40, 2)   // 150 ms, 40 of jitter, 2% loss
  * ```
  *
- * Ela atrasa e descarta **na saída**, o que é o suficiente: uma perda de ida
- * produz exatamente o mesmo buraco que uma perda de volta, do ponto de vista de
- * quem espera o pacote.
+ * It delays and drops **on the way out**, which is enough: a loss outbound produces
+ * exactly the same gap as a loss inbound, from the point of view of whoever is waiting
+ * for the packet.
  */
 
 import {
@@ -30,13 +29,13 @@ import {
   type ServerMessage,
 } from '../../shared/protocol';
 
-/** Quanto tempo esperar pelo `welcome` antes de desistir da sala. */
+/** How long to wait for the `welcome` before giving up on the room. */
 const HANDSHAKE_TIMEOUT_MS = 8000;
 
-/** Intervalo entre medições de ida e volta. */
+/** Interval between round-trip measurements. */
 const PING_INTERVAL_MS = 2000;
 
-/** Peso do valor novo na média do RTT. Baixo para a medida não pular. */
+/** Weight of the new value in the RTT's average. Low so the reading does not jump. */
 const RTT_SMOOTHING = 0.2;
 
 export interface RoomClientHandlers {
@@ -45,13 +44,13 @@ export interface RoomClientHandlers {
   onClosed(reason: string): void;
 }
 
-/** Latência artificial, para exercitar o netcode fora de `localhost`. */
+/** Artificial latency, to exercise the netcode outside `localhost`. */
 interface SimulatedLag {
-  /** Atraso base de ida e volta, em milissegundos. */
+  /** Base round-trip delay, in milliseconds. */
   latencyMs: number;
-  /** Variação aleatória somada ao atraso, em milissegundos. */
+  /** Random variation added to the delay, in milliseconds. */
   jitterMs: number;
-  /** Fração de mensagens descartadas, 0..1. */
+  /** Fraction of messages dropped, 0..1. */
   loss: number;
 }
 
@@ -61,12 +60,12 @@ export class RoomClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pingSentAt = 0;
 
-  /** Ida e volta suavizada, em milissegundos. Zero antes da primeira medida. */
+  /** Smoothed round trip, in milliseconds. Zero before the first measurement. */
   rtt = 0;
-  /** Variação da ida e volta, em milissegundos. */
+  /** Variation of the round trip, in milliseconds. */
   jitter = 0;
 
-  /** Contadores para o painel de telemetria. */
+  /** Counters for the telemetry panel. */
   readonly stats = { sent: 0, received: 0, bytesSent: 0, bytesReceived: 0, dropped: 0 };
 
   private lag: SimulatedLag = { latencyMs: 0, jitterMs: 0, loss: 0 };
@@ -81,10 +80,10 @@ export class RoomClient {
   }
 
   /**
-   * Abre a sala.
+   * Opens the room.
    *
-   * @param intent como se está entrando: fila, sala nova ou código.
-   * @param code obrigatório quando `intent` é `join`.
+   * @param intent how you are getting in: queue, new room or code.
+   * @param code required when `intent` is `join`.
    */
   connect(intent: JoinIntent, nickname: string, perfScore: number, code?: string): void {
     this.disconnect();
@@ -95,21 +94,21 @@ export class RoomClient {
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
 
-    // Se a conexão chegou a abrir. Distingue "o servidor não existe" de "o
-    // servidor existe e a conexão caiu depois" — dois problemas com soluções
-    // diferentes, e que sem isto contam a mesma história.
+    // Whether the connection ever opened. It tells "the server does not exist" from "the
+    // server exists and the connection dropped afterward" — two problems with different
+    // solutions, and which without this tell the same story.
     let opened = false;
 
     socket.onopen = () => {
       opened = true;
       this.sendLobby({ t: 'hello', v: PROTOCOL_VERSION, nickname, intent, perfScore });
-      // A primeira medida sai **agora**, e não daqui a dois segundos.
+      // The first measurement goes out **now**, and not two seconds from now.
       //
-      // Com o `setInterval` sozinho, o duelo de quem entrava numa sala já cheia
-      // começava com `rtt` em zero — e é do `rtt` que sai o avanço inicial do
-      // guest (ver `GuestSession.estimateLead`). Avanço calculado sobre zero é
-      // avanço nenhum: os primeiros segundos de todo duelo eram jogados com o
-      // comando chegando atrasado ao host e sendo descartado.
+      // With the `setInterval` on its own, the duel of whoever joined an already full
+      // room started with `rtt` at zero — and the guest's initial lead comes out of the
+      // `rtt` (see `GuestSession.estimateLead`). A lead computed over zero is no lead at
+      // all: the first seconds of every duel were played with the command arriving late
+      // at the host and being discarded.
       this.measureLatency();
       this.pingTimer = setInterval(() => this.measureLatency(), PING_INTERVAL_MS);
     };
@@ -125,13 +124,13 @@ export class RoomClient {
       this.handlers.onFrame(event.data);
     };
 
-    // `onerror` não traz motivo por decisão da especificação (revelá-lo vazaria
-    // informação sobre a rede de quem navega), então quem explica é o `onclose`.
+    // `onerror` carries no reason by decision of the specification (revealing it would
+    // leak information about the browsing user's network), so what explains is `onclose`.
     //
-    // E quando ele fecha **sem nunca ter aberto**, o motivo é sempre o mesmo: não
-    // há nada escutando do outro lado. Dizer "a conexão caiu" nesse caso manda
-    // procurar o problema no lugar errado — o endereço é a informação que
-    // resolve, e é por isso que ele aparece na mensagem.
+    // And when it closes **without ever having opened**, the reason is always the same:
+    // there is nothing listening on the other end. Saying "the connection dropped" in
+    // that case sends you looking for the problem in the wrong place — the address is the
+    // information that solves it, and that is why it shows up in the message.
     socket.onclose = (event) => {
       const neverOpened = !opened;
       this.cleanup();
@@ -152,8 +151,8 @@ export class RoomClient {
     const socket = this.socket;
     this.cleanup();
     if (!socket) return;
-    // Zera os handlers antes de fechar: sem isso, o `onclose` deste fechamento
-    // deliberado avisaria a interface de uma queda que não houve.
+    // Clear the handlers before closing: without this, the `onclose` of this deliberate
+    // close would tell the interface about a drop that did not happen.
     socket.onopen = null;
     socket.onmessage = null;
     socket.onclose = null;
@@ -161,24 +160,23 @@ export class RoomClient {
     try {
       socket.close(1000, 'Left the room.');
     } catch {
-      // Já fechado.
+      // Already closed.
     }
   }
 
   /**
-   * Manda uma mensagem de lobby.
+   * Sends a lobby message.
    *
-   * ⚠️ **Também passa pela latência simulada**, e a primeira versão não passava.
-   * O raciocínio de então era que o lobby "não é o que o netcode tem de
-   * aguentar" — e ele deixava de fora justamente o `ping`, que é como o cliente
-   * **mede** a rede. Com a bancada ligada, o duelo rodava com 150 ms de atraso
-   * nos quadros e um `rtt` de zero no medidor, então o avanço nascia calculado
-   * para uma rede que não existia. A ferramenta mentia sobre o único número que
-   * ela deveria ajudar a testar.
+   * ⚠️ **It also goes through the simulated latency**, and the first version did not. The
+   * reasoning back then was that the lobby "is not what the netcode has to survive" — and
+   * it left out precisely the `ping`, which is how the client **measures** the network.
+   * With the bench switched on, the duel ran with 150 ms of delay on the frames and an
+   * `rtt` of zero on the gauge, so the lead was born computed for a network that did not
+   * exist. The tool lied about the one number it was supposed to help test.
    *
-   * A perda simulada **não** se aplica aqui: o lobby são seis mensagens por
-   * sessão e nenhuma delas tem reenvio, então descartar uma não exercita
-   * netcode nenhum — só trava a entrada na sala.
+   * The simulated loss does **not** apply here: the lobby is six messages per session and
+   * none of them is resent, so dropping one exercises no netcode at all — it just wedges
+   * the entry into the room.
    */
   sendLobby(message: ClientMessage): void {
     const socket = this.socket;
@@ -189,7 +187,7 @@ export class RoomClient {
     this.afterLag(() => socket.send(text));
   }
 
-  /** Manda um quadro de simulação. Passa pela latência simulada em dev. */
+  /** Sends a simulation frame. It goes through the simulated latency in dev. */
   sendFrame(frame: ArrayBuffer): void {
     const socket = this.socket;
     if (socket?.readyState !== WebSocket.OPEN) return;
@@ -205,7 +203,7 @@ export class RoomClient {
     this.afterLag(() => socket.send(frame));
   }
 
-  /** Roda o envio agora, ou depois do atraso simulado quando há um. */
+  /** Runs the send now, or after the simulated delay when there is one. */
   private afterLag(send: () => void): void {
     const delay = this.lag.latencyMs + Math.random() * this.lag.jitterMs;
     if (delay <= 0) {
@@ -218,11 +216,11 @@ export class RoomClient {
   }
 
   /**
-   * Liga a latência artificial. Ver o cabeçalho.
+   * Turns on the artificial latency. See the header.
    *
-   * @param latencyMs atraso base.
-   * @param jitterMs variação somada por cima.
-   * @param lossPercent porcentagem de mensagens descartadas.
+   * @param latencyMs base delay.
+   * @param jitterMs variation added on top.
+   * @param lossPercent percentage of messages dropped.
    */
   setSimulatedLag(latencyMs: number, jitterMs = 0, lossPercent = 0): void {
     this.lag = {
@@ -233,24 +231,25 @@ export class RoomClient {
   }
 
   /**
-   * A mensagem de "não tem ninguém nesse endereço".
+   * The "there is nobody at that address" message.
    *
-   * Traz o endereço porque ele **é** o diagnóstico: quem lê isto ou esqueceu de
-   * subir o servidor de sala, ou está apontando para a porta errada, e nos dois
-   * casos ver o endereço tentado resolve em segundos. Sem ele, resta um "a
-   * conexão caiu" que manda procurar problema na internet.
+   * It carries the address because the address **is** the diagnosis: whoever reads this
+   * either forgot to bring the room server up, or is pointing at the wrong port, and in
+   * both cases seeing the address that was tried settles it in seconds. Without it, what
+   * is left is a "the connection dropped" that sends you looking for a problem on the
+   * internet.
    */
   private unreachable(): string {
     return `No room server at ${this.serverUrl}. Is it running?`;
   }
 
   /**
-   * Dispara uma medida de ida e volta agora.
+   * Fires a round-trip measurement now.
    *
-   * Pública porque há um instante em que a medida vale muito mais do que na
-   * cadência normal: quando o adversário entra na sala. Dali a menos de um
-   * segundo o duelo começa, e é a medida mais fresca que decide com quanto
-   * avanço o guest nasce.
+   * Public because there is one instant when the measurement is worth far more than at
+   * the normal cadence: when the opponent joins the room. Less than a second later the
+   * duel begins, and it is the freshest measurement that decides how much lead the guest
+   * is born with.
    */
   measureLatency(): void {
     if (!this.connected) return;
@@ -268,8 +267,8 @@ export class RoomClient {
 
     if (message.t === 'pong') {
       const sample = performance.now() - this.pingSentAt;
-      // O jitter é medido **antes** de o RTT ser atualizado: ele é o quanto esta
-      // amostra se afastou da média até agora, e não o quanto se afastou de si.
+      // The jitter is measured **before** the RTT is updated: it is how far this sample
+      // strayed from the average so far, and not how far it strayed from itself.
       const deviation = Math.abs(sample - this.rtt);
       this.jitter = this.rtt === 0 ? 0 : this.jitter + (deviation - this.jitter) * RTT_SMOOTHING;
       this.rtt = this.rtt === 0 ? sample : this.rtt + (sample - this.rtt) * RTT_SMOOTHING;
@@ -293,16 +292,16 @@ export class RoomClient {
 }
 
 /**
- * Uma nota de 0 a 100 do que esta máquina aguenta.
+ * A 0-to-100 rating of what this machine can take.
  *
- * Serve para o servidor escolher **quem simula** — ver `DuelRoom.pairIfReady`. A
- * conta é grosseira de propósito: taxa de quadros medida e núcleos disponíveis,
- * nada de benchmark sintético. O que se quer distinguir é "notebook velho" de
- * "máquina de jogo", e para isso dois sinais baratos bastam.
+ * It serves for the server to choose **who simulates** — see `DuelRoom.pairIfReady`. The
+ * arithmetic is coarse on purpose: measured frame rate and available cores, no synthetic
+ * benchmark. What you want to tell apart is "old laptop" from "gaming machine", and for
+ * that two cheap signals are enough.
  */
 export function measurePerformance(fps: number): number {
-  // 60 quadros por segundo é o teto útil da conta: acima disso a diferença já
-  // não diz nada sobre aguentar simular dois cascos.
+  // 60 frames per second is the useful ceiling of the arithmetic: above that the
+  // difference says nothing more about surviving simulating two hulls.
   const frameScore = Math.min(fps / 60, 1) * 70;
   const cores = Math.min(navigator.hardwareConcurrency || 2, 8);
   const coreScore = (cores / 8) * 30;
