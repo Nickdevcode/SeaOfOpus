@@ -1,27 +1,27 @@
 /**
- * Canhão de bordo: pontaria, carregamento, disparo e recuo.
+ * A broadside gun: laying, loading, firing and recoil.
  *
- * A peça sabe apontar e cuspir uma bala, e nada além disso. Quem decide *quando*
- * é o jogador (`PlayerController`) ou o artilheiro bot, e quem transforma o
- * disparo em projétil é o módulo de combate — este arquivo só entrega a solução
- * de tiro pronta: de onde a bala sai, para onde vai e com que velocidade.
+ * The piece knows how to aim and spit a ball, and nothing beyond that. What decides
+ * *when* is the player (`PlayerController`) or the bot gunner, and what turns the shot
+ * into a projectile is the combat module — this file only hands over the finished firing
+ * solution: where the ball leaves from, where it goes and how fast.
  *
- * Três decisões que valem explicação:
+ * Three decisions worth explaining:
  *
- * - **A bala herda a velocidade do navio.** Ela nasce com a velocidade do ponto
- *   do casco onde a boca está (translação mais ω × r), como acontece de verdade.
- *   É isso que faz atirar de bordo com o navio a 8 nós exigir uma correção real,
- *   em vez de o navio ser um chão firme disfarçado.
- * - **O disparo acontece no passo fixo, não no frame.** `triggerPull()` só levanta
- *   a bandeira; `fixedUpdate` é quem dispara. Recuo é impulso, e impulso aplicado
- *   num `dt` de render varia com o FPS — o mesmo tiro empurraria o navio mais a
- *   30 fps do que a 144.
- * - **Recuo aplicado no eixo da alma.** Não no centro de massa: a boca fica 2,5 m
- *   acima da linha d'água e 2 m fora do eixo, então o tiro aderna e guina o navio
- *   um tanto. É pouco (uns 10 mm/s), mas é de graça e é o sinal certo.
- * - **O recuo faz parte do relógio da peça, e não só do desenho.** A carreta corre
- *   38 cm para dentro e volta pelos brandais; enquanto ela está correndo, ninguém
- *   soca bala nenhuma. Ver `beginLoad`.
+ * - **The ball inherits the ship's velocity.** It is born with the velocity of the point
+ *   of the hull the muzzle is at (translation plus ω × r), as it happens for real. That is
+ *   what makes firing a broadside with the ship at 8 knots require a real correction,
+ *   instead of the ship being firm ground in disguise.
+ * - **The shot happens on the fixed step, not on the frame.** `triggerPull()` only raises
+ *   the flag; `fixedUpdate` is what fires. Recoil is an impulse, and an impulse applied
+ *   over a render `dt` varies with the FPS — the same shot would push the ship harder at
+ *   30 fps than at 144.
+ * - **The recoil is applied on the bore's axis.** Not at the center of mass: the muzzle
+ *   sits 2.5 m above the waterline and 2 m off the axis, so the shot heels and yaws the
+ *   ship a little. It is small (about 10 mm/s), but it is free and it has the right sign.
+ * - **The recoil is part of the piece's clock, and not only of its drawing.** The
+ *   carriage runs 38 cm inboard and comes back on the breechings; while it is running,
+ *   nobody is ramming any ball home. See `beginLoad`.
  */
 
 import * as THREE from 'three';
@@ -36,75 +36,75 @@ import {
 } from './ShipParts';
 
 /**
- * Raio da bala, em metros.
+ * The ball's radius, in meters.
  *
- * Menor que a alma de propósito: a folga entre bala e cano ("vento", no jargão de
- * artilharia) era de uns 4% e é o que permitia carregar sem torno. Sai daqui a
- * massa, e da massa saem o recuo e o arrasto da balística.
+ * Smaller than the bore on purpose: the clearance between ball and barrel ("windage", in
+ * artillery jargon) was around 4% and it is what let you load without a lathe. The mass
+ * comes out of this, and out of the mass come the recoil and the ballistics' drag.
  */
 export const BALL_RADIUS = BORE_RADIUS * 0.96;
-/** Densidade do ferro fundido, em kg/m³. */
+/** Density of cast iron, in kg/m³. */
 const IRON_DENSITY = 7200;
-/** Massa da bala, em kg. Calculada, não escolhida: ~3,7 kg, um "meia-libra". */
+/** The ball's mass, in kg. Computed, not chosen: ~3.7 kg, a "half-pounder". */
 export const BALL_MASS = (4 / 3) * Math.PI * BALL_RADIUS ** 3 * IRON_DENSITY;
 
 /**
- * Velocidade de boca, em m/s.
+ * Muzzle velocity, in m/s.
  *
- * Um canhão de verdade cospe a 300–400 m/s, e com isso o tiro seria reta pura
- * dentro do alcance de combate — não sobraria nada da liderança de alvo que é o
- * miolo do duelo naval no Sea of Thieves. A 95 m/s um tiro de 100 m leva pouco
- * mais de 1 s e cai uns 5 m no caminho: obriga a elevar e a prever o alvo, que é
- * exatamente o comportamento do jogo.
+ * A real cannon spits at 300–400 m/s, and with that the shot would be a pure straight
+ * line inside combat range — nothing would be left of the target leading that is the core
+ * of the naval duel in Sea of Thieves. At 95 m/s a 100 m shot takes a little over 1 s and
+ * drops some 5 m on the way: it forces you to elevate and to lead the target, which is
+ * exactly the game's behavior.
  */
 export const MUZZLE_SPEED = 95;
 
 /**
- * Batente de travessia da carreta, em radianos (±26°).
+ * The carriage's traverse stop, in radians (±26°).
  *
- * Exportado porque é ele que define o problema tático da IA: com o cano preso a
- * 26° do través, manter o alvo sob fogo é obrigação do **timoneiro**, não do
- * artilheiro. Um bot que pudesse girar a peça 180° dispensaria manobra, e a
- * manobra é o jogo.
+ * Exported because it is what defines the AI's tactical problem: with the barrel held
+ * within 26° of the beam, keeping the target under fire is the **helmsman's** job, not the
+ * gunner's. A bot that could swing the piece 180° would do away with maneuvering, and the
+ * maneuvering is the game.
  */
 export const TRAVERSE_LIMIT = 0.45;
-/** Elevação mínima: a boca desce um pouco abaixo da horizontal. */
+/** Minimum elevation: the muzzle drops a little below the horizontal. */
 export const ELEVATION_MIN = -0.09;
-/** Elevação máxima (~33°), onde a culatra encosta no convés. */
+/** Maximum elevation (~33°), where the breech meets the deck. */
 export const ELEVATION_MAX = 0.58;
 
-/** Tempo de socar a bala, em segundos. Só corre com a carreta assentada. */
+/** Time to ram the ball home, in seconds. It only runs with the carriage seated. */
 const LOAD_TIME = 1.5;
 
-/** Quanto a carreta corre para dentro no tiro, em metros. */
+/** How far the carriage runs inboard on the shot, in meters. */
 const RECOIL_TRAVEL = 0.38;
 /**
- * Velocidade com que a carreta volta ao batente, em m/s.
+ * The speed at which the carriage returns to the stop, in m/s.
  *
- * Com os 38 cm de curso, dá **0,69 s** entre o tiro e a peça estar em condições de
- * receber a carga seguinte — e esse número deixou de ser decorativo. Ver `beginLoad`.
+ * With the 38 cm of travel, it gives **0.69 s** between the shot and the piece being fit
+ * to take the next charge — and that number stopped being decorative. See `beginLoad`.
  */
 const RECOIL_RETURN = 0.55;
 
 export type CannonState = 'empty' | 'loading' | 'loaded';
 
-/** Tudo que o módulo de combate precisa para criar o projétil. */
+/** Everything the combat module needs in order to create the projectile. */
 export interface FireSolution {
-  /** Posição da boca no mundo, no instante do disparo. */
+  /** The muzzle's position in the world, at the instant of the shot. */
   readonly position: THREE.Vector3;
-  /** Velocidade inicial no mundo, já com a do navio somada. */
+  /** Initial velocity in the world, with the ship's already added in. */
   readonly velocity: THREE.Vector3;
   readonly mass: number;
   readonly radius: number;
-  /** Quem atirou — o dano precisa saber para não contar fogo amigo. */
+  /** Who fired — the damage has to know so it does not count friendly fire. */
   readonly owner: string;
 }
 
-/** Par de ângulos da peça, com o veredito de se ela alcança aquela direção. */
+/** The piece's pair of angles, with the verdict on whether it reaches that direction. */
 export interface AimAngles {
   traverse: number;
   elevation: number;
-  /** `true` quando os dois ângulos caem dentro dos batentes da carreta. */
+  /** `true` when both angles fall inside the carriage's stops. */
   bears: boolean;
 }
 
@@ -118,47 +118,47 @@ const _pivot = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class Cannon {
-  /** +1 boreste, -1 bombordo. */
+  /** +1 starboard, -1 port. */
   readonly side: 1 | -1;
 
-  /** Travessia dentro do batente da carreta, em radianos. */
+  /** Traverse within the carriage's stop, in radians. */
   traverse = 0;
-  /** Elevação do cano, em radianos. Positivo é boca para cima. */
+  /** The barrel's elevation, in radians. Positive is muzzle up. */
   elevation = 0.1;
 
   state: CannonState = 'empty';
-  /** 0..1 enquanto carrega. O HUD desenha a barra a partir disto. */
+  /** 0..1 while loading. The HUD draws the bar from this. */
   loadProgress = 0;
 
-  /** Deslocamento atual da carreta pelo recuo, em metros. */
+  /** The carriage's current displacement from the recoil, in meters. */
   recoil = 0;
 
   /**
-   * Os três ângulos no passo anterior, para o desenho interpolar entre passos.
+   * The three angles at the previous step, so the drawing can interpolate between steps.
    *
-   * A peça é mirada e recua no passo fixo, mas é desenhada na taxa do monitor.
-   * Sem esta memória, o cano andava em degraus de 60 Hz numa tela de 144 — o
-   * recuo era o mais visível, porque é o movimento mais rápido do navio inteiro.
-   * Mesma técnica, e mesma razão, de `ShipBody.previousCom`.
+   * The piece is laid and recoils on the fixed step, but it is drawn at the monitor's
+   * rate. Without this memory, the barrel moved in 60 Hz steps on a 144 Hz screen — the
+   * recoil was the most visible one, because it is the fastest movement on the whole
+   * ship. Same technique, and same reason, as `ShipBody.previousCom`.
    */
   previousTraverse = 0;
   previousElevation = 0.1;
   previousRecoil = 0;
 
-  /** Gatilho pedido neste frame, consumido pelo próximo passo fixo. */
+  /** The trigger asked for this frame, consumed by the next fixed step. */
   private triggered = false;
 
   /**
-   * Orientação fixa do bordo, lida do modelo: ∓90°, o cano atravessado.
+   * The side's fixed orientation, read off the model: ∓90°, the barrel athwartships.
    *
-   * Público porque `solveAim` mede a travessia a partir dele, e a IA precisa
-   * conseguir perguntar para que lado a peça olha sem duplicar essa constante.
+   * Public because `solveAim` measures the traverse from it, and the AI has to be able to
+   * ask which way the piece is looking without duplicating that constant.
    */
   readonly sideYaw: number;
 
   constructor(
     readonly assembly: CannonAssembly,
-    /** Nome do navio dono, carregado para a solução de tiro. */
+    /** Name of the owning ship, carried through to the firing solution. */
     readonly owner: string,
   ) {
     this.sideYaw = assembly.root.rotation.y;
@@ -169,32 +169,32 @@ export class Cannon {
     return this.state === 'loaded';
   }
 
-  /** Aponta. Os deltas vêm em radianos, do mouse ou do analógico. */
+  /** Lays the gun. The deltas come in radians, from the mouse or the stick. */
   aim(deltaTraverse: number, deltaElevation: number): void {
     this.traverse = clamp(this.traverse + deltaTraverse, -TRAVERSE_LIMIT, TRAVERSE_LIMIT);
     this.elevation = clamp(this.elevation + deltaElevation, ELEVATION_MIN, ELEVATION_MAX);
   }
 
   /**
-   * Começa a servir a peça. Devolve `false` se já havia carga ou já está carregando.
+   * Starts serving the piece. Returns `false` if there was already a charge in it or it
+   * is already loading.
    *
-   * **O comando é aceito de imediato, mas o trabalho só começa com a carreta
-   * assentada.** Depois do tiro a peça está 38 cm para dentro, correndo de volta
-   * pelos brandais, e não se enfia soquete em meia tonelada de ferro em
-   * movimento — quem serve a peça espera ela parar no batente. São 0,69 s que o
-   * modelo já calculava e ninguém cobrava: até aqui o recuo era um enfeite que
-   * corria em paralelo com o carregamento, e o ciclo de tiro custava exatamente
-   * `LOAD_TIME` e mais nada.
+   * **The command is accepted at once, but the work only begins with the carriage
+   * seated.** After the shot the piece is 38 cm inboard, running back on the breechings,
+   * and you do not put a rammer into half a ton of moving iron — whoever serves the piece
+   * waits for it to stop at the stop. It is 0.69 s the model was already computing and
+   * nobody was charging for: until now the recoil was a decoration that ran in parallel
+   * with the loading, and the firing cycle cost exactly `LOAD_TIME` and nothing else.
    *
-   * O comando entra em fila em vez de ser recusado, e essa parte importa para
-   * quem joga: apertar recarregar no estrondo do próprio tiro é o gesto natural,
-   * e devolver `false` ali obrigaria o jogador a apertar duas vezes sem nenhuma
-   * razão que ele pudesse ver na tela. A bala sai do paiol no instante do
-   * comando (`Ship.loadCannon`) — ela já está na mão do servente.
+   * The command is queued instead of refused, and that part matters to whoever is
+   * playing: hitting reload in the roar of your own shot is the natural gesture, and
+   * returning `false` there would force the player to press twice for no reason they
+   * could see on screen. The ball leaves the magazine at the instant of the command
+   * (`Ship.loadCannon`) — it is already in the server's hand.
    *
-   * Vale para os dois lados do duelo, e é ponto pacífico: `Cannon` não sabe quem
-   * a opera. Uma exceção para o navio do jogador aqui dentro seria exatamente o
-   * tipo de trapaça que o resto do projeto se dá ao trabalho de evitar.
+   * It holds for both sides of the duel, and that is settled: `Cannon` does not know who
+   * operates it. An exception for the player's ship in here would be exactly the kind of
+   * cheat the rest of the project takes the trouble to avoid.
    */
   beginLoad(): boolean {
     if (this.state !== 'empty') return false;
@@ -203,22 +203,22 @@ export class Cannon {
     return true;
   }
 
-  /** Pede fogo. O tiro sai no próximo passo fixo, se houver carga. */
+  /** Asks for fire. The shot goes off on the next fixed step, if there is a charge. */
   triggerPull(): void {
     this.triggered = true;
   }
 
   /**
-   * @returns a solução de tiro quando o canhão dispara neste passo.
+   * @returns the firing solution when the cannon fires on this step.
    */
   /**
-   * Guarda a pose deste instante como a "anterior" do passo que vai começar.
+   * Stores this instant's pose as the "previous" one for the step about to begin.
    *
-   * Precisa rodar **antes** de quem quer que mire, e é por isso que não mora em
-   * `fixedUpdate`: o marujo (ou o artilheiro da máquina) chama `aim` antes de o
-   * navio integrar, então quando `fixedUpdate` chegasse a pose já teria mudado e
-   * a "anterior" sairia igual à atual — interpolação de nada com nada, e o cano
-   * de volta aos degraus de 60 Hz que ela existe para tirar.
+   * It has to run **before** whoever lays the gun, and that is why it does not live in
+   * `fixedUpdate`: the sailor (or the machine's gunner) calls `aim` before the ship
+   * integrates, so by the time `fixedUpdate` arrived the pose would already have changed
+   * and the "previous" would come out equal to the current one — interpolation of nothing
+   * with nothing, and the barrel back to the 60 Hz steps it exists to remove.
    */
   beginStep(): void {
     this.previousTraverse = this.traverse;
@@ -227,8 +227,8 @@ export class Cannon {
   }
 
   fixedUpdate(dt: number, body: ShipBody): FireSolution | null {
-    // A carreta volta ao batente pelos brandais, não instantaneamente — e ela vem
-    // **antes** do carregamento porque é ela que o libera. Ver `beginLoad`.
+    // The carriage comes back to the stop on the breechings, not instantly — and it
+    // comes **before** the loading because it is what releases it. See `beginLoad`.
     if (this.recoil > 0) this.recoil = Math.max(this.recoil - RECOIL_RETURN * dt, 0);
 
     if (this.state === 'loading' && this.recoil <= 0) {
@@ -247,12 +247,12 @@ export class Cannon {
   }
 
   /**
-   * Orientação do cano em coordenadas locais do navio.
+   * The barrel's orientation in the ship's local coordinates.
    *
-   * @param alpha fração do passo já decorrida, para a pose de desenho. Omitido,
-   *   devolve a pose **da simulação** — que é o que a balística e o artilheiro
-   *   têm de ver: mirar contra uma pose interpolada resolveria o tiro meio passo
-   *   atrás de onde a peça de fato está.
+   * @param alpha fraction of the step already elapsed, for the drawing pose. Omitted, it
+   *   returns the **simulation's** pose — which is what the ballistics and the gunner
+   *   have to see: aiming against an interpolated pose would solve the shot half a step
+   *   behind where the piece actually is.
    */
   getBarrelQuaternion(target: THREE.Quaternion, alpha?: number): THREE.Quaternion {
     const elevation =
@@ -267,36 +267,36 @@ export class Cannon {
     return target.setFromEuler(_euler);
   }
 
-  /** Direção para onde a boca aponta, em coordenadas locais do navio. */
+  /** The direction the muzzle points, in the ship's local coordinates. */
   getAimLocal(target: THREE.Vector3): THREE.Vector3 {
     this.getBarrelQuaternion(_barrel);
     return target.set(0, 0, -1).applyQuaternion(_barrel);
   }
 
   /**
-   * **O inverso de `getAimLocal`:** que travessia e elevação apontam a alma
-   * nesta direção. É a ponte entre a balística, que resolve no mundo, e a
-   * carreta, que só entende dois ângulos presos ao casco.
+   * **The inverse of `getAimLocal`:** what traverse and elevation point the bore in this
+   * direction. It is the bridge between the ballistics, which solves in the world, and
+   * the carriage, which only understands two angles fixed to the hull.
    *
-   * A conta sai de desmontar a mesma composição que `getBarrelQuaternion` monta.
-   * Com a ordem 'YXZ' e sem rolamento, a direção da boca é
+   * The arithmetic comes out of taking apart the same composition `getBarrelQuaternion`
+   * puts together. With the 'YXZ' order and no roll, the muzzle's direction is
    *
    * ```
-   * d = ( −cos e · sen a ,  sen e ,  −cos e · cos a )      a = sideYaw + traverse
+   * d = ( −cos e · sin a ,  sin e ,  −cos e · cos a )      a = sideYaw + traverse
    * ```
    *
-   * de onde `e = asen(d.y)` e `a = atan2(−d.x, −d.z)`. Não há ambiguidade a
-   * resolver porque a elevação vive em (−90°, 90°): o arco alto de morteiro
-   * simplesmente não existe nesta peça.
+   * from which `e = asin(d.y)` and `a = atan2(−d.x, −d.z)`. There is no ambiguity to
+   * resolve because the elevation lives in (−90°, 90°): a mortar's high arc simply does
+   * not exist on this piece.
    *
-   * **Por que a direção entra em coordenadas do navio.** O casco está jogando
-   * na onda. Convertendo a solução de mundo para local *no instante do tiro*, a
-   * atitude do navio entra de graça na conta — e é isso que faz o artilheiro
-   * bot esperar o balanço trazer o cano para cima do alvo em vez de atirar no
-   * meio do mar. A pontaria não corrige o balanço: ela espera por ele.
+   * **Why the direction comes in the ship's coordinates.** The hull is working in the
+   * sea. Converting the world solution into local *at the instant of the shot*, the
+   * ship's attitude enters the arithmetic for free — and that is what makes the bot
+   * gunner wait for the roll to bring the barrel onto the target instead of firing into
+   * the middle of the sea. The aim does not correct for the roll: it waits for it.
    *
-   * @param localDirection direção desejada, em coordenadas do navio. Não precisa
-   *   estar normalizada.
+   * @param localDirection the desired direction, in the ship's coordinates. It does not
+   *   have to be normalized.
    */
   solveAim(localDirection: THREE.Vector3, out: AimAngles): AimAngles {
     const length = localDirection.length();
@@ -308,8 +308,8 @@ export class Cannon {
     }
 
     out.elevation = Math.asin(clamp(localDirection.y / length, -1, 1));
-    // `wrapAngle` porque `sideYaw` é ±π/2 e o azimute vem em (−π, π]: sem
-    // normalizar, a peça de bombordo enxergaria travessias na casa dos 270°.
+    // `wrapAngle` because `sideYaw` is ±π/2 and the azimuth comes in (−π, π]: without
+    // normalizing, the port piece would see traverses up around 270°.
     out.traverse = wrapAngle(Math.atan2(-localDirection.x, -localDirection.z) - this.sideYaw);
     out.bears =
       Math.abs(out.traverse) <= TRAVERSE_LIMIT &&
@@ -320,13 +320,13 @@ export class Cannon {
   }
 
   /**
-   * Centro dos munhões — o ponto em torno do qual o cano eleva, e onde o recuo
-   * empurra. Em coordenadas locais do navio.
+   * The trunnions' center — the point the barrel elevates around, and where the recoil
+   * pushes. In the ship's local coordinates.
    */
   getPivotLocal(target: THREE.Vector3): THREE.Vector3 {
     const root = this.assembly.root;
-    // A carreta corre para trás ao longo da própria linha de tiro. O `sideYaw`
-    // fica de fora porque o resultado já é rodado por ele logo abaixo.
+    // The carriage runs back along its own line of fire. `sideYaw` stays out of it
+    // because the result is rotated by it right below.
     const back = this.recoil;
     _quat.setFromAxisAngle(UP, this.sideYaw);
     target
@@ -336,7 +336,7 @@ export class Cannon {
     return target;
   }
 
-  /** Posição da boca, em coordenadas locais do navio. */
+  /** The muzzle's position, in the ship's local coordinates. */
   getMuzzleLocal(target: THREE.Vector3): THREE.Vector3 {
     this.getBarrelQuaternion(_barrel);
     this.getPivotLocal(_pivot);
@@ -346,7 +346,7 @@ export class Cannon {
       .add(_pivot);
   }
 
-  /** Escreve travessia, elevação e recuo no modelo 3D, na pose do quadro. */
+  /** Writes traverse, elevation and recoil into the 3D model, in the frame's pose. */
   syncModel(alpha = 1): void {
     const t = this.previousTraverse + (this.traverse - this.previousTraverse) * alpha;
     const e = this.previousElevation + (this.elevation - this.previousElevation) * alpha;
@@ -365,8 +365,8 @@ export class Cannon {
     this.traverse = 0;
     this.elevation = 0.1;
     this.triggered = false;
-    // A pose anterior vai junto: sem isto, o primeiro quadro de uma partida nova
-    // interpola a partir de onde a peça estava quando a anterior acabou.
+    // The previous pose goes with it: without this, a new match's first frame
+    // interpolates from where the piece was when the last one ended.
     this.previousTraverse = 0;
     this.previousElevation = 0.1;
     this.previousRecoil = 0;
@@ -381,13 +381,14 @@ export class Cannon {
     body.localToWorld(position, position);
     body.localDirToWorld(direction, direction);
 
-    // Velocidade do próprio ponto da boca: translação do casco mais a rotação.
+    // The velocity of the muzzle's own point: the hull's translation plus the
+    // rotation.
     _arm.subVectors(position, body.comPosition);
     body.pointVelocity(_arm, _carry);
     const velocity = direction.clone().multiplyScalar(MUZZLE_SPEED).add(_carry);
 
-    // Impulso convertido em força porque o integrador trabalha com forças; num
-    // passo fixo os dois são a mesma coisa.
+    // The impulse is converted into a force because the integrator works with forces; on
+    // a fixed step the two are the same thing.
     this.getPivotLocal(_pivot);
     body.localToWorld(_pivot, _pivot);
     _force.copy(direction).multiplyScalar((-BALL_MASS * MUZZLE_SPEED) / dt);

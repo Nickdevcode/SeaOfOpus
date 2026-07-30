@@ -98,7 +98,7 @@ function createContext(size: number): CanvasRenderingContext2D {
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas 2D indisponível — as texturas do navio dependem dele.');
+  if (!ctx) throw new Error('Canvas 2D unavailable — the ship textures depend on it.');
   return ctx;
 }
 
@@ -284,10 +284,10 @@ export function createWoodMaps(options: WoodOptions): MaterialMaps {
       const buttEdge = Math.min(along, 1 - along);
       const butt = 1 - smoothstep(0.0, 0.006, buttEdge);
 
-      // --- nós ---------------------------------------------------------------
+      // --- knots -------------------------------------------------------------
       let knot = 0;
       for (const k of knots) {
-        // Distância envolvendo em X, para o nó não ser cortado pela borda.
+        // Wrapping distance in X, so the knot is not cut off by the edge.
         let dx = Math.abs(x - k.x);
         if (dx > size * 0.5) dx = size - dx;
         const d = Math.hypot(dx, y - k.y);
@@ -297,11 +297,11 @@ export function createWoodMaps(options: WoodOptions): MaterialMaps {
         }
       }
 
-      // --- desgaste e sujeira -------------------------------------------------
+      // --- wear and grime -----------------------------------------------------
       const weather = fbm(noise, (x / size) * 5, (y / size) * 5, 40, 4);
       const wearMask = clamp01((weather - 0.42) * 2.2) * options.wear;
 
-      // --- composição da cor --------------------------------------------------
+      // --- putting the color together -----------------------------------------
       let mix = clamp01(grain * 0.75 + knot * 0.8);
       mix = clamp01(mix * plankTone[row]!);
 
@@ -309,13 +309,13 @@ export function createWoodMaps(options: WoodOptions): MaterialMaps {
       let g = lerp(options.base[1], options.grain[1], mix);
       let b = lerp(options.base[2], options.grain[2], mix);
 
-      // Desgaste esbranquiça e dessatura — é sal e sol, não sujeira.
+      // Wear whitens and desaturates — it is salt and sun, not grime.
       const grey = (r + g + b) / 3;
       r = lerp(r, lerp(grey, 0.72, 0.45), wearMask);
       g = lerp(g, lerp(grey, 0.72, 0.45), wearMask);
       b = lerp(b, lerp(grey, 0.7, 0.45), wearMask);
 
-      // A quina lixada volta mais clara que o miolo da tábua.
+      // The sanded corner comes back brighter than the plank's middle.
       const brighten = (1 - chamfer) * 0.12 * (1 - gap);
       r += brighten;
       g += brighten;
@@ -332,27 +332,27 @@ export function createWoodMaps(options: WoodOptions): MaterialMaps {
       data[pixel + 2] = clamp01(b) * 255;
       data[pixel + 3] = 255;
 
-      // O veio quase não entra na altura: é detalhe fino demais, e relevo fino
-      // vira cintilação especular assim que a peça se afasta da câmera. Quem
-      // carrega o relevo aqui são as juntas, o chanfro e os pregos, que têm
-      // milímetros de verdade. O veio se expressa na cor e na rugosidade.
+      // The grain barely enters the height: it is too fine a detail, and fine relief
+      // turns into specular shimmer as soon as the piece moves away from the camera.
+      // What carries the relief here are the seams, the chamfer and the nails, which
+      // have real millimeters. The grain expresses itself in the color and the
+      // roughness.
       height[index] = 1 - darkness * 0.9 - knot * 0.12 + grain * 0.025 - (1 - chamfer) * 0.08;
       occlusion[index] = 1 - darkness * 0.75;
-      // Madeira gasta é fosca; o veio duro brilha um pouco mais que o mole.
+      // Worn wood is matte; the hard grain shines a little more than the soft.
       //
-      // A base subiu de 0,62 para 0,72 quando o mapa de ambiente entrou em cena:
-      // com um céu inteiro para refletir, 0,62 dava ao carvalho alcatroado um
-      // lustro de verniz novo — o timão parecia envernizado, não um cabo de
-      // madeira que passa o dia na maresia. Carvalho intemperizado real fica
-      // entre 0,75 e 0,95.
+      // The base went up from 0.62 to 0.72 when the environment map came into the
+      // scene: with a whole sky to reflect, 0.62 gave the tarred oak the gloss of fresh
+      // varnish — the helm looked lacquered, not like a wooden handle that spends its
+      // day in the salt air. Real weathered oak sits between 0.75 and 0.95.
       roughness[index] = clamp01(0.72 + wearMask * 0.22 - grain * 0.06 + darkness * 0.12);
     }
   }
 
   ctx.putImageData(image, 0, 0);
 
-  // Pregos: desenhados por cima da cor já pronta, e marcados na altura, para o
-  // relevo do normal acompanhar a cabeça redonda.
+  // Nails: drawn over the finished color, and marked in the height map, so the normal's
+  // relief follows the round head.
   if (options.nails) {
     for (let row = 0; row < plankRows; row++) {
       for (let n = 0; n < 2; n++) {
@@ -391,18 +391,18 @@ export function createWoodMaps(options: WoodOptions): MaterialMaps {
   };
 }
 
-// --- lona da vela ------------------------------------------------------------
+// --- sailcloth ---------------------------------------------------------------
 
 /**
- * Lona de vela: painéis costurados, faixas de rizo, trama e manchas de maré.
+ * Sailcloth: sewn panels, reef bands, weave and tide stains.
  *
- * O UV da vela vai de 0 a 1 nas duas direções, então **um pixel desta textura
- * cobre mais de um centímetro de pano**. Isso decide tudo o que vem abaixo: a
- * trama do tecido é fina demais para caber aqui, e desenhá-la fio a fio só
- * produz moiré (foi exatamente o que aconteceu — a vela virou tela de
- * mosquiteiro). Então a trama entra como microrrelevo de baixa amplitude, quase
- * invisível de perto e inofensiva de longe, e quem carrega a leitura de "pano"
- * são as costuras dos painéis, as faixas de rizo e as ondulações largas.
+ * The sail's UV runs from 0 to 1 in both directions, so **one pixel of this texture
+ * covers more than a centimeter of cloth**. That decides everything below: the fabric's
+ * weave is too fine to fit here, and drawing it thread by thread only produces moiré
+ * (which is exactly what happened — the sail turned into mosquito netting). So the weave
+ * comes in as low-amplitude micro-relief, nearly invisible up close and harmless from a
+ * distance, and what carries the reading of "cloth" are the panels' seams, the reef bands
+ * and the wide ripples.
  */
 export function createSailMaps(seed = 77, size = DEFAULT_SIZE): MaterialMaps {
   const noise = createNoise(seed);
@@ -414,30 +414,30 @@ export function createSailMaps(seed = 77, size = DEFAULT_SIZE): MaterialMaps {
   const occlusion = new Float32Array(size * size);
   const roughness = new Float32Array(size * size);
 
-  /** Painéis verticais de lona. Nove numa vela de 7 m dá ~78 cm cada. */
+  /** Vertical cloth panels. Nine on a 7 m sail gives ~78 cm each. */
   const panels = 9;
   /**
-   * Altura de cada faixa de rizo, onde a vela é enrolada e amarrada. O
-   * espaçamento é irregular de propósito: com as três igualmente distribuídas,
-   * cruzadas com as costuras verticais, o pano lia como grade de janela.
+   * Height of each reef band, where the sail is rolled up and tied. The spacing is
+   * irregular on purpose: with the three evenly distributed, crossed with the vertical
+   * seams, the cloth read as a window grille.
    */
   const reefBands = [0.33, 0.61, 0.84];
   /**
-   * Ciclos de trama na textura inteira.
+   * Weave cycles across the whole texture.
    *
-   * A trama entra na cor e na rugosidade, e **nunca no mapa de normais**. A
-   * inclinação de um relevo cresce com a frequência, não com a amplitude: 34
-   * ciclos em 512 px dão uma normal que vira de pixel para pixel, e nenhum mip
-   * consegue tirar média disso. Na tela virava um quadriculado de pontos brancos
-   * varrendo a vela conforme o navio jogava — specular aliasing de manual.
-   * Detalhe abaixo do pixel é rugosidade, não geometria.
+   * The weave goes into the color and the roughness, and **never into the normal map**.
+   * A relief's slope grows with the frequency, not with the amplitude: 34 cycles across
+   * 512 px give a normal that flips from pixel to pixel, and no mip can average that
+   * out. On screen it became a checkerboard of white dots sweeping the sail as the ship
+   * rolled — textbook specular aliasing. Detail below the pixel is roughness, not
+   * geometry.
    */
   const threads = 34;
 
   /**
-   * Tom de cada painel. Vela de verdade é costurada de tiras que saíram de
-   * rolos diferentes, e nenhuma tem exatamente a mesma cor — é essa variação,
-   * mais que a linha da costura, que faz a lona ler como costurada.
+   * Each panel's shade. A real sail is sewn from strips that came off different bolts,
+   * and no two have exactly the same color — it is that variation, more than the stitch
+   * line, that makes the cloth read as sewn.
    */
   const panelTone = Array.from({ length: panels }, (_, i) => (noise(i, 3.5, panels) - 0.5) * 0.07);
 
@@ -447,33 +447,34 @@ export function createSailMaps(seed = 77, size = DEFAULT_SIZE): MaterialMaps {
       const u = x / size;
       const v = y / size;
 
-      // Trama: dois fios cruzados, um por cima do outro alternadamente.
+      // Weave: two crossed threads, alternately one over the other.
       const warp = Math.sin(u * Math.PI * 2 * threads);
       const weft = Math.sin(v * Math.PI * 2 * threads);
       const weave = (warp * 0.5 + weft * 0.5) * 0.5 + 0.5;
 
-      // Costura entre painéis: uma faixa estreita, mais grossa e mais escura.
+      // The seam between panels: a narrow band, thicker and darker.
       const panelIndex = Math.floor(u * panels) % panels;
       const panelPos = (u * panels) % 1;
       const seam = 1 - smoothstep(0.004, 0.03, Math.min(panelPos, 1 - panelPos));
 
-      // Faixa de rizo: mesma ideia na horizontal, porém mais larga e mais suave.
+      // Reef band: the same idea horizontally, but wider and softer.
       let band = 0;
       for (const position of reefBands) {
         band = Math.max(band, 1 - smoothstep(0.008, 0.036, Math.abs(v - position)));
       }
 
-      // Manchas de maré e mofo, concentradas embaixo — a vela molha pela barra.
+      // Tide stains and mildew, concentrated at the bottom — the sail gets wet along
+      // its foot.
       const stain = fbm(noise, u * 4, v * 4, 32, 4);
       const wet = clamp01((stain - 0.45) * 2) * smoothstep(0.35, 1, v);
 
-      // Tensão do tecido: ondulação larga que o normal transforma em relevo.
-      // É ela que faz a lona parecer esticada em vez de impressa.
+      // The fabric's tension: a wide ripple the normal map turns into relief. It is
+      // what makes the cloth look stretched instead of printed.
       const slack = fbm(noise, u * 3, v * 3, 24, 4);
 
       const base = 0.9 + panelTone[panelIndex]! - wet * 0.26 - (slack - 0.5) * 0.12;
-      // Creme, não branco: lona crua puxa para o amarelo, e sob o céu azul do
-      // meio-dia um branco neutro leria como cinza-azulado.
+      // Cream, not white: raw canvas pulls toward yellow, and under the blue noon sky a
+      // neutral white would read as blue-gray.
       const tint = [base, base * 0.945, base * 0.82];
 
       const shade = 1 - seam * 0.16 - band * 0.07 - (1 - weave) * 0.025;
@@ -485,8 +486,8 @@ export function createSailMaps(seed = 77, size = DEFAULT_SIZE): MaterialMaps {
 
       height[index] = slack * 0.9 + band * 0.3 - seam * 0.55;
       occlusion[index] = 1 - seam * 0.3 - wet * 0.12;
-      // O fio que não virou relevo vira rugosidade: é o mesmo detalhe, cobrado
-      // no canal onde ele não alia.
+      // The thread that did not become relief becomes roughness: it is the same detail,
+      // charged to the channel where it does not alias.
       roughness[index] = clamp01(0.88 + wet * 0.08 - band * 0.06 + (1 - weave) * 0.03);
     }
   }
@@ -500,14 +501,14 @@ export function createSailMaps(seed = 77, size = DEFAULT_SIZE): MaterialMaps {
   };
 }
 
-// --- cordame -----------------------------------------------------------------
+// --- rigging -----------------------------------------------------------------
 
 /**
- * Corda: três pernas torcidas.
+ * Rope: three twisted strands.
  *
- * A hélice sai de um único `fract` no eixo do comprimento somado ao ângulo em
- * volta — desenhar a torção em vez de ruidar a cor é o que faz uma corda de 2 cm
- * ainda parecer corda quando o jogador encosta o rosto nela.
+ * The helix comes out of a single `fract` on the length axis added to the angle around —
+ * drawing the twist instead of noising the color is what makes a 2 cm rope still look
+ * like rope when the player puts their face against it.
  */
 export function createRopeMaps(seed = 91, size = 256): MaterialMaps {
   const noise = createNoise(seed);
@@ -519,18 +520,18 @@ export function createRopeMaps(seed = 91, size = 256): MaterialMaps {
   const occlusion = new Float32Array(size * size);
   const roughness = new Float32Array(size * size);
 
-  /** Voltas da hélice ao longo da textura. */
+  /** Turns of the helix along the texture. */
   const twists = 8;
   const strands = 3;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const index = y * size + x;
-      const u = x / size; // volta da corda
-      const v = y / size; // comprimento
+      const u = x / size; // around the rope
+      const v = y / size; // along its length
 
       const phase = (u * strands + v * twists) % 1;
-      // Perfil da perna: cheia no meio, fundo no vale entre duas.
+      // The strand's profile: full in the middle, deep in the valley between two.
       const strand = Math.pow(Math.sin(phase * Math.PI), 0.55);
 
       const fibre = fbm(noise, u * 30, v * 8, 64, 3);
@@ -561,21 +562,21 @@ export function createRopeMaps(seed = 91, size = 256): MaterialMaps {
 
 export interface MetalOptions {
   base: [number, number, number];
-  /** 0 = polido, 1 = corroído até o osso. */
+  /** 0 = polished, 1 = corroded to the bone. */
   corrosion: number;
   metalness: number;
   /**
-   * Rugosidade da superfície ainda limpa, antes da ferrugem entrar. Faz muita
-   * diferença: ferro fundido de canhão é areia bruta (≈0.6) e devolve um brilho
-   * largo e mole, enquanto o mesmo material em 0.3 lê como obsidiana polida.
+   * Roughness of the still-clean surface, before the rust comes in. It makes a big
+   * difference: a cannon's cast iron is raw sand (≈0.6) and gives back a wide, soft
+   * highlight, while the same material at 0.3 reads as polished obsidian.
    */
   roughness?: number;
   /**
-   * Cor do óxido. O padrão é a ferrugem vermelho-terrosa do ferro.
+   * The oxide's color. The default is iron's earthy red rust.
    *
-   * Latão não enferruja: ele forma **zinabre**, o verde-azulado de estátua
-   * velha. Pintar o latão com ferrugem de ferro dá uma peça cor de lama que não
-   * lê como liga de cobre nenhuma.
+   * Brass does not rust: it forms **verdigris**, the blue-green of an old statue.
+   * Painting brass with iron rust gives a mud-colored piece that does not read as any
+   * copper alloy.
    */
   corrosionColor?: [number, number, number];
   seed: number;
@@ -583,11 +584,11 @@ export interface MetalOptions {
 }
 
 /**
- * Ferro forjado e latão: martelado, com corrosão nas reentrâncias.
+ * Wrought iron and brass: hammered, with corrosion in the hollows.
  *
- * A ferrugem não é só uma cor por cima — ela também sobe a rugosidade e
- * **derruba a metalicidade** naquele ponto, porque óxido de ferro é dielétrico.
- * É o detalhe que faz a peça enferrujada parar de espelhar como metal.
+ * The rust is not only a color on top — it also raises the roughness and **drops the
+ * metalness** at that point, because iron oxide is a dielectric. It is the detail that
+ * makes the rusted piece stop mirroring like metal.
  */
 export function createMetalMaps(options: MetalOptions): MaterialMaps {
   const size = options.size ?? 256;
@@ -607,9 +608,9 @@ export function createMetalMaps(options: MetalOptions): MaterialMaps {
       const u = x / size;
       const v = y / size;
 
-      // Marcas de martelo: células largas e suaves.
+      // Hammer marks: wide, soft cells.
       const hammer = fbm(noise, u * 8, v * 8, 32, 2);
-      // Picotes da corrosão: alta frequência, com corte para virar cratera.
+      // Corrosion pits: high frequency, with a cutoff to turn them into craters.
       const pit = fbm(noise, u * 26, v * 26, 96, 3);
       const rust = clamp01((pit - 0.52) * 3) * options.corrosion;
 
@@ -638,19 +639,19 @@ export function createMetalMaps(options: MetalOptions): MaterialMaps {
   };
 }
 
-// --- partículas ---------------------------------------------------------------
+// --- particles ----------------------------------------------------------------
 
 /**
- * Sprite de baforada: fumaça, respingo e espuma saem todos daqui.
+ * The puff sprite: smoke, splash and foam all come out of here.
  *
- * Diferente do resto do arquivo, **não** é um mapa PBR e **não** ladrilha — é um
- * sprite solto, então o ruído usado é aperiódico de propósito. O alfa carrega a
- * silhueta e o RGB carrega uma sombra interna já pronta, o que dá volume à
- * baforada sem nenhuma conta de iluminação: o material das partículas é
- * `ShaderMaterial` puro, sem luz.
+ * Unlike the rest of the file, it is **not** a PBR map and it does **not** tile — it is a
+ * loose sprite, so the noise used is aperiodic on purpose. The alpha carries the
+ * silhouette and the RGB carries a ready-made internal shading, which gives the puff
+ * volume with no lighting arithmetic at all: the particles' material is a plain
+ * `ShaderMaterial`, with no light.
  *
- * A silhueta é o disco deformado por fbm, e não um disco liso — é a diferença
- * entre "nuvem de pólvora" e "bola de algodão desfocada".
+ * The silhouette is the disc deformed by fbm, and not a smooth disc — it is the
+ * difference between "a cloud of powder smoke" and "a blurry cotton ball".
  */
 export function createPuffTexture(seed = 13, size = 128): THREE.CanvasTexture {
   const noise = createNoise(seed);
@@ -665,11 +666,11 @@ export function createPuffTexture(seed = 13, size = 128): THREE.CanvasTexture {
       const radius = Math.hypot(u, v) * 2;
 
       const turbulence = fbm(noise, (u + 0.5) * 5, (v + 0.5) * 5, 64, 4);
-      // O ruído entra deformando o *raio*, não multiplicando o alfa: assim a
-      // borda fica recortada, em vez de a baforada inteira ficar salpicada.
+      // The noise comes in deforming the *radius*, not multiplying the alpha: that way
+      // the rim comes out ragged, instead of the whole puff coming out speckled.
       const shape = 1 - smoothstep(0.35, 1, radius + (turbulence - 0.5) * 0.55);
 
-      // Sombra interna com o topo mais claro, como fumaça iluminada de cima.
+      // Internal shading with a brighter top, like smoke lit from above.
       const shade = 0.55 + turbulence * 0.3 + (0.5 - v) * 0.3;
 
       const index = (y * size + x) * 4;
@@ -684,15 +685,15 @@ export function createPuffTexture(seed = 13, size = 128): THREE.CanvasTexture {
 
   const texture = new THREE.CanvasTexture(ctx.canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  // Borda transparente e sem repetição: `ClampToEdge` evita a costura que o
-  // filtro bilinear criaria ao amostrar de um lado para o outro do sprite.
+  // A transparent rim and no repetition: `ClampToEdge` avoids the seam the bilinear
+  // filter would create by sampling from one side of the sprite to the other.
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.needsUpdate = true;
   return texture;
 }
 
-/** Libera as três texturas de um conjunto. */
+/** Releases a set's three textures. */
 export function disposeMaps(maps: MaterialMaps): void {
   maps.map.dispose();
   maps.normalMap.dispose();

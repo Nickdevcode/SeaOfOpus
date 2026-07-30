@@ -1,15 +1,15 @@
 /**
- * Monta a Chalupa inteira e entrega as alças que o resto do jogo precisa girar.
+ * Assembles the whole sloop and hands over the handles the rest of the game has to turn.
  *
- * A construção é dividida em dois passos de propósito. `createShipAssets()` gera
- * o que é caro e idêntico nos dois navios da partida — texturas, materiais,
- * casco e todas as peças fixas — e `createShip()` só instancia malhas em cima
- * dessa geometria compartilhada. O navio inimigo custa, em memória de GPU,
- * praticamente nada além das poucas peças que giram.
+ * The build is split into two steps on purpose. `createShipAssets()` generates what is
+ * expensive and identical on both ships in the match — textures, materials, hull and
+ * every fixed part — and `createShip()` only instances meshes on top of that shared
+ * geometry. The enemy ship costs, in GPU memory, practically nothing beyond the few parts
+ * that turn.
  *
- * Tudo aqui vive no sistema local do navio (`-Z` proa, `+Y` cima, origem na
- * linha d'água de projeto). Quem move o navio no mundo é `ShipBody`, escrevendo
- * na matriz de `root` — nada neste módulo sabe onde o navio está.
+ * Everything here lives in the ship's local frame (`-Z` forward, `+Y` up, origin at the
+ * design waterline). What moves the ship in the world is `ShipBody`, writing into `root`'s
+ * matrix — nothing in this module knows where the ship is.
  */
 
 import * as THREE from 'three';
@@ -34,27 +34,28 @@ import {
 import { QUARTERDECK_Y, STATIONS, deckCamber, deckHalfWidth, tToZ } from './ShipDimensions';
 
 /**
- * Onde o timoneiro fica de pé, atrás da roda, olhando para a proa.
+ * Where the helmsman stands, behind the wheel, facing the bow.
  *
- * **Eram 85 cm, e 85 cm é uma medida de enquadramento.** Foi escolhida quando o
- * jogador não tinha corpo: com a câmera solta atrás da roda, o que se julgava era
- * quanto do navio cabia na tela. No dia em que o corpo chegou, a mesma distância
- * virou uma medida **anatômica** — e não fecha. O braço deste rig mede 0,678 m do
- * ombro à palma (`anim_helm.ARM_REACH`), e o ombro fica 1,462 m acima dos pés:
- * para um vão de 0,850 m faltam **17 cm** que nenhuma pose inventa de graça. Em
- * primeira pessoa é pior, porque o corpo ainda recua `FIRST_PERSON_SETBACK`.
+ * **It used to be 85 cm, and 85 cm is a framing measurement.** It was chosen when the
+ * player had no body: with the camera loose behind the wheel, what you were judging was
+ * how much of the ship fit on screen. The day the body arrived, the same distance became
+ * an **anatomical** measurement — and it does not add up. This rig's arm measures 0.678 m
+ * from shoulder to palm (`anim_helm.ARM_REACH`), and the shoulder sits 1.462 m above the
+ * feet: for a gap of 0.850 m there are **17 cm** missing that no pose invents for free.
+ * In first person it is worse, because the body also steps back by
+ * `FIRST_PERSON_SETBACK`.
  *
- * A alternativa era pagar os 17 cm com postura — tronco inclinado, quadril
- * avançado, ombro projetado —, e ela existiu (`_HelmIntact`). Funciona, e parece
- * o que é: um homem esticado sobre uma roda longe demais, com o braço a 91% da
- * extensão. Aproximar o posto sai mais barato e o timoneiro fica **em pé**, com o
- * cotovelo dobrado e o braço em 88% no pior quadro do ciclo.
+ * The alternative was to pay the 17 cm with posture — leaning torso, hips forward,
+ * shoulder thrown out —, and it existed (`_HelmIntact`). It works, and it looks like what
+ * it is: a man stretched over a wheel that is too far away, with his arm at 91% of its
+ * extension. Bringing the station closer is cheaper and the helmsman stands **upright**,
+ * with his elbow bent and his arm at 88% in the cycle's worst frame.
  *
- * 0,62 é o maior valor que mantém esse pior quadro abaixo dos 88%, e o menor que
- * ainda cabe: a face de ré do tambor do leme fica a 0,22 m do plano da roda, e
- * sobram 10 cm para o cilindro de colisão do jogador. Mexer aqui pede mexer junto
- * no raio do obstáculo do timão, em `PlayerController` — foi ele que expulsava o
- * jogador do posto.
+ * 0.62 is the largest value that keeps that worst frame under 88%, and the smallest that
+ * still fits: the after face of the tiller drum sits 0.22 m from the wheel's plane, and
+ * 10 cm are left for the player's collision cylinder. Touching this means touching the
+ * helm obstacle's radius in `PlayerController` too — that is what used to push the player
+ * out of the station.
  */
 export const HELM_STAND = new THREE.Vector3(
   0,
@@ -63,15 +64,15 @@ export const HELM_STAND = new THREE.Vector3(
 );
 
 /**
- * Clona o material da vela e multiplica a cor dele.
+ * Clones the sail's material and multiplies its color.
  *
- * Multiplica, e não substitui: a lona já tem cor e mapa de textura próprios, e
- * jogar uma cor chapada em cima apagaria a trama do pano. Multiplicando, o tingido
- * atravessa o tecido — que é literalmente o que tinta faz em lona.
+ * It multiplies, and does not replace: the canvas already has its own color and texture
+ * map, and throwing a flat color on top would erase the cloth's weave. By multiplying,
+ * the dye goes through the fabric — which is literally what dye does to canvas.
  *
- * O emissivo vai junto, na mesma proporção. Ele existe para a face de trás não
- * ficar preta com o sol de frente (ver `ShipMaterials`), e se ficasse na cor
- * original a vela tingida acenderia com a luz do pano cru na contraluz.
+ * The emissive goes with it, in the same proportion. It exists so the back face does not
+ * go black with the sun in front (see `ShipMaterials`), and if it stayed the original
+ * color the dyed sail would light up with raw canvas's light when backlit.
  */
 function tintSail(base: THREE.MeshStandardMaterial, tint: THREE.ColorRepresentation): THREE.MeshStandardMaterial {
   const material = base.clone();
@@ -80,24 +81,23 @@ function tintSail(base: THREE.MeshStandardMaterial, tint: THREE.ColorRepresentat
   return material;
 }
 
-/** Cor das lanternas — chama de óleo, bem quente. */
+/** The lanterns' color — an oil flame, good and warm. */
 const LANTERN_COLOR = 0xffab5e;
-/** Intensidade da luz pontual de cada lanterna, em candela, com a noite fechada. */
+/** Intensity of each lantern's point light, in candela, at full night. */
 const LANTERN_INTENSITY = 7;
-/** Alcance da luz. Curto de propósito: lanterna ilumina o convés, não o mar. */
+/** The light's range. Short on purpose: a lantern lights the deck, not the sea. */
 const LANTERN_RANGE = 13;
 
 /**
- * O que é compartilhado entre todos os navios. Criar isso é a parte cara da
- * inicialização (texturas em canvas 2D mais a varredura do casco), então roda
- * uma vez só, no carregamento da partida.
+ * What is shared across every ship. Creating this is the expensive part of startup (2D
+ * canvas textures plus the hull's sweep), so it runs only once, when the match loads.
  */
 export interface ShipAssets {
   materials: ShipMaterials;
   hull: HullGeometrySet;
-  /** Geometria de tudo que não se mexe, agrupada por material. */
+  /** Geometry of everything that does not move, grouped by material. */
   parts: PartGeometries;
-  /** Onde ficam as lanternas, e quais delas nunca apagam. */
+  /** Where the lanterns are, and which of them never go out. */
   lanternSpots: readonly LanternSpot[];
   dispose(): void;
 }
@@ -124,26 +124,26 @@ export function createShipAssets(): ShipAssets {
 }
 
 export interface ShipModel {
-  /** Raiz do navio. É nela que `ShipBody` escreve posição e orientação. */
+  /** The ship's root. It is where `ShipBody` writes position and orientation. */
   root: THREE.Group;
-  /** Roda do timão. Gira no próprio Z. */
+  /** The ship's wheel. It turns on its own Z. */
   wheel: THREE.Group;
-  /** Cabrestante. Gira no próprio Y enquanto a âncora sobe. */
+  /** The capstan. It turns on its own Y while the anchor comes up. */
   capstan: THREE.Group;
-  /** Leme. Gira no próprio Y; o ângulo é o que `Rudder` calcula. */
+  /** The rudder. It turns on its own Y; the angle is what `Rudder` computes. */
   rudder: THREE.Group;
   anchor: THREE.Group;
-  /** Índice 0 é boreste, índice 1 é bombordo. */
+  /** Index 0 is starboard, index 1 is port. */
   cannons: readonly CannonAssembly[];
-  /** Pano da vela. A geometria é dele, e `SailSim` reescreve as posições. */
+  /** The sail's cloth. The geometry belongs to it, and `SailSim` rewrites the positions. */
   sail: THREE.Mesh;
-  /** Bandeira do tope. Mesma história do pano: `EnsignSim` a reescreve. */
+  /** The masthead ensign. Same story as the cloth: `EnsignSim` rewrites it. */
   ensign: THREE.Mesh;
-  /** Luzes das lanternas, já penduradas no navio. */
+  /** The lanterns' lights, already hung on the ship. */
   lanterns: readonly THREE.PointLight[];
   /**
-   * Acende ou apaga as lanternas. `k` vai de 0 (apagadas, e a chama some) a 1
-   * (noite fechada) — quem decide é `DayNightCycle`.
+   * Lights the lanterns or puts them out. `k` runs from 0 (out, and the flame
+   * disappears) to 1 (full night) — what decides is `DayNightCycle`.
    */
   setLanternIntensity(k: number): void;
   dispose(): void;
@@ -151,15 +151,15 @@ export interface ShipModel {
 
 export interface ShipOptions {
   /**
-   * Cor multiplicada na vela, para distinguir um navio do outro no horizonte.
+   * A color multiplied into the sail, to tell one ship from the other on the horizon.
    *
-   * A vela é o único lugar honesto para fazer isso. É a maior superfície do navio,
-   * a única visível a 200 m, e a que um capitão de verdade *escolheria* — bandeira e
-   * pano eram a identidade do barco. Pintar o casco de outra cor seria mentir sobre
-   * o material; trocar a silhueta exigiria um segundo modelo.
+   * The sail is the only honest place to do this. It is the ship's largest surface, the
+   * only one visible at 200 m, and the one a real captain would *choose* — the flag and
+   * the canvas were the boat's identity. Painting the hull another color would be lying
+   * about the material; changing the silhouette would take a second model.
    *
-   * Custa um clone de material por navio: os mapas de textura são compartilhados
-   * por referência, então o gasto de GPU é zero.
+   * It costs one material clone per ship: the texture maps are shared by reference, so
+   * the GPU cost is zero.
    */
   sailTint?: THREE.ColorRepresentation;
 }
@@ -169,7 +169,7 @@ export function createShip(assets: ShipAssets, name = 'ship', options: ShipOptio
   const root = new THREE.Group();
   root.name = name;
 
-  // Casco: quatro malhas, uma por material.
+  // The hull: four meshes, one per material.
   for (const [key, geometry] of Object.entries(assets.hull)) {
     const mesh = new THREE.Mesh(geometry, materials[key as keyof HullGeometrySet]);
     mesh.name = `hull-${key}`;
@@ -181,7 +181,7 @@ export function createShip(assets: ShipAssets, name = 'ship', options: ShipOptio
   const partMeshes = meshesFromParts(assets.parts, materials, root);
   const flames = partMeshes.filter((mesh) => mesh.material === materials.flame);
 
-  // Peças móveis: geometria própria, porque cada navio as gira para um lado.
+  // Moving parts: their own geometry, because each ship turns them a different way.
   const wheel = createWheel(materials);
   const capstan = createCapstan(materials);
   const rudder = createRudder(materials);
@@ -190,31 +190,32 @@ export function createShip(assets: ShipAssets, name = 'ship', options: ShipOptio
 
   root.add(wheel, capstan, rudder, anchor, cannons[0].root, cannons[1].root);
 
-  // Vela: geometria por navio, já que `SailSim` reescreve as posições dela.
+  // The sail: geometry per ship, since `SailSim` rewrites its positions.
   const sailMaterial = options.sailTint === undefined
     ? materials.sail
     : tintSail(materials.sail, options.sailTint);
   const sail = new THREE.Mesh(createSailGeometry(), sailMaterial);
   sail.name = 'sail';
   sail.castShadow = true;
-  // Não recebe sombra de propósito. O pano tem espessura zero, então as duas
-  // faces caem na mesma profundidade do shadow map e a vela se auto-sombreia:
-  // dá manchas moles espalhadas pelo pano, que o PCF de raio 2.5 ainda espalha
-  // mais. Perde-se a sombra da enxárcia sobre a lona; ganha-se um pano limpo.
+  // It does not receive shadow on purpose. The cloth has zero thickness, so both faces
+  // land at the same depth in the shadow map and the sail self-shadows: it gives soft
+  // blotches spread over the cloth, which the radius-2.5 PCF spreads further still. You
+  // lose the shroud's shadow on the canvas; you gain a clean cloth.
   sail.receiveShadow = false;
-  // O pano se deforma todo quadro, então a esfera envolvente calculada na
-  // criação envelhece. Sem isto a vela sumiria justamente quando enfunasse.
+  // The cloth deforms every frame, so the bounding sphere computed at creation goes
+  // stale. Without this the sail would disappear exactly when it filled.
   sail.frustumCulled = false;
   root.add(sail);
 
-  // A bandeira usa o mesmo material da vela — inclusive o tingido deste navio —
-  // então ela nasce carmim no inimigo sem nenhuma linha a mais.
+  // The ensign uses the sail's material — this ship's tint included — so it is born
+  // crimson on the enemy without a single extra line.
   const ensign = new THREE.Mesh(createEnsign(), sailMaterial);
   ensign.name = 'ensign';
   ensign.castShadow = true;
   ensign.receiveShadow = false;
-  // Mesmo motivo da vela: o pano se deforma todo quadro, e a esfera envolvente
-  // calculada na criação envelheceria — a bandeira sumiria justo quando esticasse.
+  // Same reason as the sail: the cloth deforms every frame, and the bounding sphere
+  // computed at creation would go stale — the ensign would disappear exactly when it
+  // streamed out.
   ensign.frustumCulled = false;
   root.add(ensign);
 
@@ -222,8 +223,8 @@ export function createShip(assets: ShipAssets, name = 'ship', options: ShipOptio
     const light = new THREE.PointLight(LANTERN_COLOR, 0, LANTERN_RANGE, 2);
     light.name = `lantern-${index}`;
     light.position.copy(spot.position);
-    // Sem sombra: são luzes de ambientação, e cada mapa de sombra dinâmico aqui
-    // custaria mais que tudo que elas iluminam.
+    // No shadow: they are mood lights, and each dynamic shadow map here would cost more
+    // than everything they light.
     light.castShadow = false;
     root.add(light);
     return light;
@@ -243,25 +244,25 @@ export function createShip(assets: ShipAssets, name = 'ship', options: ShipOptio
     setLanternIntensity(k: number): void {
       const clamped = Math.min(Math.max(k, 0), 1);
       lanterns.forEach((light, index) => {
-        // A do porão fica acesa o dia inteiro: lá embaixo não existe hora.
+        // The hold's stays lit all day: down there is no hour.
         const on = assets.lanternSpots[index]?.alwaysOn ? 1 : clamped;
         light.intensity = on * LANTERN_INTENSITY;
       });
-      // A chama é `MeshBasicMaterial` compartilhado, e uma malha só carrega
-      // todas elas: quem apaga é a visibilidade da malha, não a cor do
-      // material. Como a do porão nunca apaga, a malha fica sempre visível — o
-      // que se perde é a chama das de convés sumindo de dia, e ela é pequena
-      // demais para alguém notar contra um convés iluminado pelo sol.
+      // The flame is a shared `MeshBasicMaterial`, and a single mesh carries all of
+      // them: what puts it out is the mesh's visibility, not the material's color. Since
+      // the hold's never goes out, the mesh stays visible always — what you lose is the
+      // deck lanterns' flame disappearing by day, and it is too small for anyone to
+      // notice against a sunlit deck.
       for (const flame of flames) flame.visible = true;
     },
 
     dispose(): void {
-      // Só a geometria deste navio. A compartilhada é de `ShipAssets`.
+      // Only this ship's geometry. The shared one belongs to `ShipAssets`.
       sail.geometry.dispose();
       ensign.geometry.dispose();
-      // E o material da vela apenas se ele for o clone tingido deste navio. Os
-      // mapas ficam de fora: são de `ShipAssets`, e `Material.dispose` não os
-      // toca — se tocasse, tingir um navio apagaria a textura do outro.
+      // And the sail's material only if it is this ship's dyed clone. The maps stay out
+      // of it: they belong to `ShipAssets`, and `Material.dispose` does not touch them —
+      // if it did, tinting one ship would erase the other's texture.
       if (sailMaterial !== materials.sail) sailMaterial.dispose();
       for (const group of [wheel, capstan, rudder, anchor, cannons[0].root, cannons[1].root]) {
         group.traverse((object) => {
