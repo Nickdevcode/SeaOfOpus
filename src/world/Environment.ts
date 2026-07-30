@@ -1,11 +1,10 @@
 /**
- * O mundo: mar, céu, hora do dia e luz, costurados num único objeto.
+ * The world: sea, sky, time of day and light, stitched into a single object.
  *
- * Existe para que o resto do jogo não precise saber que o reflexo da água sai
- * da mesma LUT que o céu desenha, nem que a névoa da cena tem que acompanhar a
- * cor do horizonte. Quem estiver de fora só chama `fixedUpdate` no passo da
- * física, `update` no frame, e `sampleHeight` quando quiser saber onde a água
- * está.
+ * It exists so the rest of the game does not have to know the water's reflection comes
+ * out of the same LUT the sky draws, nor that the scene's fog has to follow the
+ * horizon's color. Whoever is outside only calls `fixedUpdate` on the physics step,
+ * `update` on the frame, and `sampleHeight` when they want to know where the water is.
  */
 
 import * as THREE from 'three';
@@ -19,26 +18,26 @@ import { MAX_WAVES, WaveField } from './WaveField';
 import { Weather } from './Weather';
 
 /**
- * O quanto a luz hemisférica cai quando o IBL entra.
+ * How far the hemisphere light drops when the IBL comes in.
  *
- * Os dois representam a mesma coisa — a luz que chega de todas as direções que
- * não são o sol — e somá-los inteiros lava as sombras. Não é zero porque a
- * hemisférica ainda faz um trabalho que o IBL não faz: ela vem de baixo também,
- * com a cor do mar, e é o que impede o porão de fechar em preto.
+ * The two represent the same thing — the light arriving from every direction that is not
+ * the sun — and adding them in full washes the shadows out. It is not zero because the
+ * hemisphere light still does a job the IBL does not: it also comes from below, with the
+ * sea's color, and it is what keeps the hold from closing to black.
  */
 const AMBIENT_WITH_IBL = 0.4;
 
-/** Cor do clarão do relâmpago — branco puxando para o azul frio da descarga. */
+/** Color of the lightning flash — white pulling toward the discharge's cold blue. */
 const LIGHTNING_COLOR = new THREE.Color(0.82, 0.88, 1);
-/** Cor do horizonte com o tempo fechado: chumbo levemente esverdeado. */
+/** Horizon color with the weather closed in: lead, faintly green. */
 const STORM_HORIZON = new THREE.Color(0.29, 0.31, 0.33);
 
 export interface EnvironmentOptions {
-  /** Duração de um dia completo, em minutos reais. */
+  /** Length of a full day, in real minutes. */
   dayLengthMinutes?: number;
-  /** Hora inicial, 0..1 (0.34 ≈ meio da manhã). */
+  /** Starting time, 0..1 (0.34 ≈ mid-morning). */
   startTimeOfDay?: number;
-  /** Semente do espectro de ondas — a mesma semente dá o mesmo mar. */
+  /** Seed for the wave spectrum — the same seed gives the same sea. */
   seed?: number;
   windDirection?: number;
   windStrength?: number;
@@ -50,22 +49,22 @@ export class Environment {
   readonly ocean: Ocean;
   readonly sky: Sky;
   readonly dayNight: DayNightCycle;
-  /** O tempo: quem decide vento, nuvem, chuva e visibilidade. */
+  /** The weather: what decides wind, cloud, rain and visibility. */
   readonly weather: Weather;
   readonly rain: Rain;
 
   /**
-   * Nasce só no primeiro `prepare`: o `PMREMGenerator` precisa do renderer, que
-   * não existe aqui no construtor.
+   * It is only born on the first `prepare`: `PMREMGenerator` needs the renderer, which
+   * does not exist here in the constructor.
    */
   private skyEnvironment: SkyEnvironment | null = null;
   private useSkyEnvironment: boolean;
 
-  /** Tempo acumulado, usado por animações puramente visuais. */
+  /** Accumulated time, used by purely visual animations. */
   private elapsed = 0;
   /**
-   * Duração do último frame. O ambiente se regenera por tempo, e `prepare` — que
-   * é quem faz isso — não recebe `dt` porque roda no passo de render.
+   * The last frame's duration. The environment regenerates on time, and `prepare` —
+   * which is what does it — does not receive `dt` because it runs on the render step.
    */
   private frameDt = 1 / 60;
   private readonly windVector = new THREE.Vector2(1, 0);
@@ -73,8 +72,8 @@ export class Environment {
   constructor(scene: THREE.Scene, quality: QualitySettings, options: EnvironmentOptions = {}) {
     this.scene = scene;
 
-    // Sempre com o campo cheio, e **nunca** em função do preset gráfico: o mar é
-    // simulação. Ver a nota em `QualitySettings`.
+    // Always with the full field, and **never** as a function of the graphics preset:
+    // the sea is simulation. See the note in `QualitySettings`.
     this.waveField = new WaveField(
       MAX_WAVES,
       options.seed ?? 1337,
@@ -100,8 +99,8 @@ export class Environment {
 
     this.ocean.setSkyLut(this.sky.lutTexture);
 
-    // A névoa da cena usa a mesma fórmula do shader do mar (exp do quadrado da
-    // distância), então navio e água desaparecem no horizonte no mesmo ritmo.
+    // The scene's fog uses the same formula as the sea's shader (exp of the squared
+    // distance), so ship and water disappear into the horizon at the same rate.
     this.scene.fog = new THREE.FogExp2(0x88a5be, 1 / 3200);
 
     scene.add(this.ocean.mesh);
@@ -115,18 +114,18 @@ export class Environment {
   }
 
   /**
-   * Passo fixo: só o que a física precisa ver de forma determinística.
+   * The fixed step: only what the physics has to see deterministically.
    *
-   * O tempo entra aqui, e não no quadro, porque a intensidade do vento vira
-   * força de vela: se ela variasse com a taxa de quadros, dois computadores
-   * dariam velocidades diferentes ao mesmo navio.
+   * The weather comes in here, and not on the frame, because the wind's strength becomes
+   * sail force: if it varied with the frame rate, two computers would give the same ship
+   * different speeds.
    */
   fixedUpdate(dt: number): void {
     this.weather.fixedUpdate(dt);
     this.dayNight.overcast = this.weather.severity;
 
-    // O mar segue o tempo. A intensidade entra direto; o rumo é seguido com
-    // atraso pela ondulação de fundo, que é o que produz o mar cruzado.
+    // The sea follows the weather. The strength goes straight in; the heading is
+    // followed with a lag by the background swell, which is what produces the cross sea.
     this.waveField.windStrength = this.weather.wind;
     this.waveField.followWind(this.weather.direction, dt);
     this.waveField.syncUniforms();
@@ -136,24 +135,23 @@ export class Environment {
   }
 
   /**
-   * O passo fixo de quem **não** simula.
+   * The fixed step for the side that does **not** simulate.
    *
-   * O tempo e a hora do dia chegam prontos pelo instantâneo — ver
-   * `Weather.applyRemote` para o porquê de eles não serem simulados dos dois
-   * lados. O que sobra para fazer aqui é recalcular o que **depende** deles: a
-   * posição do sol e da lua, a intensidade e a cor de cada luz, o fator de noite
-   * e a cor da névoa.
+   * The weather and the time of day arrive ready in the snapshot — see
+   * `Weather.applyRemote` for why they are not simulated on both sides. What is left to
+   * do here is recompute what **depends** on them: the sun's and moon's positions, each
+   * light's intensity and color, the night factor and the fog's color.
    *
-   * `dayNight.update(0)` é a chamada que faz isso sem avançar o relógio: com
-   * `dt` zero o `timeOfDay` fica exatamente onde a rede o pôs, e todo o resto é
-   * derivado dele.
+   * `dayNight.update(0)` is the call that does that without advancing the clock: with
+   * `dt` zero, `timeOfDay` stays exactly where the network put it, and everything else is
+   * derived from it.
    */
   fixedUpdateRemote(): void {
     this.dayNight.overcast = this.weather.severity;
     this.dayNight.update(0);
   }
 
-  /** Passo de frame: tudo que é visual e pode variar com o frame rate. */
+  /** The frame step: everything visual that can vary with the frame rate. */
   update(dt: number, cameraPosition: THREE.Vector3): void {
     this.elapsed += dt;
     this.frameDt = dt;
@@ -171,10 +169,10 @@ export class Environment {
       this.windVector,
     );
 
-    // Nuvem de temporal é **escura**, e escura por um motivo físico: ela é
-    // espessa, e o que se vê de baixo é a base dela, que a própria nuvem já
-    // sombreou. Sem isto o céu encobria com o mesmo algodão branco de uma tarde
-    // de verão, e a tempestade era só um mar mais alto embaixo de um céu bonito.
+    // A storm cloud is **dark**, and dark for a physical reason: it is thick, and what
+    // you see from below is its base, which the cloud has already shadowed. Without this
+    // the sky closed in with the same white cotton as a summer afternoon, and the storm
+    // was only a higher sea under a pretty sky.
     const cloudColors = this.dayNight.getCloudColors();
     const gloom = 1 - this.weather.severity * 0.72;
     cloudColors.sun.multiplyScalar(gloom);
@@ -193,25 +191,25 @@ export class Environment {
 
     this.dayNight.follow(cameraPosition);
 
-    // --- névoa e clarão ---
+    // --- fog and flash ---
     //
-    // A densidade sai da distância de visibilidade que o tempo pede. A conta é a
-    // inversa da própria fórmula de névoa (`1 − exp(−(d·ρ)²)`): pedindo 95% de
-    // ocultação no alcance, ρ = √(−ln 0,05)/alcance. Assim "ver 750 m" significa
-    // literalmente ver 750 m, e o número do preset pode ser conferido no olho.
+    // The density comes from the visibility distance the weather asks for. The
+    // arithmetic is the inverse of the fog formula itself (`1 − exp(−(d·ρ)²)`): asking
+    // for 95% occlusion at the range, ρ = √(−ln 0.05)/range. That way "seeing 750 m"
+    // literally means seeing 750 m, and the preset's number can be checked by eye.
     const density = Math.sqrt(-Math.log(0.05)) / Math.max(this.weather.visibility, 50);
     const fog = this.scene.fog as THREE.FogExp2;
     fog.density = density;
     this.ocean.setFogDensity(density);
 
-    // O horizonte de mau tempo puxa para o chumbo. `lerp` para uma cor fixa, e
-    // não uma multiplicação: escurecer sozinho deixaria o horizonte azul-escuro,
-    // e o que se vê num temporal é cinza — a nuvem baixa apaga a cor do céu.
+    // The bad-weather horizon pulls toward lead. A `lerp` to a fixed color, and not a
+    // multiplication: darkening on its own would leave the horizon dark blue, and what
+    // you see in a storm is gray — the low cloud erases the sky's color.
     fog.color.copy(this.dayNight.fogColor).lerp(STORM_HORIZON, this.weather.severity * 0.65);
-    // O relâmpago lava a cena de branco-azulado. Entra na névoa e na luz
-    // ambiente porque é assim que um clarão se comporta de verdade: ele acende o
-    // ar, e não a superfície de cada objeto — quem está na sombra do mastro
-    // clareia junto com quem está no sol.
+    // The lightning washes the scene bluish-white. It goes into the fog and into the
+    // ambient light because that is how a flash really behaves: it lights the air, and
+    // not each object's surface — whoever is in the mast's shadow brightens along with
+    // whoever is in the sun.
     if (this.weather.flash > 0) {
       fog.color.lerp(LIGHTNING_COLOR, this.weather.flash * 0.75);
     }
@@ -219,9 +217,9 @@ export class Environment {
   }
 
   /**
-   * Renderiza a LUT atmosférica e, a partir dela, o ambiente de reflexo. Precisa
-   * rodar antes do render principal, porque tanto o céu quanto o mar leem essas
-   * texturas no mesmo frame.
+   * Renders the atmospheric LUT and, from it, the reflection environment. It has to run
+   * before the main render, because both the sky and the sea read those textures on the
+   * same frame.
    */
   prepare(renderer: THREE.WebGLRenderer): void {
     this.sky.renderLut(renderer);
@@ -229,60 +227,59 @@ export class Environment {
 
     this.skyEnvironment ??= new SkyEnvironment(renderer);
     if (this.skyEnvironment.update(renderer, this.sky.lutTexture, this.sky.lutGeneration, this.frameDt)) {
-      // O alvo do PMREM é reaproveitado, mas `fromEquirectangular` pode devolver
-      // outro na primeira chamada — reatribuir sempre é barato e evita a cena
-      // ficar apontando para uma textura descartada.
+      // The PMREM's target is reused, but `fromEquirectangular` can return a different
+      // one on the first call — reassigning every time is cheap and keeps the scene from
+      // pointing at a disposed texture.
       this.scene.environment = this.skyEnvironment.texture;
     }
   }
 
   /**
-   * Registra um casco para o mar ser recortado por dentro dele.
+   * Registers a hull so the sea is clipped away inside it.
    *
-   * Chamar uma vez por navio, logo depois de pôr o modelo na cena. Sem isto a
-   * superfície do oceano atravessa o forro e o porão fica alagado de mentira.
+   * Call it once per ship, right after putting the model in the scene. Without it the
+   * ocean's surface goes through the planking and the hold is falsely flooded.
    */
   addHullClip(object: THREE.Object3D): void {
     this.ocean.addHullClip(object);
   }
 
-  /** Esquece os cascos registrados — ao desmontar a partida. */
+  /** Forgets the registered hulls — when tearing the match down. */
   clearHullClips(): void {
     this.ocean.clearHullClips();
   }
 
-  /** Altura da água em (x, z) — o que a flutuabilidade consome. */
+  /** Water height at (x, z) — what the buoyancy consumes. */
   sampleHeight(x: number, z: number): number {
     return this.waveField.sampleHeight(x, z);
   }
 
-  /** Altura + normal da água, para orientar respingos e espuma. */
+  /** Water height + normal, to orient splashes and foam. */
   sampleSurface(x: number, z: number, outNormal?: THREE.Vector3): number {
     return this.waveField.sampleSurface(x, z, outNormal);
   }
 
   /**
-   * Refaz mar e tempo a partir de uma semente dada.
+   * Rebuilds sea and weather from a given seed.
    *
-   * Só o duelo em rede chama isto, e é a peça que garante que os dois lados
-   * naveguem **o mesmo mar**: as ondas, as rajadas e a cadeia de transições de
-   * clima saem todas de sorteios semeados, então a mesma semente produz o mesmo
-   * oceano em qualquer máquina.
+   * Only the networked duel calls this, and it is the piece that guarantees both sides
+   * sail **the same sea**: the waves, the gusts and the weather's chain of transitions
+   * all come out of seeded draws, so the same seed produces the same ocean on any
+   * machine.
    *
-   * A contagem de ondas não é parâmetro: são sempre as seis. Ver a nota em
+   * The wave count is not a parameter: it is always the six. See the note in
    * `QualitySettings`.
    */
   reseed(seed: number): void {
-    // ⚠️ **O tempo vem primeiro, e a ordem é o conserto.**
+    // ⚠️ **The weather comes first, and the order is the fix.**
     //
-    // `WaveField.generate` fixa o rumo da ondulação de fundo no rumo do vento
-    // **daquele instante**, e é dele que as duas ondas longas do espectro tiram
-    // a direção pelo resto da partida. Gerando o mar antes de semear o tempo, o
-    // rumo que ele congelava era o que o vento local tinha alcançado girando
-    // desde que a página abriu — um número diferente em cada máquina. Os dois
-    // jogadores entravam no mesmo mar com as ondas grandes vindo de lados
-    // diferentes, e a queixa que isso produz é a mais vaga possível: "não está
-    // sincronizado".
+    // `WaveField.generate` pins the background swell's heading to the wind's heading at
+    // **that instant**, and it is where the spectrum's two long waves take their
+    // direction from for the rest of the match. Generating the sea before seeding the
+    // weather, the heading it froze was whatever the local wind had reached by turning
+    // since the page opened — a different number on each machine. The two players
+    // entered the same sea with the big waves coming from different sides, and the
+    // complaint that produces is the vaguest one possible: "it is not synchronized".
     this.weather.reseed(seed ^ 0x5eed);
     this.waveField.windDirection = this.weather.direction;
     this.waveField.windStrength = this.weather.wind;
@@ -294,8 +291,8 @@ export class Environment {
   applyQuality(quality: QualitySettings): void {
     this.ocean.applyQuality(quality);
     this.dayNight.setShadowMapSize(quality.shadowMapSize);
-    // O campo de ondas **não** é regerado aqui. Trocar de preset no meio de uma
-    // partida trocava o mar debaixo de um tiro em voo. Ver `QualitySettings`.
+    // The wave field is **not** regenerated here. Changing preset mid-match used to
+    // change the sea under a shot in flight. See `QualitySettings`.
 
     this.useSkyEnvironment = quality.skyEnvironment;
     this.dayNight.ambientScale = this.useSkyEnvironment ? AMBIENT_WITH_IBL : 1;
@@ -307,11 +304,11 @@ export class Environment {
   }
 
   /**
-   * Trava o tempo num estado, ou o solta para virar sozinho.
+   * Locks the weather into one state, or releases it to turn on its own.
    *
-   * Travar não congela o mundo: o vento continua girando e as rajadas continuam
-   * vindo, porque o que a opção promete é "o mar fica assim", e não "nada mais
-   * acontece". O que ela desliga é a transição para outro estado.
+   * Locking does not freeze the world: the wind goes on turning and the gusts go on
+   * coming, because what the option promises is "the sea stays like this", and not
+   * "nothing else happens". What it switches off is the transition to another state.
    */
   setWeatherMode(mode: WeatherMode): void {
     if (mode === 'dynamic') {
@@ -322,7 +319,7 @@ export class Environment {
     this.weather.locked = true;
   }
 
-  /** Muda o vento: reordena as ondas e reescala a amplitude do mar. */
+  /** Changes the wind: it reorders the waves and rescales the sea's amplitude. */
   setWind(direction: number, strength: number): void {
     this.waveField.windDirection = direction;
     this.waveField.windStrength = strength;

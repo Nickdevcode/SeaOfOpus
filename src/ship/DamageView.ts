@@ -1,45 +1,44 @@
 /**
- * O que se **vê** do estrago: os rombos no costado e a água subindo no porão.
+ * What you **see** of the damage: the breaches in the side and the water rising in the
+ * hold.
  *
- * Duas peças, com truques opostos que usam a mesma tabela.
+ * Two pieces, with opposite tricks that use the same table.
  *
- * **A água do porão** é um plano horizontal no mundo — tem que ser, senão ela
- * adernaria junto com o navio e denunciaria a farsa na primeira onda. Como um
- * plano é infinito e o porão não, o fragmento converte a própria posição para o
- * referencial do navio e se descarta quando cai fora do forro. É exatamente o
- * recorte que o oceano faz em `hullClip`, **de sinal trocado**: lá o mar some
- * dentro do casco, aqui a água só existe dentro do casco. As duas leem a mesma
- * textura de perfil, então nunca vão discordar sobre onde fica a tábua.
+ * **The hold's water** is a horizontal plane in the world — it has to be, or it would
+ * heel along with the ship and give the sham away on the first wave. Since a plane is
+ * infinite and the hold is not, the fragment converts its own position into the ship's
+ * frame and discards itself when it falls outside the planking. It is exactly the clip
+ * the ocean does in `hullClip`, **with the sign flipped**: there the sea disappears
+ * inside the hull, here the water only exists inside the hull. Both read the same profile
+ * texture, so they will never disagree about where the plank is.
  *
- * **As marcas de tiro** são instâncias presas ao modelo do navio, orientadas
- * pela normal do casco naquele ponto e desenhadas por `BreachDecal`. Não são
- * decalques de verdade (projeção sobre a malha): num costado curvo, a diferença
- * entre uma marca encostada na superfície e um decalque projetado é de
- * milímetros, e a instância custa uma entrada de matriz em vez de um passo de
- * renderização inteiro.
+ * **The shot marks** are instances attached to the ship's model, oriented by the hull's
+ * normal at that point and drawn by `BreachDecal`. They are not real decals (projection
+ * onto the mesh): on a curved side, the difference between a mark resting on the surface
+ * and a projected decal is millimeters, and the instance costs one matrix entry instead
+ * of a whole render pass.
  *
- * **Cada rombo tem duas marcas, e não uma.** O costado tem 13 cm de espessura e
- * forro dos dois lados, então uma bala que o atravessa deixa marca no mar *e* no
- * porão. Desenhar só a de fora era o defeito mais estranho que este arquivo já
- * teve: o jogador descia para tapar o rombo e encontrava uma parede intacta, e
- * conseguia pregar a tábua assim mesmo porque a mira do reparo é por ângulo, não
- * por raio. O buraco funcionava sem existir.
+ * **Every breach has two marks, and not one.** The side is 13 cm thick with planking on
+ * both faces, so a ball that goes through it leaves a mark on the sea side *and* in the
+ * hold. Drawing only the outer one was the strangest defect this file ever had: the
+ * player went below to patch the breach and found an intact wall, and could nail the
+ * plank up anyway because the repair's aim is by angle, not by radius. The hole worked
+ * without existing.
  *
- * As duas faces não são espelho uma da outra. Na entrada manda a pólvora
- * (fuligem, borda chamuscada); na saída manda a fibra (lasca grande, carvalho
- * cru, o fundo molhado da água que entra) — ver `BreachFace`, em `BreachDecal`.
+ * The two faces are not mirrors of each other. On the entry the powder rules (soot,
+ * scorched rim); on the exit the fiber rules (big splinter, raw oak, the wet bottom of
+ * the water coming in) — see `BreachFace`, in `BreachDecal`.
  *
- * A mesma malha serve rombo aberto e rombo tapado — muda um atributo. Um casco
- * que já apanhou muito é uma colcha de marcas fechadas com uma ou outra ainda
- * escancarada, e essa leitura só existe porque as duas coisas são a mesma
- * coisa em estados diferentes. Ela vale para os dois lados: por dentro, a tábua
- * é estreita demais para cobrir o rombo inteiro, e o que sobra da cicatriz
- * escapa pelas beiradas dela.
+ * The same mesh serves an open breach and a patched one — one attribute changes. A hull
+ * that has taken a beating is a quilt of closed marks with one or another still gaping
+ * open, and that reading only exists because both things are the same thing in different
+ * states. It holds on both sides: from within, the plank is too narrow to cover the whole
+ * breach, and what is left of the scar escapes around its edges.
  *
- * **As tábuas** são o que se prega por cima da marca fechada, uma por reparo.
- * Elas chegam pelo `PlankAsset`, que é assíncrono, então o pool nasce vazio e
- * se monta quando o arquivo cai — se ele nunca cair, o rombo continua fechando
- * e o casco fica com a cicatriz sem a madeira.
+ * **The planks** are what gets nailed over the closed mark, one per repair. They arrive
+ * through `PlankAsset`, which is asynchronous, so the pool is born empty and assembles
+ * itself when the file lands — if it never lands, the breach still closes and the hull is
+ * left with the scar and no wood.
  */
 
 import * as THREE from 'three';
@@ -51,20 +50,20 @@ import { DECK_Y, HALF_LENGTH, HULL_LENGTH, HULL_THICKNESS } from './ShipDimensio
 import type { Ship } from './Ship';
 
 /**
- * Marcas desenhadas ao mesmo tempo por navio.
+ * Marks drawn at the same time per ship.
  *
- * Cobre rombos abertos **e** tapados no mesmo pool: `ShipDamage` limita cada
- * lista a 24, mas as duas somadas passariam disso num combate longo. Quando
- * estoura, os rombos abertos entram primeiro — é neles que o jogador precisa
- * reparar, e uma cicatriz que some do outro bordo não custa nada.
+ * It covers open **and** patched breaches in the same pool: `ShipDamage` caps each list
+ * at 24, but the two added together would go past this in a long fight. When it
+ * overflows, the open breaches go in first — they are the ones the player has to repair,
+ * and a scar vanishing from the other side costs nothing.
  */
 const MAX_SCARS = 32;
 
 /**
- * Lado do plano d'água, em metros.
+ * Side of the water plane, in meters.
  *
- * Cobre o casco (16 × 5 m) em qualquer proa sem precisar girar junto: a diagonal
- * do casco é 16,8 m, e o plano é quadrado.
+ * It covers the hull (16 × 5 m) at any heading without having to turn along: the hull's
+ * diagonal is 16.8 m, and the plane is square.
  */
 const WATER_PLANE_SIZE = 18;
 
@@ -98,22 +97,23 @@ const WATER_FRAGMENT = /* glsl */ `
     );
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) discard;
 
-    // A margem entra **subtraindo** aqui: o mar cresce para cobrir o forro, esta
-    // água encolhe para não vazar por fora dele. Mesma tabela, sinal trocado.
+    // The margin comes in **subtracting** here: the sea grows to cover the planking,
+    // this water shrinks so it does not leak outside it. Same table, flipped sign.
     float halfWidth = texture2D(uHullProfile, uv).r * ${HULL_PROFILE.scale.toFixed(4)};
     if (halfWidth <= 0.0 || abs(local.x) > halfWidth - ${HULL_PROFILE.margin.toFixed(4)}) discard;
 
-    // Passou do convés, o navio já está afundando e o que se vê é o mar de fora,
-    // não a água de dentro — deixar desenhar aqui só criaria uma folha de água
-    // atravessando o tombadilho.
+    // Past the deck, the ship is already sinking and what you see is the sea outside,
+    // not the water inside — letting it draw here would only create a sheet of water
+    // going through the quarterdeck.
     if (local.y > ${(DECK_Y + 0.1).toFixed(3)}) discard;
 
-    // Marulho: duas camadas de ruído andando em sentidos diferentes, no
-    // referencial **do navio**, porque a água balança junto com o casco.
+    // Lapping: two noise layers walking in different directions, in the **ship's**
+    // frame, because the water rocks along with the hull.
     float ripple = fbm(vec3(local.xz * 1.7 + vec2(uTime * 0.35, -uTime * 0.22), uTime * 0.25), 3, 2.1, 0.55);
     float sheen = smoothstep(0.55, 0.95, ripple);
 
-    // Fundo escuro nas bordas, onde a lâmina encosta no forro e some na sombra.
+    // Dark bottom at the edges, where the sheet meets the planking and disappears into
+    // the shadow.
     float edge = smoothstep(halfWidth, halfWidth * 0.45, abs(local.x));
     vec3 color = mix(uShallowColor, uDeepColor, edge * 0.8);
     color += sheen * 0.16;
@@ -123,68 +123,68 @@ const WATER_FRAGMENT = /* glsl */ `
 `;
 
 /**
- * Quanto a marca fica afastada do costado, em metros.
+ * How far the mark sits off the side, in meters.
  *
- * Um centímetro. O `polygonOffset` do material já resolve o z-fighting; isto
- * aqui existe porque o costado é **curvo** e a marca é plana: sem a folga, uma
- * marca de 90 cm de vão pregada numa quina de bochecha afundaria pelas bordas.
+ * One centimeter. The material's `polygonOffset` already handles the z-fighting; this
+ * exists because the side is **curved** and the mark is flat: without the clearance, a
+ * 90 cm mark pinned on the corner of a bow would sink in at the edges.
  */
 const DECAL_LIFT = 0.012;
 
 /**
- * Quanto a marca de dentro é maior que a de fora.
+ * How much bigger the inner mark is than the outer one.
  *
- * A bala não abre um cilindro: ela entra por um furo e sai por um cone. A face
- * de saída é sempre a maior das duas, e 12% é o bastante para o olho registrar
- * a diferença quando compara os dois lados do mesmo rombo sem que ela vire
- * caricatura.
+ * The ball does not open a cylinder: it goes in through a hole and comes out through a
+ * cone. The exit face is always the bigger of the two, and 12% is enough for the eye to
+ * register the difference when comparing both sides of the same breach without it turning
+ * into caricature.
  */
 const INNER_SCAR_SCALE = 1.12;
 
 /**
- * Onde fica a marca de dentro, medida a partir da superfície **externa**.
+ * Where the inner mark sits, measured from the **outer** surface.
  *
- * O forro interno está a `HULL_THICKNESS` para dentro (ver `buildInnerShell`, em
- * `HullGeometry`), e a marca tem de ficar **além** dele, do lado do porão — daí
- * a soma. Subtrair era o erro óbvio de escrever, e o sintoma dele foi didático:
- * a marca ficava enterrada 1 cm dentro da madeira, e o que se via no porão eram
- * só as lascas altas o bastante para furar o forro — um anel de madeira boiando
- * na parede, sem miolo e sem base. Uma cicatriz já fechada, cujas lascas são
- * baixas, sumia por inteiro.
+ * The inner planking is `HULL_THICKNESS` further in (see `buildInnerShell`, in
+ * `HullGeometry`), and the mark has to sit **beyond** it, on the hold's side — hence the
+ * addition. Subtracting was the obvious mistake to write, and its symptom was
+ * instructive: the mark ended up buried 1 cm inside the wood, and what you saw in the
+ * hold was only the splinters tall enough to pierce the planking — a ring of wood
+ * floating on the wall, with no middle and no base. An already closed scar, whose
+ * splinters are low, disappeared entirely.
  *
- * São **dois** valores porque a tábua do reparo passa por aqui. Com o rombo
- * aberto não há nada na frente e a marca usa a mesma folga generosa da face
- * externa. Com ele tapado, a face da tábua está a 6 mm do forro (ver
- * `PLANK_DEPTH`) e a marca tem de caber nessa fresta: 2 mm, contando com o
- * `polygonOffset` do material para o resto.
+ * There are **two** values because the repair's plank passes through here. With the
+ * breach open there is nothing in front and the mark uses the same generous clearance as
+ * the outer face. With it patched, the plank's face is 6 mm from the planking (see
+ * `PLANK_DEPTH`) and the mark has to fit into that gap: 2 mm, counting on the material's
+ * `polygonOffset` for the rest.
  */
 const INNER_DECAL_DEPTH_OPEN = HULL_THICKNESS + DECAL_LIFT;
 const INNER_DECAL_DEPTH_CLOSED = HULL_THICKNESS + 0.002;
 
 /**
- * Onde fica o **centro** da tábua, medido para **dentro** do casco.
+ * Where the plank's **center** sits, measured **into** the hull.
  *
- * A tábua é pregada do lado de dentro, e não do lado de fora, porque é ali que
- * o jogador está quando prega: ele desce ao porão, fica de frente para o forro
- * e segura o botão. Uma tábua do lado de fora seria um reparo que só o inimigo
- * enxerga — quem fez o trabalho nunca veria o próprio trabalho.
+ * The plank is nailed on the inside, and not on the outside, because that is where the
+ * player is when nailing it: they go down into the hold, stand facing the planking and
+ * hold the button. A plank on the outside would be a repair only the enemy sees —
+ * whoever did the work would never see their own work.
  *
- * A conta é a espessura do costado (o `local` do rombo mora na superfície
- * **externa**), mais meia tábua, mais 6 mm de folga para a madeira nova não
- * brigar com o forro no z-buffer.
+ * The arithmetic is the side's thickness (the breach's `local` lives on the **outer**
+ * surface), plus half a plank, plus 6 mm of clearance so the new wood does not fight the
+ * planking in the z-buffer.
  */
 const PLANK_DEPTH = HULL_THICKNESS + PLANK_THICKNESS * 0.5 + 0.006;
 
 /**
- * Giro máximo da tábua em torno da normal, em radianos.
+ * The plank's maximum roll around the normal, in radians.
  *
- * ±23°. Uma tábua pregada às pressas nunca sai reta, mas também não sai em pé:
- * quem tapa rombo põe a peça **atravessada** no furo, acompanhando de longe o
- * tabuado do costado, porque é assim que ela pega madeira sã dos dois lados.
+ * ±23°. A plank nailed up in a hurry never comes out straight, but it does not come out
+ * upright either: whoever patches a breach lays the piece **across** the hole, loosely
+ * following the side's planking, because that is how it bites sound wood on both sides.
  */
 const PLANK_ROLL = 0.4;
 
-/** Escorregamento da tábua em relação ao centro do rombo, em metros. */
+/** The plank's slide relative to the breach's center, in meters. */
 const PLANK_SLIDE = 0.07;
 
 const _inverse = new THREE.Matrix4();
@@ -205,23 +205,23 @@ const ORIGIN = new THREE.Vector3(0, 0, 0);
 const UNIT = new THREE.Vector3(1, 1, 1);
 
 /**
- * Raio desenhado de um rombo de `area` metros quadrados.
+ * Drawn radius of a breach of `area` square meters.
  *
- * O 3,4 é o que separa o furo por onde a água entra da **marca** que a bala
- * deixa em volta dele: a área é hidráulica, e a mancha de fuligem e madeira
- * lascada é bem maior que ela. Ver a divisão em zonas de `BreachDecal`.
+ * The 3.4 is what separates the hole the water comes in through from the **mark** the
+ * ball leaves around it: the area is hydraulic, and the stain of soot and splintered wood
+ * is much larger than it. See the zone split in `BreachDecal`.
  */
 function scarRadius(area: number): number {
   return Math.sqrt(area / Math.PI) * 3.4;
 }
 
 /**
- * Sorteio estável a partir do identificador do rombo.
+ * A stable draw from the breach's identifier.
  *
- * Estável é o requisito: a pose da tábua é recalculada em todo quadro, e um
- * `Math.random()` aqui faria a madeira tremer no costado. Como o `id` do rombo
- * viaja para o `Patch` que o substitui, a tábua também nasce exatamente na pose
- * que o desenho do rombo já vinha semeando.
+ * Stable is the requirement: the plank's pose is recomputed every frame, and a
+ * `Math.random()` here would make the wood shake on the side. Since the breach's `id`
+ * travels to the `Patch` that replaces it, the plank is also born in exactly the pose the
+ * breach's drawing had been seeding all along.
  */
 function hash01(seed: number): number {
   const value = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
@@ -229,23 +229,22 @@ function hash01(seed: number): number {
 }
 
 /**
- * O pool de marcas de **uma** das faces do costado.
+ * The mark pool for **one** of the side's faces.
  *
- * Existe porque o rombo é atravessado: a bala entra por fora e sai por dentro, e
- * as duas faces são desenhadas por instâncias independentes. Malhas separadas em
- * vez de um pool só com o dobro de instâncias porque as duas faces rodam shaders
- * diferentes — a de dentro lasca mais, escurece menos e molha o fundo do furo —
- * e um `InstancedMesh` só carrega um material.
+ * It exists because the breach goes through: the ball goes in from outside and comes out
+ * inside, and the two faces are drawn by independent instances. Separate meshes instead
+ * of a single pool with twice the instances because the two faces run different shaders —
+ * the inner one splinters more, darkens less and wets the bottom of the hole — and an
+ * `InstancedMesh` only carries one material.
  *
- * O custo é uma chamada de desenho a mais por navio, o que a esta escala não se
- * mede; o que se ganha é que cada face escolhe as próprias constantes sem
- * ramificação no shader do outro.
+ * The cost is one more draw call per ship, which at this scale does not measure; what you
+ * gain is that each face picks its own constants with no branching in the other's shader.
  */
 class ScarPool {
   readonly mesh: THREE.InstancedMesh;
-  /** Semente por instância: varia fuligem e fibra de uma marca para a outra. */
+  /** Per-instance seed: it varies soot and fiber from one mark to the next. */
   private readonly seed: THREE.InstancedBufferAttribute;
-  /** `1` rombo aberto, `0` rombo tapado. Lido pelo shader da marca. */
+  /** `1` open breach, `0` patched breach. Read by the mark's shader. */
   private readonly open: THREE.InstancedBufferAttribute;
 
   constructor(name: string, side: BreachSide) {
@@ -258,8 +257,8 @@ class ScarPool {
     this.mesh = new THREE.InstancedMesh(geometry, createBreachMaterial(side), MAX_SCARS);
     this.mesh.name = name;
     this.mesh.frustumCulled = false;
-    // As lascas sobem do costado e projetariam sombra de recorte no próprio
-    // casco; o que se ganharia em relevo se perderia em manchas moles.
+    // The splinters rise off the side and would cast a cutout shadow on the hull
+    // itself; what you would gain in relief you would lose in soft blotches.
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = true;
     this.mesh.count = MAX_SCARS;
@@ -269,17 +268,17 @@ class ScarPool {
   write(index: number, radius: number, open: number, id: number): void {
     _scale.setScalar(radius);
     this.mesh.setMatrixAt(index, _matrix.compose(_position, _quaternion, _scale));
-    // A semente sai do **id do rombo**, e não do índice da instância: as duas
-    // faces do mesmo furo têm de sortear a mesma silhueta, senão a borda
-    // quebrada de dentro não bate com a de fora e o buraco deixa de ser um
-    // buraco só, atravessado, para virar duas marcas coladas nas costas uma da
-    // outra. É também o que impede a marca de trocar de cara quando um rombo
-    // vizinho fecha e todo mundo anda uma posição no pool.
+    // The seed comes from the **breach's id**, and not from the instance's index: the
+    // two faces of the same hole have to draw the same silhouette, or the broken rim
+    // inside does not match the one outside and the hole stops being one hole, going
+    // through, and turns into two marks glued back to back. It is also what keeps the
+    // mark from changing face when a neighboring breach closes and everyone shifts one
+    // position in the pool.
     this.seed.setX(index, hash01(id));
     this.open.setX(index, open);
   }
 
-  /** Encolhe a zero tudo daí para a frente e sobe as três listas para a GPU. */
+  /** Shrinks everything from there on to zero and uploads the three lists to the GPU. */
   flush(from: number): void {
     for (let i = from; i < MAX_SCARS; i++) {
       this.mesh.setMatrixAt(i, _matrix.compose(ORIGIN, _quaternion.identity(), HIDDEN));
@@ -300,11 +299,11 @@ class ScarPool {
 export class DamageView {
   private readonly water: THREE.Mesh;
   private readonly waterMaterial: THREE.ShaderMaterial;
-  /** A marca vista do mar: por onde a bala entrou. */
+  /** The mark seen from the sea: where the ball went in. */
   private readonly outerScars: ScarPool;
-  /** A marca vista do porão: por onde ela saiu, e é onde o jogador conserta. */
+  /** The mark seen from the hold: where it came out, and where the player repairs. */
   private readonly innerScars: ScarPool;
-  /** Só existe depois que o glb da tábua chega — e pode nunca chegar. */
+  /** It only exists after the plank's glb arrives — and it may never arrive. */
   private planks: THREE.InstancedMesh | null = null;
   private disposed = false;
   private time = 0;
@@ -324,8 +323,8 @@ export class DamageView {
       vertexShader: WATER_VERTEX,
       fragmentShader: WATER_FRAGMENT,
       transparent: true,
-      // Frente e verso: quem está no porão com água pela cintura vê a lâmina por
-      // baixo, e ela precisa continuar existindo.
+      // Front and back: whoever is in the hold with water up to their waist sees the
+      // sheet from below, and it has to go on existing.
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -362,8 +361,8 @@ export class DamageView {
     this.outerScars.dispose();
     this.innerScars.dispose();
     if (this.planks) {
-      // A geometria e o material são do módulo, e o outro navio ainda os usa:
-      // aqui só se solta a instância.
+      // The geometry and the material belong to the module, and the other ship still
+      // uses them: here only the instance is released.
       this.planks.removeFromParent();
       this.planks.dispose();
       this.planks = null;
@@ -371,11 +370,11 @@ export class DamageView {
   }
 
   /**
-   * Monta o pool de tábuas quando o arquivo chega.
+   * Assembles the plank pool when the file arrives.
    *
-   * A guarda de `disposed` não é zelo: uma partida abandonada antes de os
-   * 64 KB caírem penduraria a malha num navio que já saiu da cena, e ela
-   * ficaria viva pela referência do pai até o fim do processo.
+   * The `disposed` guard is not fussiness: a match abandoned before the 64 KB land would
+   * hang the mesh on a ship that has already left the scene, and it would stay alive
+   * through the parent's reference until the end of the process.
    */
   private async attachPlanks(): Promise<void> {
     const asset = await loadPlank();
@@ -398,18 +397,18 @@ export class DamageView {
       return;
     }
 
-    // O plano segue o navio em X/Z mas ignora a rotação dele: água é horizontal.
+    // The plane follows the ship in X/Z but ignores its rotation: water is horizontal.
     const root = this.ship.model.root;
     this.water.visible = true;
     this.water.position.set(root.position.x, surface, root.position.z);
     this.water.updateMatrixWorld();
 
-    // A matriz do modelo é a pose **interpolada** do quadro, e não a do último
-    // passo de física: usar a do corpo faria a lâmina tremer contra o forro em
-    // taxas de quadro altas. `updateWorldMatrix` sobe a cadeia sem descer nos
-    // filhos porque `syncModel` só escreve posição e quaternion — o
-    // `matrixWorld` ainda é o que o render do quadro *anterior* deixou, e ler
-    // ele atrasaria a lâmina um quadro contra o forro.
+    // The model's matrix is the frame's **interpolated** pose, and not the last physics
+    // step's: using the body's would make the sheet shake against the planking at high
+    // frame rates. `updateWorldMatrix` walks up the chain without descending into the
+    // children because `syncModel` only writes position and quaternion — `matrixWorld` is
+    // still what the *previous* frame's render left, and reading it would put the sheet
+    // one frame behind the planking.
     root.updateWorldMatrix(true, false);
     _inverse.copy(root.matrixWorld).invert();
     (this.waterMaterial.uniforms.uShipInverse!.value as THREE.Matrix4).copy(_inverse);
@@ -417,12 +416,11 @@ export class DamageView {
   }
 
   /**
-   * Escreve as marcas do quadro: primeiro os rombos abertos, depois as
-   * cicatrizes com tábua.
+   * Writes the frame's marks: the open breaches first, then the planked scars.
    *
-   * Os abertos vêm antes porque são eles que disputam o teto de `MAX_SCARS` —
-   * um rombo que o jogador precisa achar não pode sumir para dar lugar a um
-   * remendo velho.
+   * The open ones come first because they are the ones competing for the `MAX_SCARS`
+   * ceiling — a breach the player has to find cannot disappear to make room for an old
+   * patch.
    */
   private updateScars(): void {
     const { breaches, patches } = this.ship.damage;
@@ -431,9 +429,9 @@ export class DamageView {
 
     for (const breach of breaches) {
       if (index >= MAX_SCARS) break;
-      // O furo encolhe um pouco conforme a tábua vai sendo pregada, mas não
-      // fecha: o que fecha o rombo é a madeira que chega no fim, e o
-      // encolhimento existe só para o esforço aparecer no casco antes disso.
+      // The hole shrinks a little as the plank goes up, but it does not close: what
+      // closes the breach is the wood that arrives at the end, and the shrinking exists
+      // only so the effort shows on the hull before that.
       const radius = scarRadius(breach.area) * (1 - breach.repair * 0.18);
       this.writeScar(index++, breach.local, breach.normal, radius, 1, breach.id);
     }
@@ -456,19 +454,20 @@ export class DamageView {
   }
 
   /**
-   * Escreve as **duas** faces do mesmo rombo: a que o mar vê e a que o porão vê.
+   * Writes the **two** faces of the same breach: the one the sea sees and the one the
+   * hold sees.
    *
-   * Uma bala que abre rombo atravessa o costado, e um costado tem 13 cm de
-   * espessura com forro dos dois lados. Desenhar só a face de fora deixava o
-   * jogador olhando para uma parede intacta exatamente no lugar em que ele
-   * precisa pregar a tábua — e a mira do reparo, que é por ângulo e não por
-   * raio, deixava consertar assim mesmo. O rombo funcionava sem existir.
+   * A ball that opens a breach goes through the side, and a side is 13 cm thick with
+   * planking on both faces. Drawing only the outer face left the player staring at an
+   * intact wall exactly where they have to nail the plank — and the repair's aim, which
+   * is by angle and not by radius, let them fix it anyway. The breach worked without
+   * existing.
    *
-   * A face de dentro nasce da mesma `local` e da mesma `normal`, com o sinal
-   * trocado: `orientDecal` recebe a normal invertida e devolve uma base que
-   * continua com o X no tabuado e o Y para cima (as duas inversões se cancelam
-   * no produto vetorial), então a fibra da madeira segue correndo no sentido
-   * certo do casco e a marca não sai de cabeça para baixo.
+   * The inner face is born from the same `local` and the same `normal`, with the sign
+   * flipped: `orientDecal` receives the inverted normal and returns a basis that still
+   * has X along the planking and Y pointing up (the two inversions cancel in the cross
+   * product), so the wood's grain goes on running the right way along the hull and the
+   * mark does not come out upside down.
    */
   private writeScar(
     index: number,
@@ -489,24 +488,23 @@ export class DamageView {
   }
 
   /**
-   * Põe a tábua sobre a cicatriz, atravessada e um pouco fora do prumo.
+   * Lays the plank over the scar, across it and a little out of plumb.
    *
-   * O sorteio sai do `id` do rombo, então duas tábuas nunca ficam iguais e
-   * nenhuma delas se mexe entre quadros. Ele decide duas coisas: o giro em
-   * torno da normal e o escorregamento no plano do costado — que juntos são o
-   * que separa "uma tábua pregada por alguém com pressa" de "um adesivo
-   * centralizado".
+   * The draw comes from the breach's `id`, so no two planks are ever alike and none of
+   * them moves between frames. It decides two things: the roll around the normal and the
+   * slide in the side's plane — which together are what separates "a plank nailed up by
+   * someone in a hurry" from "a centered sticker".
    */
   private writePlank(index: number, local: THREE.Vector3, normal: THREE.Vector3, id: number): void {
     if (!this.planks) return;
 
-    // `orientDecal` deixa `_tangent` e `_bitangent` prontos como efeito
-    // colateral, e são eles que definem o plano em que a tábua escorrega.
+    // `orientDecal` leaves `_tangent` and `_bitangent` ready as a side effect, and they
+    // are what define the plane the plank slides in.
     orientDecal(normal, _quaternion);
 
     const roll = (hash01(id) * 2 - 1) * PLANK_ROLL;
-    // O giro é em torno do Z **do decalque**, e o Z do decalque é a normal do
-    // casco: a tábua roda no plano do costado, que é onde ela encosta.
+    // The roll is around the **decal's** Z, and the decal's Z is the hull's normal: the
+    // plank turns in the side's plane, which is where it rests.
     _roll.setFromAxisAngle(ALONG, roll);
     _quaternion.multiply(_roll).multiply(PLANK_TO_DECAL);
 
@@ -525,32 +523,31 @@ export class DamageView {
 }
 
 /**
- * Os dois eixos da marca que ficam **no** costado.
+ * The mark's two axes that lie **on** the side.
  *
- * `tangent` corre ao longo do tabuado (proa-popa) e `bitangent` sobe por ele.
- * Alinhar o decalque assim não é capricho: a fibra da madeira e as lascas são
- * desenhadas ao longo do X da marca, e madeira racha ao longo da tábua. Com
- * uma orientação qualquer, as rachaduras sairiam cruzando o tabuado — que é a
- * única coisa que madeira não faz.
+ * `tangent` runs along the planking (bow to stern) and `bitangent` climbs it. Aligning
+ * the decal this way is not fussiness: the wood's grain and the splinters are drawn along
+ * the mark's X, and wood splits along the plank. With any old orientation, the cracks
+ * would come out crossing the planking — which is the one thing wood does not do.
  */
 function decalAxes(normal: THREE.Vector3, tangent: THREE.Vector3, bitangent: THREE.Vector3): void {
   tangent.crossVectors(UP, normal);
-  // Rombo na quilha ou no fundo do bojo: a normal aponta para baixo e o
-  // produto com a vertical degenera. Aí o tabuado é longitudinal do mesmo
-  // jeito, então serve o eixo do navio.
+  // A breach in the keel or at the bottom of the bilge: the normal points down and the
+  // product with the vertical degenerates. There the planking runs fore and aft anyway,
+  // so the ship's axis serves.
   if (tangent.lengthSq() < 1e-6) tangent.copy(ALONG);
   tangent.normalize();
   bitangent.crossVectors(normal, tangent);
 }
 
-/** A orientação da marca: X no tabuado, Y subindo, Z na normal do casco. */
+/** The mark's orientation: X along the planking, Y climbing, Z on the hull's normal. */
 function orientDecal(normal: THREE.Vector3, out: THREE.Quaternion): void {
   decalAxes(normal, _tangent, _bitangent);
   _basis.makeBasis(_tangent, _bitangent, _normal.copy(normal));
   out.setFromRotationMatrix(_basis);
 }
 
-/** Encolhe todas as instâncias a zero — é assim que uma instância "não existe". */
+/** Shrinks every instance to zero — that is how an instance "does not exist". */
 function hideAll(mesh: THREE.InstancedMesh, count: number): void {
   for (let i = 0; i < count; i++) {
     mesh.setMatrixAt(i, _matrix.compose(ORIGIN, _quaternion.identity(), HIDDEN));
