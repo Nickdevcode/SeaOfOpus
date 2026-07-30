@@ -1,34 +1,34 @@
 /**
- * A entrada de um jogador num passo de simulação, num formato que cabe no fio.
+ * One player's input for one simulation step, in a shape that fits on the wire.
  *
- * É a **única** coisa que atravessa a rede do lado de quem joga: dezesseis bytes
- * por passo, sessenta vezes por segundo. Todo o resto do estado nasce de aplicar
- * estes campos à mesma simulação nos dois lados.
+ * It is the **only** thing that crosses the network from the playing side: sixteen
+ * bytes per step, sixty times a second. All the rest of the state is born from
+ * applying these fields to the same simulation on both sides.
  *
- * ## Por que um struct, e não o `Input`
+ * ## Why a struct, and not `Input`
  *
- * `Input` responde "o que está acontecendo agora, neste quadro". A simulação
- * precisa de "o que aconteceu **neste tick**", que é outra pergunta: um quadro de
- * 144 Hz não chega a cobrir um tick, e um de 20 Hz cobre três. Quem faz a
- * tradução é `InputSampler`; o que sai dela é isto.
+ * `Input` answers "what is happening right now, this frame". The simulation needs
+ * "what happened **on this tick**", which is a different question: a 144 Hz frame does
+ * not even cover one tick, and a 20 Hz one covers three. What does the translation is
+ * `InputSampler`; what comes out of it is this.
  *
- * ## A regra que não se quebra
+ * ## The rule you do not break
  *
- * ⚠️ **A ordem dos bits é o formato de rede.** Reordenar `InputBit` troca pulo por
- * tiro entre duas versões do jogo que se encontrarem numa sala — e o sintoma não é
- * um erro, é um adversário que atira ao andar. Acrescentar no fim é seguro;
- * remover e reordenar, nunca.
+ * ⚠️ **The order of the bits is the network format.** Reordering `InputBit` swaps jump
+ * for fire between two versions of the game that meet in a room — and the symptom is
+ * not an error, it is an opponent who fires while walking. Appending at the end is
+ * safe; removing and reordering, never.
  */
 
 /**
- * As onze ações de jogo, uma por bit.
+ * The eleven game actions, one per bit.
  *
- * Objeto congelado em vez de `const enum`: o `tsconfig` tem `isolatedModules`, e
- * `const enum` não sobrevive à compilação arquivo-a-arquivo que ele exige.
+ * A frozen object instead of a `const enum`: the `tsconfig` has `isolatedModules`, and
+ * `const enum` does not survive the file-by-file compilation it requires.
  *
- * Ficam de fora `freeCamera`, `controls`, `debug` e `pause` — são comandos da
- * casca, não do marujo. Nenhum deles muda um grama de física, e mandá-los pela
- * rede seria deixar o adversário abrir a tela de ajustes do outro.
+ * `freeCamera`, `controls`, `debug` and `pause` are left out — they are the shell's
+ * commands, not the sailor's. None of them changes a gram of physics, and sending them
+ * over the network would let the opponent open the other one's settings screen.
  */
 export const InputBit = {
   MoveForward: 1 << 0,
@@ -45,47 +45,45 @@ export const InputBit = {
 } as const;
 
 export interface InputFrame {
-  /** O passo a que esta entrada pertence. É o carimbo que a rede usa. */
+  /** The step this input belongs to. It is the stamp the network uses. */
   tick: number;
-  /** Bitmask do que está segurado no instante da amostra. */
+  /** Bitmask of what is held at the instant of the sample. */
   held: number;
   /**
-   * Bitmask das bordas **acumuladas** desde o tick anterior.
+   * Bitmask of the edges **accumulated** since the previous tick.
    *
-   * Separado de `held` porque as duas perguntas se comportam diferente quando um
-   * pacote se perde: segurar o W durante um engasgo tem de continuar andando,
-   * mas repetir a borda de `fire` dispara o canhão duas vezes. Ver a política de
-   * repetição em `InputBuffer`.
+   * Separate from `held` because the two questions behave differently when a packet is
+   * lost: holding W through a hitch has to keep walking, but repeating the `fire` edge
+   * fires the cannon twice. See the repeat policy in `InputBuffer`.
    */
   pressed: number;
-  /** Eixo de caminhada já normalizado, -1..1. */
+  /** Walking axis, already normalized, -1..1. */
   moveX: number;
   moveY: number;
-  /** Delta de olhar acumulado desde o tick anterior, em radianos. */
+  /** Look delta accumulated since the previous tick, in radians. */
   lookX: number;
   lookY: number;
   /**
-   * O olhar **absoluto** de quem mandou este quadro, em radianos.
+   * The **absolute** gaze of whoever sent this frame, in radians.
    *
-   * Só vale quando `absoluteView` é `true`, que é o caso dos quadros que vieram
-   * pela rede. Ver `PlayerController.applyLook` para o defeito que isto conserta
-   * — em resumo: delta de olhar não sobrevive a pacote perdido, e o que quebra
-   * quando ele não sobrevive não é a cabeça do outro, é o foco de interação
-   * dele.
+   * It is only valid when `absoluteView` is `true`, which is the case for frames that
+   * came over the network. See `PlayerController.applyLook` for the defect this fixes —
+   * in short: a gaze delta does not survive a lost packet, and what breaks when it does
+   * not survive is not the other one's head, it is their interaction focus.
    */
   yaw: number;
   pitch: number;
   /**
-   * `true` quando `yaw`/`pitch` mandam e os deltas devem ser ignorados.
+   * `true` when `yaw`/`pitch` rule and the deltas should be ignored.
    *
-   * Uma bandeira explícita, e não um valor sentinela em `yaw`: o quadro é
-   * preenchido em dois lugares muito diferentes (o amostrador local e o
-   * decodificador de rede), e "zero" é um ângulo perfeitamente válido.
+   * An explicit flag, and not a sentinel value in `yaw`: the frame is filled in two
+   * very different places (the local sampler and the network decoder), and "zero" is a
+   * perfectly valid angle.
    */
   absoluteView: boolean;
 }
 
-/** Um `InputFrame` zerado, para preencher pools sem alocar depois. */
+/** A zeroed `InputFrame`, for filling pools without allocating later. */
 export function createInputFrame(): InputFrame {
   return {
     tick: 0,
@@ -121,18 +119,18 @@ export function clearInputFrame(frame: InputFrame): void {
   frame.moveY = 0;
   frame.lookX = 0;
   frame.lookY = 0;
-  // `yaw`, `pitch` e `absoluteView` **não** são zerados: um quadro limpo entra
-  // no pool para ser reescrito por inteiro, e zerar o olhar aqui seria a mesma
-  // classe de erro que a política de fome do `InputBuffer` evita — inventar uma
-  // cabeça virada para a frente onde o que se sabe é "nada mudou".
+  // `yaw`, `pitch` and `absoluteView` are **not** zeroed: a clean frame goes into the
+  // pool to be rewritten in full, and zeroing the gaze here would be the same class of
+  // error `InputBuffer`'s starvation policy avoids — inventing a head facing forward
+  // where what is known is "nothing changed".
 }
 
-/** A ação está segurada neste passo. */
+/** The action is held on this step. */
 export function held(frame: InputFrame, bit: number): boolean {
   return (frame.held & bit) !== 0;
 }
 
-/** A ação foi acionada em algum ponto entre o passo anterior e este. */
+/** The action was triggered at some point between the previous step and this one. */
 export function pressed(frame: InputFrame, bit: number): boolean {
   return (frame.pressed & bit) !== 0;
 }

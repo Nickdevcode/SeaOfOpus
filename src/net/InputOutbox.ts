@@ -1,76 +1,74 @@
 /**
- * A janela de comandos que sai do cliente, e a regra de que ela **não tem
- * buracos**.
+ * The window of commands leaving the client, and the rule that it **has no holes**.
  *
- * Módulo próprio, e não um punhado de campos privados em `GuestSession`, pelo
- * mesmo motivo de `renderClock`: isto é aritmética sobre inteiros e bits, e é o
- * tipo de coisa que se prova num teste em vez de se conferir olhando a tela.
- * `GuestSession` importa Three.js e o `Match` inteiro; isto aqui não importa
- * nada além do formato do quadro.
+ * A module of its own, and not a handful of private fields in `GuestSession`, for the
+ * same reason as `renderClock`: this is arithmetic over integers and bits, and it is
+ * the kind of thing you prove in a test instead of checking by looking at the screen.
+ * `GuestSession` imports Three.js and the whole `Match`; this imports nothing beyond
+ * the frame's shape.
  *
- * ## O contrato
+ * ## The contract
  *
- * O host consome **um tick por passo**, em ordem, e descarta silenciosamente
- * qualquer quadro cujo tick ele já tenha passado (é assim que a redundância do
- * lote funciona — ver `INPUT_BATCH`). Isso dá duas obrigações a quem envia:
+ * The host consumes **one tick per step**, in order, and silently discards any frame
+ * whose tick it has already passed (that is how the batch's redundancy works — see
+ * `INPUT_BATCH`). That gives the sender two obligations:
  *
- * 1. **Nenhum tick pode faltar.** Um tick que nunca foi enviado é um passo em
- *    que o host não acha comando: ele conta uma fome, repete o último comando
- *    conhecido e relata a fome ao cliente — que responde correndo mais à frente,
- *    o que provoca outra correção de relógio e outro buraco. É uma catraca, e
- *    girando ela chega ao teto de avanço com o jogador vendo o próprio marujo
- *    andar sem obedecer.
- * 2. **Nenhum tick pode aparecer duas vezes com conteúdos diferentes.** O
- *    segundo é descartado como duplicata, e com ele vai embora o comando daquele
- *    passo: um `F` no timão, um tiro, um pulo.
+ * 1. **No tick may be missing.** A tick that was never sent is a step where the host
+ *    finds no command: it counts a starvation, repeats the last known command and
+ *    reports the starvation to the client — which responds by running further ahead,
+ *    which provokes another clock correction and another hole. It is a ratchet, and by
+ *    turning it reaches the lead ceiling with the player watching their own sailor walk
+ *    without obeying.
+ * 2. **No tick may appear twice with different contents.** The second is discarded as a
+ *    duplicate, and with it goes that step's command: an `F` at the helm, a shot, a
+ *    jump.
  *
- * As duas coisas acontecem pelo mesmo motivo, e não por causa da rede: o relógio
- * de predição do cliente é **corrigido** de um em um para acompanhar o do host
- * (ver `GuestSession.syncClock`), e uma correção para cima pula um carimbo,
- * enquanto uma para baixo repete o anterior. Sem esta classe, cada correção de
- * relógio custava um comando.
+ * Both things happen for the same reason, and not because of the network: the client's
+ * prediction clock is **corrected** one step at a time to follow the host's (see
+ * `GuestSession.syncClock`), and a correction upward skips a stamp, while one downward
+ * repeats the previous one. Without this class, every clock correction cost a command.
  *
- * ## O que a costura preserva
+ * ## What the stitching preserves
  *
- * O tick que a correção pulou vira uma **repetição** do anterior, seguindo a
- * mesma política de `InputBuffer`: o que é estado (teclas seguradas, eixos,
- * olhar absoluto) repete, o que é borda não. É a verdade sobre aquele instante —
- * nada mudou nele, porque ele não chegou a existir.
+ * The tick the correction skipped becomes a **repeat** of the previous one, following
+ * `InputBuffer`'s policy: what is state (held keys, axes, absolute gaze) repeats, what
+ * is an edge does not. It is the truth about that instant — nothing changed in it,
+ * because it never came to exist.
  *
- * O tick repetido é **fundido**: as bordas entram por OU, o estado vale o mais
- * recente e o olhar acumulado se soma. É exatamente o que `InputSampler` faz
- * quando dois quadros do monitor caem dentro do mesmo passo.
+ * The repeated tick is **merged**: the edges come in by OR, the state takes the most
+ * recent and the accumulated gaze is summed. It is exactly what `InputSampler` does
+ * when two monitor frames land inside the same step.
  */
 
 import { INPUT_BATCH } from '../../shared/protocol';
 import { copyInputFrame, createInputFrame, type InputFrame } from '../core/InputFrame';
 
 /**
- * Lacuna máxima que vale a pena costurar, em passos.
+ * Largest gap worth stitching, in steps.
  *
- * O que separa **deriva** de **salto**. A correção de relógio anda de um em um,
- * então qualquer buraco legítimo é de um passo; uma lacuna grande é o relógio
- * saltando (a aba dormiu, a rede sumiu por segundos), e preenchê-la seria mandar
- * segundos de comando fantasma. Salto é caso de `InputBuffer.claimAhead`, que
- * fecha o vão de uma vez do outro lado.
+ * What separates **drift** from **a jump**. The clock correction moves one at a time,
+ * so any legitimate hole is one step wide; a large gap is the clock jumping (the tab
+ * slept, the network vanished for seconds), and filling it would mean sending seconds
+ * of phantom command. A jump is `InputBuffer.claimAhead`'s case, which closes the gap
+ * in one go on the other side.
  */
 const MAX_STITCH = INPUT_BATCH;
 
 export class InputOutbox {
-  /** Os últimos quadros, do mais novo para o mais velho. */
+  /** The most recent frames, newest first. */
   private readonly frames: InputFrame[] = Array.from({ length: INPUT_BATCH }, createInputFrame);
   private count = 0;
-  /** O tick mais novo que já entrou. `-1` antes do primeiro. */
+  /** The newest tick that has gone in. `-1` before the first. */
   private newest = -1;
-  /** Rascunho da repetição. Nada aqui aloca por passo. */
+  /** Scratch for the repeat. Nothing here allocates per step. */
   private readonly filler = createInputFrame();
 
-  /** O lote a mandar: os mais novos primeiro. Válido até o próximo `add`. */
+  /** The batch to send: newest first. Valid until the next `add`. */
   get batch(): readonly InputFrame[] {
     return this.frames.slice(0, this.count);
   }
 
-  /** Quantos quadros o lote leva agora. */
+  /** How many frames the batch carries right now. */
   get size(): number {
     return this.count;
   }
@@ -81,9 +79,9 @@ export class InputOutbox {
   }
 
   /**
-   * Põe o comando deste passo na janela, costurando o que o relógio tiver feito.
+   * Puts this step's command into the window, stitching whatever the clock has done.
    *
-   * @param frame o quadro do passo. É copiado — quem chama pode reaproveitá-lo.
+   * @param frame the step's frame. It is copied — the caller can reuse it.
    */
   add(frame: InputFrame): void {
     if (this.newest >= 0 && frame.tick <= this.newest) {
@@ -96,7 +94,7 @@ export class InputOutbox {
     this.newest = frame.tick;
   }
 
-  /** Empurra um quadro, jogando o mais antigo fora. */
+  /** Pushes a frame in, throwing the oldest one out. */
   private push(frame: InputFrame): void {
     for (let i = this.frames.length - 1; i > 0; i--) {
       copyInputFrame(this.frames[i - 1]!, this.frames[i]!);
@@ -105,7 +103,7 @@ export class InputOutbox {
     this.count = Math.min(this.count + 1, this.frames.length);
   }
 
-  /** Preenche os ticks que a correção do relógio pulou. Ver o cabeçalho. */
+  /** Fills in the ticks the clock correction skipped. See the header. */
   private stitch(tick: number): void {
     const first = this.newest + 1;
     if (this.newest < 0 || tick - first > MAX_STITCH) return;
@@ -120,7 +118,7 @@ export class InputOutbox {
     }
   }
 
-  /** Funde um comando num tick que já está na janela. Ver o cabeçalho. */
+  /** Merges a command into a tick already in the window. See the header. */
   private merge(frame: InputFrame): void {
     let slot: InputFrame | null = null;
     for (let i = 0; i < this.count; i++) {
@@ -130,8 +128,8 @@ export class InputOutbox {
       }
     }
 
-    // Saiu da janela: o relógio saltou para trás de verdade, e o que estava aqui
-    // descreve um futuro que já não vale. Recomeçar é o certo.
+    // Out of the window: the clock really did jump backwards, and what was here
+    // describes a future that no longer applies. Starting over is right.
     if (!slot) {
       this.count = 0;
       this.push(frame);

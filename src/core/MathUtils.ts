@@ -1,22 +1,22 @@
 /**
- * Utilitários matemáticos usados pela física, câmera e IA.
+ * Math utilities used by the physics, the camera and the AI.
  *
- * Tudo aqui é independente de framerate: funções de suavização recebem `dt`
- * e usam decaimento exponencial em vez de `lerp(a, b, 0.1)`, que muda de
- * comportamento conforme o FPS varia.
+ * Everything here is frame-rate independent: the smoothing functions take `dt` and use
+ * exponential decay instead of `lerp(a, b, 0.1)`, which changes behavior as the FPS
+ * varies.
  */
 
 export const TAU = Math.PI * 2;
 export const DEG = Math.PI / 180;
 export const RAD = 180 / Math.PI;
 
-/** Gravidade em m/s². Usada pela balística e pelo empuxo. */
+/** Gravity in m/s². Used by the ballistics and by the buoyancy. */
 export const GRAVITY = 9.81;
 
 /** Densidade da água do mar em kg/m³. */
 export const WATER_DENSITY = 1025;
 
-/** Densidade do ar em kg/m³, usada pela força da vela e pelo arrasto da bala. */
+/** Air density in kg/m³, used by the sail's force and the ball's drag. */
 export const AIR_DENSITY = 1.225;
 
 export function clamp(v: number, min: number, max: number): number {
@@ -45,37 +45,37 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 /**
- * Suavização exponencial independente de framerate.
- * `lambda` é a taxa de decaimento: quanto maior, mais rápido converge.
- * Equivale a um lerp que se comporta igual em 30 ou 144 FPS.
+ * Frame-rate independent exponential smoothing.
+ * `lambda` is the decay rate: the higher it is, the faster it converges.
+ * It is equivalent to a lerp that behaves the same at 30 or 144 FPS.
  */
 export function damp(current: number, target: number, lambda: number, dt: number): number {
   return lerp(target, current, Math.exp(-lambda * dt));
 }
 
-/** Move `current` na direção de `target` no máximo `maxDelta`. */
+/** Moves `current` toward `target` by at most `maxDelta`. */
 export function moveTowards(current: number, target: number, maxDelta: number): number {
   const diff = target - current;
   if (Math.abs(diff) <= maxDelta) return target;
   return current + Math.sign(diff) * maxDelta;
 }
 
-/** Normaliza um ângulo em radianos para o intervalo (-π, π]. */
+/** Normalizes an angle in radians into the interval (-π, π]. */
 export function wrapAngle(a: number): number {
   a = (a + Math.PI) % TAU;
   if (a < 0) a += TAU;
   return a - Math.PI;
 }
 
-/** Menor diferença angular entre dois ângulos, no intervalo (-π, π]. */
+/** Smallest angular difference between two angles, in the interval (-π, π]. */
 export function angleDelta(from: number, to: number): number {
   return wrapAngle(to - from);
 }
 
 /**
- * Aplica zona morta radial a um par de eixos de analógico e recurva a resposta.
- * Radial (e não por eixo) evita o clássico "canto quadrado" que faz a mira
- * acelerar nas diagonais.
+ * Applies a radial dead zone to a pair of stick axes and recurves the response.
+ * Radial (and not per axis) avoids the classic "square corner" that makes the aim
+ * speed up on the diagonals.
  */
 export function applyDeadzone(x: number, y: number, deadzone: number, exponent = 2): [number, number] {
   const mag = Math.hypot(x, y);
@@ -87,8 +87,8 @@ export function applyDeadzone(x: number, y: number, deadzone: number, exponent =
 }
 
 /**
- * Controlador PID discreto, usado pelo timoneiro bot para manter um rumo.
- * Guarda estado interno, então cada instância serve a um único alvo.
+ * A discrete PID controller, used by the bot helmsman to hold a heading.
+ * It keeps internal state, so each instance serves a single target.
  */
 export class PID {
   private integral = 0;
@@ -99,7 +99,7 @@ export class PID {
     public kp: number,
     public ki: number,
     public kd: number,
-    /** Limita o acúmulo do termo integral para evitar windup. */
+    /** Caps the integral term's accumulation to avoid windup. */
     public integralLimit = 1,
   ) {}
 
@@ -108,7 +108,8 @@ export class PID {
 
     this.integral = clamp(this.integral + error * dt, -this.integralLimit, this.integralLimit);
 
-    // Na primeira chamada não há derivada válida; usar 0 evita um pico inicial.
+    // On the first call there is no valid derivative; using 0 avoids an initial
+    // spike.
     const derivative = this.initialized ? (error - this.previousError) / dt : 0;
     this.previousError = error;
     this.initialized = true;
@@ -124,9 +125,9 @@ export class PID {
 }
 
 /**
- * Gerador pseudoaleatório determinístico (mulberry32).
- * Usado para que ondas, decoração e erro de mira da IA sejam reproduzíveis
- * entre partidas — essencial para depurar física.
+ * Deterministic pseudo-random generator (mulberry32).
+ * Used so that waves, decoration and the AI's aiming error are reproducible between
+ * matches — essential for debugging physics.
  */
 export function createRandom(seed: number): () => number {
   let a = seed >>> 0;
@@ -139,7 +140,7 @@ export function createRandom(seed: number): () => number {
   };
 }
 
-/** Amostra de uma normal padrão via Box-Muller, para erro de mira da IA. */
+/** A sample from a standard normal via Box-Muller, for the AI's aiming error. */
 export function gaussian(random: () => number): number {
   let u = 0;
   let v = 0;
@@ -148,7 +149,7 @@ export function gaussian(random: () => number): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * v);
 }
 
-/** Converte metros por segundo para nós (usado no HUD). */
+/** Converts meters per second into knots (used in the HUD). */
 export function msToKnots(ms: number): number {
   return ms * 1.943844;
 }
