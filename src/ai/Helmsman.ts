@@ -1,38 +1,40 @@
 /**
- * O timoneiro bot: mantém um rumo comandado girando a mesma roda que o jogador.
+ * The bot helmsman: holds a commanded heading by turning the same wheel the player
+ * does.
  *
- * **O problema não é trivial, e vale dizer por quê.** A roda da Chalupa não é um
- * volante: a entrada de `Rudder` é *taxa de giro*, e o ângulo é estado que fica
- * onde foi deixado (ver `Rudder.ts`). Ligar um controlador direto do erro de rumo
- * na entrada da roda cria dois integradores em série — a roda integra o comando e
- * o casco integra a guinada. Sistema de segunda ordem com ganho puro oscila
- * *sempre*, e o navio sairia costurando o rumo para todo lado.
+ * **The problem is not trivial, and it is worth saying why.** The Sloop's wheel is not
+ * a steering wheel: `Rudder`'s input is a *rate of turn*, and the angle is state that
+ * stays where it was left (see `Rudder.ts`). Wiring a controller straight from the
+ * heading error into the wheel's input creates two integrators in series — the wheel
+ * integrates the command and the hull integrates the yaw. A second-order system with
+ * pure gain oscillates *always*, and the ship would go weaving all over its heading.
  *
- * A saída é a dos pilotos automáticos de verdade, e é uma malha em cascata:
+ * The way out is the one real autopilots use, and it is a cascaded loop:
  *
- * 1. **Fora**, um PD sobre o erro de rumo decide um **ângulo de roda** — não uma
- *    taxa. É o "meia volta a bombordo" que um timoneiro humano ouve e executa.
- * 2. **Dentro**, a roda é levada até esse ângulo o mais rápido que o batente
- *    permite. Uma conta, sem ganho para ajustar.
+ * 1. **Outside**, a PD over the heading error decides a **wheel angle** — not a rate.
+ *    It is the "half a turn to port" a human helmsman hears and executes.
+ * 2. **Inside**, the wheel is taken to that angle as fast as the stop allows. One
+ *    calculation, with no gain to tune.
  *
- * Com a roda virando posição comandada, o único integrador que sobra é o casco, e
- * um PD estabiliza isso sem drama.
+ * With the wheel becoming a commanded position, the only integrator left is the hull,
+ * and a PD stabilizes that without drama.
  *
- * **Por que não a classe `PID` de `MathUtils`.** Ela deriva o erro numericamente,
- * e a derivada do rumo é justamente a grandeza que o corpo rígido *já mede*:
- * `angularVelocity.y`. Diferenciar um sinal que se tem exato é trocar precisão por
- * ruído de graça. O termo integral também não entra: o único desvio permanente é
- * o leme de sota de ~0,08°/s que `SailSim` documenta, e o termo proporcional o
- * segura com menos de 1° de erro de rumo. Menos código, e nenhum risco de windup
- * deixando a roda grudada no batente.
+ * **Why not `MathUtils`'s `PID` class.** It differentiates the error numerically, and
+ * the heading's derivative is precisely the quantity the rigid body *already measures*:
+ * `angularVelocity.y`. Differentiating a signal you have exactly is trading precision
+ * for noise for free. The integral term stays out too: the only permanent offset is the
+ * ~0.08°/s of lee helm `SailSim` documents, and the proportional term holds it under 1°
+ * of heading error. Less code, and no risk of windup leaving the wheel stuck against
+ * the stop.
  *
- * ## O sinal, que é onde se erra
+ * ## The sign, which is where you go wrong
  *
- * `heading` é rotação em torno de **+Y**, e girar em +Y leva a proa (−Z) para −X,
- * que é **bombordo**. Então rumo crescente é guinar para a esquerda, e o comando
- * de roda positivo (boreste, por `Rudder`) faz o rumo **diminuir**. Todo sinal
- * daqui vem disso, e trocar um deles faz o navio fugir do rumo em vez de buscá-lo
- * — girando cada vez mais rápido, porque a realimentação passa a ser positiva.
+ * `heading` is rotation about **+Y**, and rotating in +Y takes the bow (−Z) toward −X,
+ * which is **port**. So an increasing heading is yawing to the left, and a positive
+ * wheel command (starboard, by `Rudder`) makes the heading **decrease**. Every sign in
+ * here comes from that, and flipping one of them makes the ship run from its heading
+ * instead of seeking it — turning faster and faster, because the feedback becomes
+ * positive.
  */
 
 import { WHEEL_RATE, MAX_WHEEL } from '../ship/Rudder';
@@ -40,81 +42,80 @@ import { angleDelta, clamp } from '../core/MathUtils';
 import type { Ship } from '../ship/Ship';
 
 /**
- * Ganho proporcional: radianos de roda por radiano de erro de rumo.
+ * Proportional gain: radians of wheel per radian of heading error.
  *
- * 8 põe a roda no batente (π) com 22° de erro. Acima disso o navio já está
- * fazendo tudo que o leme dá, então ganho maior não viraria mais rápido — só
- * atrasaria a saída da curva.
+ * 8 puts the wheel against the stop (π) at 22° of error. Above that the ship is
+ * already doing everything the rudder gives, so a higher gain would not turn any
+ * faster — it would only delay the exit from the turn.
  */
 const HELM_KP = 8;
 
 /**
- * Ganho derivativo: radianos de roda por rad/s de guinada.
+ * Derivative gain: radians of wheel per rad/s of yaw.
  *
- * É o freio da curva. Numa guinada carregada a Chalupa gira a ~0,13 rad/s, o que
- * aqui vale 1,4 rad de roda contrária — o suficiente para ela chegar no rumo e
- * parar, em vez de passar dele e voltar. Com 6 o navio derrapa uns 8° além do
- * rumo a cada correção grande; com 20 ele fica preguiçoso e nunca fecha uma curva
- * apertada em tempo de combate.
+ * It is the turn's brake. In a hard turn the Sloop rotates at ~0.13 rad/s, which here
+ * is worth 1.4 rad of opposite wheel — enough for it to reach the heading and stop,
+ * instead of overshooting and coming back. At 6 the ship skids some 8° past the
+ * heading on every large correction; at 20 it gets lazy and never closes a tight turn
+ * in combat time.
  */
 const HELM_KD = 11;
 
 /**
- * Erro de rumo abaixo do qual o timoneiro considera o navio "no rumo".
+ * Heading error below which the helmsman considers the ship "on course".
  *
- * 4°. Serve ao capitão, não ao controle: é o que decide se já dá para abrir fogo
- * ou se ainda se está fechando a manobra.
+ * 4°. It serves the captain, not the control loop: it is what decides whether you can
+ * already open fire or are still closing the maneuver.
  */
 const ON_COURSE = 0.07;
 
 export class Helmsman {
-  /** Rumo comandado, em radianos, na mesma medida de `Ship.heading`. */
+  /** Commanded heading, in radians, in the same measure as `Ship.heading`. */
   course = 0;
 
-  /** Erro de rumo do último passo, em radianos. Telemetria e decisão tática. */
+  /** Last step's heading error, in radians. Telemetry and tactical decisions. */
   error = 0;
 
-  /** Ângulo de roda que o timoneiro está pedindo. Só telemetria. */
+  /** The wheel angle the helmsman is asking for. Telemetry only. */
   commandedWheel = 0;
 
-  /** `true` quando a proa já está praticamente no rumo pedido. */
+  /** `true` when the bow is practically on the requested heading. */
   get onCourse(): boolean {
     return Math.abs(this.error) < ON_COURSE;
   }
 
-  /** Mesmo comando de rumo, dado como uma direção a seguir. */
+  /** The same heading command, given as a direction to follow. */
   setCourse(heading: number): void {
     this.course = heading;
   }
 
   /**
-   * Um passo de governo. Escreve `ship.controls.wheel` e nada mais.
+   * One step of steering. It writes `ship.controls.wheel` and nothing else.
    *
-   * @param gain multiplicador de perícia: o grumete corrige mole, a lenda seca.
+   * @param gain skill multiplier: the deckhand corrects softly, the legend sharply.
    */
   update(dt: number, ship: Ship, gain = 1): void {
     this.error = angleDelta(ship.heading, this.course);
 
-    // Guinada medida no eixo do mundo. Rigorosamente a taxa de *rumo* é a
-    // projeção de ω no eixo local de guinada, e não `y` puro; com o navio
-    // adernado 10° a diferença é 1,5%, bem abaixo do que o ganho derivativo
-    // pretende resolver.
+    // Yaw measured on the world axis. Strictly, the *heading* rate is the projection
+    // of ω onto the local yaw axis, and not plain `y`; with the ship heeled 10° the
+    // difference is 1.5%, well below what the derivative gain sets out to solve.
     const yawRate = ship.body.angularVelocity.y;
 
-    // Malha externa: PD → ângulo de roda desejado. O sinal negativo no erro é a
-    // convenção documentada no topo (roda positiva baixa o rumo).
+    // Outer loop: PD → desired wheel angle. The negative sign on the error is the
+    // convention documented at the top (positive wheel lowers the heading).
     const desired = clamp((-HELM_KP * this.error + HELM_KD * yawRate) * gain, -MAX_WHEEL, MAX_WHEEL);
     this.commandedWheel = desired;
 
-    // Malha interna: leva a roda até lá o mais rápido que o batente aguenta. Sem
-    // o `dt` no denominador o comando dependeria da taxa de passo, e um `dt`
-    // pequeno faria a roda arrastar.
+    // Inner loop: takes the wheel there as fast as the stop can bear. Without the
+    // `dt` in the denominator the command would depend on the step rate, and a small
+    // `dt` would make the wheel drag.
     const room = WHEEL_RATE * dt;
     ship.controls.wheel =
       room > 1e-9 ? clamp((desired - ship.rudder.wheelAngle) / room, -1, 1) : 0;
   }
 
-  /** Larga o timão: roda parada, sem tentar corrigir nada. */
+  /** Lets go of the helm: wheel still, with no attempt to correct anything. */
   release(ship: Ship): void {
     ship.controls.wheel = 0;
     this.error = 0;

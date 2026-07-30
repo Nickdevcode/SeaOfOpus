@@ -1,159 +1,161 @@
 /**
- * Os três capitães inimigos, e o que exatamente muda entre eles.
+ * The three enemy captains, and exactly what changes between them.
  *
- * **A regra que este arquivo respeita:** a dificuldade mexe em *perícia*, nunca
- * em física nem em tripulação. Os três navios têm o mesmo casco, o mesmo pano, os
- * mesmos dois canhões e a mesma tripulação de dois. O que muda é o quanto a mão
- * do artilheiro trema, quanto ele erra a liderança do alvo, quanto tempo o
- * capitão leva para perceber que a situação virou e a que distância ele resolve
- * abrir fogo. Nenhum deles ganha alcance de tiro, velocidade de casco ou bomba de
- * porão extra.
+ * **The rule this file respects:** difficulty touches *skill*, never physics and never
+ * crew. All three ships have the same hull, the same canvas, the same two guns and the
+ * same crew of two. What changes is how much the gunner's hand shakes, how far off he
+ * is on the target's lead, how long the captain takes to notice the situation has
+ * turned and at what distance he decides to open fire. None of them gains firing range,
+ * hull speed or an extra bilge pump.
  *
- * Isso importa por dois motivos. O primeiro é que dificuldade que aumenta números
- * de física vira um navio que o jogador não consegue ler: ele vê o inimigo virar
- * mais rápido do que o barco dele consegue e conclui que o jogo trapaceia — e
- * estaria certo. O segundo é que perícia produz erros *do tipo certo*: o grumete
- * não erra por sorteio, ele erra **atrasado e curto**, que é como gente nova erra
- * de verdade num canhão.
+ * That matters for two reasons. The first is that difficulty which raises physics
+ * numbers becomes a ship the player cannot read: they see the enemy turn faster than
+ * their own boat can and conclude the game cheats — and they would be right. The second
+ * is that skill produces errors *of the right kind*: the deckhand does not miss by dice
+ * roll, he misses **late and short**, which is how a new hand really misses on a gun.
  *
- * ## De onde saem os números de pontaria
+ * ## Where the aiming numbers come from
  *
- * `aimSigma` é o desvio padrão do erro angular por tiro. A conversão para metros
- * no alvo é direta: `desvio ≈ sigma × alcance`. A Chalupa tem 16 m de comprimento
- * e ~2,6 m de costado exposto acima da linha d'água, então a 80 m:
+ * `aimSigma` is the standard deviation of the angular error per shot. The conversion to
+ * meters at the target is direct: `deviation ≈ sigma × range`. The Sloop is 16 m long
+ * with ~2.6 m of side exposed above the waterline, so at 80 m:
  *
- * | capitão  | sigma    | desvio a 80 m | leitura                              |
- * |----------|----------|---------------|--------------------------------------|
- * | grumete  | 0,050 rad| ±4,0 m        | acerta o casco em ~1 tiro de 3       |
- * | corsário | 0,018 rad| ±1,4 m        | acerta quase sempre, erra na onda    |
- * | lenda    | 0,007 rad| ±0,56 m       | escolhe *onde* no casco vai acertar  |
+ * | captain  | sigma     | deviation at 80 m | reading                              |
+ * |----------|-----------|-------------------|--------------------------------------|
+ * | deckhand | 0.050 rad | ±4.0 m            | hits the hull about 1 shot in 3      |
+ * | corsair  | 0.018 rad | ±1.4 m            | almost always hits, misses on the wave |
+ * | legend   | 0.007 rad | ±0.56 m           | chooses *where* on the hull to hit   |
  *
- * `leadFraction` é a fração da velocidade do alvo que o artilheiro consegue
- * prever. Abaixo de 1 ele **atira atrás** do navio que cruza — o erro clássico de
- * quem está aprendendo, e o que dá ao jogador a chance de escapar acelerando.
+ * `leadFraction` is the fraction of the target's velocity the gunner manages to
+ * anticipate. Below 1 he **shoots behind** a ship that crosses — the classic error of
+ * somebody learning, and what gives the player a chance to escape by accelerating.
  *
- * ## O eixo que faltava: o que ele faz com o navio dele
+ * ## The axis that was missing: what he does with his own ship
  *
- * Os três capitães nasceram com três perícias de artilharia e uma de comando, e
- * **nenhuma de avaria** — os três consertavam o casco exatamente igual, e exatamente
- * bem. Medindo, isso queria dizer que oito rombos na linha d'água viravam casco
- * estanque em vinte e cinco segundos em qualquer dificuldade. Um jogador que
- * acertasse mais não ganhava nada com isso, o que é o contrário do que um jogo de
- * combate naval deve ensinar.
+ * The three captains were born with three gunnery skills and one of command, and **none
+ * of damage control** — all three repaired the hull exactly the same, and exactly well.
+ * Measured, that meant eight breaches at the waterline became a watertight hull in
+ * twenty-five seconds at any difficulty. A player who hit more gained nothing from it,
+ * which is the opposite of what a naval combat game should teach.
  *
- * `holdShift`, `gunShift` e `triage` são o eixo que faltava, e ele mede a mesma
- * coisa que os outros: **julgamento**. Quanto tempo largar a peça vale a pena,
- * quando voltar a ela, e qual dos buracos merece a tábua que está na mão. Continua
- * não havendo gente a mais nem bomba melhor — o inimigo Lenda salva o navio dele
- * porque decide melhor, não porque trabalha mais rápido.
+ * `holdShift`, `gunShift` and `triage` are the axis that was missing, and it measures
+ * the same thing as the others: **judgment**. How long leaving the gun is worth it, when
+ * to come back to it, and which of the holes deserves the plank in hand. There is still
+ * no extra man and no better pump — the Legend enemy saves its ship because it decides
+ * better, not because it works faster.
  */
 
 export type DifficultyId = 'recruit' | 'corsair' | 'legend';
 
 export interface DifficultyPreset {
   readonly id: DifficultyId;
-  /** Nome mostrado no menu. */
+  /** The name shown in the menu. */
   readonly label: string;
-  /** Uma linha que diz ao jogador no que ele está se metendo. */
+  /** One line telling the player what they are getting into. */
   readonly blurb: string;
 
-  // --- artilharia ------------------------------------------------------------
-  /** Desvio padrão do erro de pontaria, em radianos, sorteado a cada carga. */
+  // --- gunnery ---------------------------------------------------------------
+  /** Standard deviation of the aiming error, in radians, drawn on every load. */
   readonly aimSigma: number;
   /**
-   * Fração da velocidade do alvo que o artilheiro leva em conta. 1 é liderança
-   * perfeita; abaixo disso ele atira atrás do alvo que atravessa.
+   * Fraction of the target's velocity the gunner takes into account. 1 is perfect
+   * lead; below that he shoots behind a target that crosses.
    */
   readonly leadFraction: number;
   /**
-   * Voltas da iteração de ponto fixo em `solveIntercept`.
+   * Rounds of the fixed-point iteration in `solveIntercept`.
    *
-   * Uma volta só já lidera o azimute, mas calcula o tempo de voo para onde o
-   * alvo *está* em vez de para onde ele vai estar — erro que cresce com a
-   * distância, que é justamente onde a diferença entre os capitães deve pesar.
+   * A single round already leads the azimuth, but it computes the time of flight to
+   * where the target *is* instead of to where it is going to be — an error that grows
+   * with distance, which is exactly where the difference between the captains should
+   * weigh.
    */
   readonly leadIterations: number;
-  /** Alcance máximo em que a peça abre fogo, em metros. */
+  /** Maximum range at which the gun opens fire, in meters. */
   readonly engageRange: number;
   /**
-   * Tolerância angular para soltar o tiro, em radianos.
+   * Angular tolerance for releasing the shot, in radians.
    *
-   * Apertada, o artilheiro espera o balanço trazer o cano exatamente para cima
-   * do alvo; folgada, ele atira quase à vontade. É o segundo eixo da precisão, e
-   * o mais visível: um capitão ruim atira **na hora errada**, não só torto.
+   * Tight, the gunner waits for the roll to bring the barrel exactly onto the target;
+   * loose, he fires almost at will. It is precision's second axis, and the most
+   * visible: a bad captain shoots **at the wrong moment**, not only crooked.
    */
   readonly fireTolerance: number;
 
-  // --- comando ---------------------------------------------------------------
-  /** Segundos até o capitão reagir a uma mudança de situação tática. */
+  // --- command ---------------------------------------------------------------
+  /** Seconds until the captain reacts to a change in the tactical situation. */
   readonly reaction: number;
-  /** Ganho do timoneiro sobre o erro de rumo. */
+  /** The helmsman's gain over the heading error. */
   readonly helmGain: number;
-  /** Distância de través que o capitão tenta manter, em metros. */
+  /** Beam distance the captain tries to keep, in meters. */
   readonly standoff: number;
 
-  // --- tripulação ------------------------------------------------------------
-  /** Multiplicador do tempo que o marujo leva para trocar de posto. */
+  // --- crew ------------------------------------------------------------------
+  /** Multiplier on the time the sailor takes to change post. */
   readonly transitScale: number;
   /**
-   * Fração de alagamento que manda o marujo largar o canhão e descer ao porão.
+   * Flooding fraction that sends the sailor off the gun and down into the hold.
    *
-   * O grumete deixa a água subir demais antes de agir — e é assim que se perde
-   * uma chalupa. A lenda desce ao primeiro rombo abaixo da linha d'água.
+   * The deckhand lets the water rise too far before acting — and that is how a sloop
+   * is lost. The legend goes below at the first breach under the waterline.
    */
   readonly floodAlarm: number;
   /**
-   * Segundos de trabalho que o marujo entrega por descida ao porão.
+   * Seconds of work the sailor delivers per trip down into the hold.
    *
-   * **É o número que decide se o navio inimigo pode ser afundado.** Ele conta a
-   * partir da chegada lá embaixo — a escada já foi paga em `transitScale` —, e ao
-   * esgotar-se o marujo sobe para a peça com o casco no estado em que estiver.
+   * **It is the number that decides whether the enemy ship can be sunk.** It counts
+   * from arriving down there — the stair has already been paid for in `transitScale` —
+   * and when it runs out the sailor goes up to the gun with the hull in whatever state
+   * it is in.
    *
-   * Um turno cobre uma caminhada e uma tábua e meia, então o inimigo sai do porão
-   * com buracos abertos e volta a atirar mesmo assim. Não é desatenção: é a aposta
-   * de que dá para afundar o outro primeiro, e é a mesma aposta que o jogador faz
-   * toda vez que decide dar mais um tiro em vez de descer.
+   * One shift covers one walk and a plank and a half, so the enemy leaves the hold with
+   * holes open and goes back to firing anyway. It is not carelessness: it is the bet
+   * that it can sink the other one first, and it is the same bet the player makes every
+   * time they decide to take one more shot instead of going below.
    *
-   * O turno **não** vale quando o porão passa de `BREAK_OFF_FLOOD` — aí o capitão
-   * rompeu contato e salvar o navio virou a única tarefa. Ver `ShipAI.assignCrew`.
+   * The shift does **not** apply when the hold goes past `BREAK_OFF_FLOOD` — then the
+   * captain has broken contact and saving the ship has become the only task. See
+   * `ShipAI.assignCrew`.
    */
   readonly holdShift: number;
   /**
-   * Segundos que ele deve à peça antes de poder descer de novo.
+   * Seconds he owes the gun before he can go below again.
    *
-   * O par de `holdShift`, e é ele que dá o respiro: entre duas descidas há um
-   * intervalo em que o inimigo está atirando e a água está subindo. Sem este
-   * intervalo o marujo desceria de volta no passo seguinte ao de subir, e o
-   * rodízio viraria o reparo contínuo que ele veio substituir.
+   * `holdShift`'s partner, and it is what gives the breathing room: between two trips
+   * below there is an interval in which the enemy is firing and the water is rising.
+   * Without this interval the sailor would go back down on the step after coming up,
+   * and the rotation would become the continuous repair it came to replace.
    */
   readonly gunShift: number;
   /**
-   * Quão bem ele escolhe **qual** rombo tapar. Ver `Crew.pickBreach`.
+   * How well he picks **which** breach to patch. See `Crew.pickBreach`.
    *
-   * É o expoente de um sorteio ponderado pela vazão de cada furo. Perto de zero, a
-   * escolha é às cegas; alto, ele quase sempre acha o que mais está afundando o
-   * navio. É o eixo de perícia que faltava: até aqui os três capitães tinham a
-   * mesma triagem, e ela era perfeita.
+   * It is the exponent of a draw weighted by each hole's inflow. Near zero, the choice
+   * is blind; high, he almost always finds the one sinking the ship fastest. It is the
+   * skill axis that was missing: until now all three captains had the same triage, and
+   * it was perfect.
    */
   readonly triage: number;
   /**
-   * Fração de porão que ele **aceita deixar dentro do navio**, 0..1.
+   * Fraction of the hold he **accepts leaving inside the ship**, 0..1.
    *
-   * A bomba é a mesma dos dois lados e tira os mesmos 750 L/s — o que muda é quanto
-   * tempo alguém fica nela. Até aqui o marujo inimigo bombeava até o porão zerar,
-   * sempre, e o efeito era um casco que voltava a ser novo entre uma salva e outra:
-   * a água que o jogador pôs lá dentro não acumulava nada ao longo do duelo.
+   * The pump is the same on both sides and moves the same 750 L/s — what changes is how
+   * long somebody stays on it. Until now the enemy sailor pumped until the hold was
+   * empty, always, and the effect was a hull that went back to being new between one
+   * salvo and the next: the water the player put in there accumulated nothing over the
+   * course of the duel.
    *
-   * Com um piso, ela acumula. Ele bombeia até o nível que julga aceitável, larga a
-   * alavanca e sobe para a peça — e o duelo passa a ser jogado por um navio que
-   * carrega o estrago das trocas anteriores. É a mesma decisão do turno de porão
-   * (`holdShift`), aplicada à água em vez de à madeira, e é o mesmo tipo de erro:
-   * o Grumete tolera um quarto do porão cheio e paga caro no primeiro rombo novo.
+   * With a floor, it accumulates. He pumps to the level he judges acceptable, lets go
+   * of the handle and goes up to the gun — and the duel starts being played by a ship
+   * that carries the damage from the previous exchanges. It is the same decision as the
+   * hold shift (`holdShift`), applied to the water instead of to the wood, and it is the
+   * same kind of error: the Deckhand tolerates a quarter of the hold full and pays
+   * dearly at the first fresh breach.
    *
-   * **É também o número que o traz de volta ao combate**, e não há um segundo
-   * limiar para isso: o porão que ele considera bom o bastante para largar a bomba é
-   * o mesmo que ele considera bom o bastante para voltar a atirar. Ver
-   * `ShipAI.desiredIntent`, e a nota sobre por que dois números aqui brigariam.
+   * **It is also the number that brings him back into the fight**, and there is no
+   * second threshold for that: the hold he considers good enough to let go of the pump
+   * is the same one he considers good enough to go back to firing. See
+   * `ShipAI.desiredIntent`, and the note on why two numbers here would fight.
    */
   readonly bilgeFloor: number;
 }
@@ -170,7 +172,8 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyPreset> = {
     fireTolerance: 0.06,
     reaction: 1.2,
     helmGain: 0.75,
-    // Chega perto demais e às vezes se enrosca: parte do charme de enfrentá-lo.
+    // He gets too close and sometimes fouls himself: part of the charm of fighting
+    // him.
     standoff: 48,
     transitScale: 1.6,
     floodAlarm: 0.3,
@@ -211,10 +214,10 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyPreset> = {
     helmGain: 1.25,
     standoff: 76,
     transitScale: 0.9,
-    // Sobe de 0,08 desde que o turno existe: com o alarme no primeiro palmo de
-    // água ela desceria a cada minuto por um dedo de porão, e o rodízio faria a
-    // Lenda **atirar menos** que o Corsário. Perícia é saber a hora de largar a
-    // peça, e a hora certa não é ao primeiro respingo.
+    // Up from 0.08 since the shift has existed: with the alarm at the first hand's
+    // breadth of water it would go below every minute for a finger of hold, and the
+    // rotation would make the Legend **fire less** than the Corsair. Skill is knowing
+    // when to leave the gun, and the right moment is not at the first splash.
     floodAlarm: 0.12,
     holdShift: 14,
     gunShift: 18,
@@ -223,5 +226,5 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyPreset> = {
   },
 };
 
-/** Ordem em que os presets aparecem no menu. */
+/** Order the presets appear in the menu. */
 export const DIFFICULTY_ORDER: readonly DifficultyId[] = ['recruit', 'corsair', 'legend'];
