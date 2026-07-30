@@ -393,23 +393,23 @@ function stepPlayer(
 }
 
 /**
- * Põe o marujo de pé no vão do portaló, olhando para fora.
+ * Stands the sailor in the gangway's opening, facing outboard.
  *
- * `x` a meio caminho da borda para o corpo ter de **andar** até ela: um teste que
- * nascesse já fora do casco provaria que o grampeamento não existe, não que ele
- * abriu no lugar certo.
+ * `x` halfway to the edge so the body has to **walk** to it: a test that was born already
+ * outside the hull would prove that the clamping does not exist, not that it opened in the
+ * right place.
  */
 function atGangway(side: 1 | -1): PlayerController {
   const controller = new PlayerController();
   controller.spawn();
   const spec = BOARDING_LADDERS[0]!;
   controller.local.set(side * 0.9, QUARTERDECK_Y, spec.z);
-  // Para fora do bordo: o rumo olha para (−sen, −cos), então boreste é −π/2.
+  // Outboard: the heading looks toward (−sin, −cos), so starboard is −π/2.
   controller.yaw = side > 0 ? -Math.PI / 2 : Math.PI / 2;
   return controller;
 }
 
-/** Um quadro andando para vante com força cheia. */
+/** One frame walking forward at full throttle. */
 function walkForward(): InputFrame {
   const frame = idleFrame();
   frame.moveY = 1;
@@ -418,16 +418,16 @@ function walkForward(): InputFrame {
 }
 
 /**
- * Atravessa o portaló e cai no mar, medindo as duas metades separadamente.
+ * Crosses the gangway and falls into the sea, measuring the two halves separately.
  *
- * A divisa é `grounded`: enquanto há convés sob o pé é caminhada, e a partir do
- * quadro em que ele some é queda. Separá-las é o que permite cobrar da segunda o
- * que a gravidade cobra, sem a caminhada no meio — e a caminhada não tem duração
- * fechada, porque ela começa com a aceleração de `GROUND_CONTROL`.
+ * The dividing line is `grounded`: while there is deck under the foot it is walking, and
+ * from the frame it disappears it is falling. Separating them is what allows demanding of
+ * the second what gravity demands, with no walking in the middle — and the walking has no
+ * fixed duration, because it starts with `GROUND_CONTROL`'s acceleration.
  *
- * A tecla é **solta** durante a queda, que é o que um jogador faz: ninguém segura
- * o W depois de já ter saído do navio. Segurá-la empurraria o corpo mais 1,7 m
- * para fora enquanto ele cai, o que é uma escolha de teste e não do jogo.
+ * The key is **released** during the fall, which is what a player does: nobody holds W
+ * after having already left the ship. Holding it would push the body another 1.7 m
+ * outboard while it falls, which is a choice of the test and not of the game.
  */
 function fallOverboard(
   controller: PlayerController,
@@ -453,14 +453,14 @@ function fallOverboard(
 }
 
 /**
- * A pose como o teste precisa dela: escrevível.
+ * The pose as the test needs it: writable.
  *
- * `RemoteCrewPose` é só de leitura porque quem a recebe não pode alterá-la — é o
- * estado autoritativo do outro lado. Aqui é o contrário: nós somos o outro lado.
+ * `RemoteCrewPose` is read-only because whoever receives it may not alter it — it is the
+ * other side's authoritative state. Here it is the opposite: we are the other side.
  */
 type MutablePose = { -readonly [K in keyof RemoteCrewPose]: RemoteCrewPose[K] };
 
-/** A pose de partida do marujo remoto, no lugar em que ele nasce. */
+/** The remote sailor's starting pose, where he is born. */
 function remotePose(controller: PlayerController): MutablePose {
   return {
     local: controller.local.clone(),
@@ -477,12 +477,12 @@ function remotePose(controller: PlayerController): MutablePose {
 }
 
 /**
- * O adversário andando em linha reta, alimentado como a rede o alimenta: só a
- * pose, um passo por vez, sem nunca dizer a que velocidade ele vai.
+ * The opponent walking in a straight line, fed the way the network feeds him: only the
+ * pose, one step at a time, never saying what speed he is going.
  *
- * Devolve a distância que cada ciclo da passada cobriu, medida **entre
- * cruzamentos de fase** — como `distancePerCycle` faz para o corpo local, e pela
- * mesma razão: um ciclo parcial no começo ou no fim contaminaria a média.
+ * It returns the distance each stride cycle covered, measured **between phase crossings**
+ * — as `distancePerCycle` does for the local body, and for the same reason: a partial
+ * cycle at the start or the end would contaminate the average.
  */
 function remoteWalkCycle(speed: number, seconds: number, dt = 1 / 240): number {
   const controller = new PlayerController();
@@ -498,7 +498,7 @@ function remoteWalkCycle(speed: number, seconds: number, dt = 1 / 240): number {
 
   const steps = Math.round(seconds / dt);
   for (let i = 0; i < steps; i++) {
-    // Para vante é −Z no referencial do navio, como em `updateOnFoot`.
+    // Forward is −Z in the ship's frame, as in `updateOnFoot`.
     pose.local.z -= speed * dt;
     travelled += speed * dt;
     controller.applyRemoteStep(dt, pose, ship);
@@ -529,114 +529,114 @@ export function runLocomotionTests(): TestReport {
     });
   }
 
-  // 1. Na velocidade nativa da caminhada, o ciclo tem de cobrir exatamente a
-  //    distância do clipe de caminhada — nem mais, nem menos.
+  // 1. At the walk's native speed, the cycle has to cover exactly the walk clip's
+  //    distance — no more, no less.
   const walk = distancePerCycle(WALK_CLIP.speed);
-  check('passada a 1,65 m/s cobre a distância do clipe de andar',
+  check('a stride at 1.65 m/s covers the distance of the walk clip',
     walk.distance, WALK_DISTANCE, 0.02, 'm');
 
-  // 2. Idem na corrida. Entre as duas, a distância é interpolada, e é por isso
-  //    que o pé não patina no meio da mistura.
+  // 2. The same for the run. Between the two, the distance is interpolated, and that is
+  //    why the foot does not skate in the middle of the blend.
   const run = distancePerCycle(RUN_CLIP.speed);
-  check('passada a 3,67 m/s cobre a distância do clipe de correr',
+  check('a stride at 3.67 m/s covers the distance of the run clip',
     run.distance, RUN_DISTANCE, 0.03, 'm');
 
-  // 3. Andando, o corpo está no ponto mais baixo no contato (fase 0), que é
-  //    quando as pernas estão mais abertas.
+  // 3. Walking, the body is at its lowest at contact (phase 0), which is when the legs
+  //    are furthest apart.
   const walking = new GaitClock();
   for (let t = 0; t < 1; t += 1 / 60) walking.update(1 / 60, WALK_CLIP.speed, true);
   walking.phase = 0;
-  check('andando, corpo no ponto baixo no contato', walking.bounce, -1, 0.001, '');
+  check('walking, the body is at its low point at contact', walking.bounce, -1, 0.001, '');
 
   walking.phase = 0.25;
-  check('andando, corpo no ponto alto na passagem', walking.bounce, 1, 0.001, '');
+  check('walking, the body is at its high point at passing', walking.bounce, 1, 0.001, '');
 
-  // 4. Correndo, o ponto baixo migra para o meio do apoio — a perna virou mola.
-  //    No contato o corpo já não está no fundo.
+  // 4. Running, the low point migrates to mid-stance — the leg has become a spring. At
+  //    contact the body is no longer at the bottom.
   const running = new GaitClock();
   for (let t = 0; t < 2; t += 1 / 60) running.update(1 / 60, RUN_CLIP.speed * 1.5, true);
   running.phase = RUN_CLIP.bouncePhase;
-  check('correndo, corpo no ponto baixo no meio do apoio', running.bounce, -1, 0.01, '');
+  check('running, the body is at its low point at mid-stance', running.bounce, -1, 0.01, '');
 
   running.phase = RUN_CLIP.bouncePhase + 0.25;
-  check('correndo, corpo no ponto alto no meio do voo', running.bounce, 1, 0.01, '');
+  check('running, the body is at its high point at mid-flight', running.bounce, 1, 0.01, '');
 
-  // 5. Parado, a fase congela: sem isto o personagem "anda no lugar" enquanto a
-  //    câmera balança sozinha.
+  // 5. Standing still, the phase freezes: without this the character "walks in place"
+  //    while the camera sways on its own.
   const still = new GaitClock();
   for (let t = 0; t < 0.5; t += 1 / 60) still.update(1 / 60, 2.8, true);
   const frozen = still.phase;
   for (let t = 0; t < 1; t += 1 / 60) still.update(1 / 60, 0, true);
-  check('parado, a fase não avança', still.phase, frozen, 1e-9, '');
+  check('standing still, the phase does not advance', still.phase, frozen, 1e-9, '');
 
-  // 6. E a locomoção se apaga sozinha. É o que faz o personagem largar a pose de
-  //    corrida ao assumir o timão: quem está numa estação alimenta o relógio com
-  //    velocidade zero, e o parado assume por peso. Sem isto ele fica congelado
-  //    num quadro de corrida atrás da roda.
+  // 6. And the locomotion fades on its own. It is what makes the character drop the
+  //    running pose when taking the helm: whoever is at a station feeds the clock zero
+  //    speed, and the idle takes over by weight. Without this he stays frozen in a
+  //    running frame behind the wheel.
   const settling = new GaitClock();
   for (let t = 0; t < 1; t += 1 / 60) settling.update(1 / 60, RUN_CLIP.speed, true);
   for (let t = 0; t < 1; t += 1 / 60) settling.update(1 / 60, 0, true);
-  check('locomoção se apaga um segundo depois de parar', settling.moving, 0, 0.001, '');
+  check('locomotion fades out one second after stopping', settling.moving, 0, 0.001, '');
 
-  // -- o pulo ------------------------------------------------------------------
+  // -- the jump ----------------------------------------------------------------
 
-  // 7. A propriedade central: o pulo do jogo percorre o clipe de ar de ponta a
-  //    ponta, uma vez só. Ninguém ajustou a duração do clipe para isso — ela cai
-  //    da fase ser lida da velocidade vertical, com a de saída como escala.
+  // 7. The central property: the game's jump runs through the air clip end to end, once
+  //    only. Nobody tuned the clip's duration for that — it falls out of the phase being
+  //    read from the vertical speed, with the takeoff speed as the scale.
   //
-  //    A tolerância é **derivada**, não escolhida: a fase é amostrada uma vez
-  //    por quadro, e um quadro de queda vale isto de fase. Apertar mais seria
-  //    exigir do relógio uma resolução que o laço do jogo não tem, e afrouxar
-  //    mais deixaria passar um erro de verdade. Ver a nota de `distancePerCycle`
-  //    sobre a tarde que se perde com um teste errado sobre um código certo.
+  //    The tolerance is **derived**, not chosen: the phase is sampled once per frame, and
+  //    one frame of fall is worth this much phase. Tightening it would demand of the clock
+  //    a resolution the game loop does not have, and loosening it would let a real error
+  //    through. See `distancePerCycle`'s note about the afternoon you lose to a wrong test
+  //    on right code.
   const FRAME_PHASE = (GRAVITY * (1 / 60)) / (2 * JUMP_SPEED);
 
   const jump = simulateFall(0, JUMP_SPEED);
-  check('pulo padrão voa 0,67 s', jump.flight, (2 * JUMP_SPEED) / GRAVITY, 0.03, 's');
-  check('no ápice, o clipe de ar está na metade',
+  check('a standard jump flies for 0.67 s', jump.flight, (2 * JUMP_SPEED) / GRAVITY, 0.03, 's');
+  check('at the apex, the air clip is halfway through',
     jump.phaseAtApex, 0.5, FRAME_PHASE, '');
-  // O dobro aqui: o corpo cruza o convés no **meio** de um quadro, então o
-  // último ponto amostrado no ar fica mais longe do contato do que o do ápice
-  // fica do topo.
-  check('no contato, o clipe de ar chegou ao fim',
+  // Twice as much here: the body crosses the deck in the **middle** of a frame, so the
+  // last point sampled in the air is further from contact than the apex one is from the
+  // top.
+  check('at contact, the air clip has reached its end',
     jump.phaseAtContact, 1, 2 * FRAME_PHASE, '');
 
-  // 8. Cair de nove metros não quebra nada: a fase satura e o corpo passa a
-  //    queda inteira no último quadro, pernas estendidas à espera do convés. É o
-  //    que permite um clipe só para qualquer altura.
+  // 8. Falling nine meters breaks nothing: the phase saturates and the body spends the
+  //    whole fall on the last frame, legs extended waiting for the deck. It is what allows
+  //    a single clip for any height.
   const drop = simulateFall(9);
-  check('queda do mastro satura a fase do ar', drop.phaseAtContact, 1, 1e-9, '');
-  check('queda do mastro dá pouso cheio', drop.impact, 1, 1e-9, '');
+  check('a fall from the mast saturates the air phase', drop.phaseAtContact, 1, 1e-9, '');
+  check('a fall from the mast gives a full landing', drop.impact, 1, 1e-9, '');
 
-  // 9. E o pulo do próprio jogo é a referência do pouso cheio: cair de nove
-  //    metros não tem como bater mais forte que isso, porque o clipe é um só.
-  //    A comparação é contra a queda, e não contra 1, porque a velocidade
-  //    guardada é a do último quadro *no ar* e não a do contato — o relógio
-  //    nunca chega a ver a segunda, e essa diferença de um quadro é justamente o
-  //    que a cópia interna existe para não perder por inteiro.
-  check('pulo padrão pousa tão forte quanto a queda do mastro',
+  // 9. And the game's own jump is the reference for a full landing: falling nine meters
+  //    cannot hit harder than that, because there is only one clip. The comparison is
+  //    against the fall, and not against 1, because the stored speed is the last frame's
+  //    *in the air* and not the contact one — the clock never gets to see the second, and
+  //    that one-frame difference is precisely what the in-test copy exists not to lose
+  //    entirely.
+  check('a standard jump lands as hard as a fall from the mast',
     jump.impact, drop.impact, 0.1, '');
 
-  // 10. Já um tropeço de quatro centímetros não é pouso nenhum. Sem este piso,
-  //     qualquer irregularidade do convés faria o personagem se agachar.
+  // 10. A four-centimeter stumble, on the other hand, is no landing at all. Without this
+  //     floor, any unevenness in the deck would make the character crouch.
   const stumble = simulateFall(0.04);
-  check('tropeço de 4 cm não dispara pouso', stumble.impact, 0, 1e-9, '');
+  check('a 4 cm stumble does not trigger a landing', stumble.impact, 0, 1e-9, '');
 
-  // 11. Os pesos são uma partição, não uma soma solta: o ar chega a 1 no voo e
-  //     nada nunca passa disso. O que sobrasse acima de 1 o Three tira da
-  //     locomoção; o que faltasse ele preencheria com a T-pose do rig.
-  check('no voo, o clipe de ar chega a peso cheio', jump.peakWeight, 1, 0.001, '');
-  check('ar e pouso nunca têm peso no mesmo quadro', jump.overlap, 0, 0, ' quadros');
+  // 11. The weights are a partition, not a loose sum: the air reaches 1 in flight and
+  //     nothing ever goes past that. What went above 1 Three would take out of the
+  //     locomotion; what was missing it would fill with the rig's T-pose.
+  check('in flight, the air clip reaches full weight', jump.peakWeight, 1, 0.001, '');
+  check('air and landing never carry weight on the same frame', jump.overlap, 0, 0, ' frames');
 
-  // 12. O pouso é o único dos dois que roda no relógio, e ele termina junto com
-  //     o clipe — não fica meio agachado para sempre.
+  // 12. The landing is the only one of the two that runs on the clock, and it ends
+  //     together with the clip — it does not stay half-crouched forever.
   const landing = new JumpClock();
   for (let t = 0; t < 0.3; t += 1 / 60) landing.update(1 / 60, -JUMP_SPEED, false);
   landing.update(1 / 60, 0, true);
   const firstFrame = landing.land;
   for (let t = 0; t < LAND_CLIP.cycle; t += 1 / 60) landing.update(1 / 60, 0, true);
-  check('pouso começa com peso cheio', firstFrame, 1, 0.05, '');
-  check('pouso acaba junto com o clipe', landing.land, 0, 1e-9, '');
+  check('the landing starts at full weight', firstFrame, 1, 0.05, '');
+  check('the landing ends together with the clip', landing.land, 0, 1e-9, '');
 
   // 13. Agarrar a escada tira os pés do chão sem que ninguém esteja voando. É o
   //     caso que `settle` cobre: alimentar `update` com `grounded` ali faria o
@@ -644,175 +644,175 @@ export function runLocomotionTests(): TestReport {
   const ladder = new JumpClock();
   for (let t = 0; t < 0.3; t += 1 / 60) ladder.update(1 / 60, -JUMP_SPEED, false);
   for (let t = 0; t < 0.5; t += 1 / 60) ladder.settle(1 / 60);
-  check('agarrar a escada apaga o clipe de ar', ladder.air, 0, 0.001, '');
+  check('grabbing the ladder puts out the air clip', ladder.air, 0, 0.001, '');
   ladder.update(1 / 60, 0, true);
-  check('chegar ao cesto não dispara pouso', ladder.land, 0, 1e-9, '');
+  check('reaching the nest does not trigger a landing', ladder.land, 0, 1e-9, '');
 
-  // -- a escada ----------------------------------------------------------------
+  // -- the ladder --------------------------------------------------------------
 
-  // 14. A propriedade central da escalada, gêmea da passada: subir a altura de um
-  //     ciclo gira o clipe exatamente uma volta. É o que mantém a mão parada na
-  //     barra enquanto o corpo sobe, em qualquer `CLIMB_SPEED`.
+  // 14. The climb's central property, twin of the stride: climbing one cycle's height
+  //     turns the clip exactly one revolution. It is what keeps the hand still on the rung
+  //     while the body climbs, at any `CLIMB_SPEED`.
   const climb = new ClimbClock();
   climb.phase = 0;
   const steps = 600;
   for (let i = 0; i < steps; i++) climb.update(1 / 60, true, CLIMB_CLIP.rise / steps);
-  check('subir um ciclo fecha uma volta da fase', climb.phase, 0, 1e-9, '');
+  check('climbing one cycle closes one revolution of the phase', climb.phase, 0, 1e-9, '');
 
-  // 15. E a volta acontece na altura certa **da escada de verdade**: depois de
-  //     alinhar uma vez, a barra que o clipe manda a mão agarrar coincide com um
-  //     enfrechate desenhado, subindo o mastro inteiro. Este é o teste que
-  //     amarra a animação à geometria do navio — se alguém mexer no espaçamento
-  //     da escada ou na altura do cesto sem regerar o clipe, ele quebra aqui.
+  // 15. And the revolution happens at the right height **on the real ladder**: after
+  //     aligning once, the rung the clip tells the hand to grab coincides with a drawn
+  //     ratline, all the way up the mast. This is the test that ties the animation to the
+  //     ship's geometry — if somebody touches the ladder's spacing or the nest's height
+  //     without regenerating the clip, it breaks here.
   const aligned = new ClimbClock();
   let feet = MAST_LADDER.bottomY;
   aligned.align(feet, MAST_LADDER.bottomY, MAST_LADDER.rungSpacing);
 
   let worstMiss = 0;
   for (let i = 0; i < 2000; i++) {
-    const rise = 0.004;                       // ~ um quadro a 0,24 m/s
+    const rise = 0.004;                       // ~ one frame at 0.24 m/s
     feet += rise;
     aligned.update(1 / 60, true, rise);
     if (feet > MAST_LADDER.topY) break;
-    // Altura, no navio, da barra que o pé esquerdo está segurando agora.
+    // The height, on the ship, of the rung the left foot is holding right now.
     const held = feet + CLIMB_CLIP.footRung - CLIMB_CLIP.rise * aligned.phase;
     const u = (held - MAST_LADDER.bottomY) / MAST_LADDER.rungSpacing;
     const fraction = ((u % 1) + 1) % 1;
     worstMiss = Math.max(worstMiss,
       Math.min(fraction, 1 - fraction) * MAST_LADDER.rungSpacing);
   }
-  check('a mão cai na barra ao longo dos 9 m de escada', worstMiss, 0, 0.001, 'm');
+  check('the hand lands on a rung along the 9 m of ladder', worstMiss, 0, 0.001, 'm');
 
-  // 16. Descer é o mesmo clipe ao contrário: subir e voltar devolve a fase de
-  //     onde saiu. É o que dispensa um segundo clipe — e o que garante que os
-  //     contatos da descida caiam na mesma grade de barras da subida.
+  // 16. Going down is the same clip in reverse: climbing and coming back returns the phase
+  //     to where it started. It is what does away with a second clip — and what guarantees
+  //     the descent's contacts land on the same grid of rungs as the climb's.
   const reversible = new ClimbClock();
   reversible.phase = 0.37;
   for (let i = 0; i < 120; i++) reversible.update(1 / 60, true, 0.01);
   for (let i = 0; i < 120; i++) reversible.update(1 / 60, true, -0.01);
-  check('descer desfaz a subida na mesma fase', reversible.phase, 0.37, 1e-9, '');
+  check('going down undoes the climb at the same phase', reversible.phase, 0.37, 1e-9, '');
 
-  // 17. Parado na escada a fase congela: o personagem fica agarrado exatamente
-  //     onde estava, sem deslizar. É a razão de não haver clipe de "hold".
+  // 17. Still on the ladder the phase freezes: the character stays gripping exactly where
+  //     he was, without sliding. It is the reason there is no "hold" clip.
   const holding = new ClimbClock();
   for (let i = 0; i < 60; i++) holding.update(1 / 60, true, 0.02);
   const held = holding.phase;
   for (let i = 0; i < 120; i++) holding.update(1 / 60, true, 0);
-  check('parado na escada, a fase não anda', holding.phase, held, 1e-9, '');
+  check('still on the ladder, the phase does not move', holding.phase, held, 1e-9, '');
 
-  // 18. E largar a escada apaga o clipe sem mexer na fase — quem reagarra mais
-  //     acima não recomeça o ciclo do zero.
+  // 18. And letting go of the ladder puts the clip out without touching the phase —
+  //     whoever grabs on again higher up does not restart the cycle from zero.
   const released = new ClimbClock();
   for (let i = 0; i < 60; i++) released.update(1 / 60, true, 0.02);
   const frozenPhase = released.phase;
   for (let i = 0; i < 90; i++) released.update(1 / 60, false, 0);
-  check('largar a escada apaga o peso', released.weight, 0, 0.001, '');
-  check('largar a escada preserva a fase', released.phase, frozenPhase, 1e-9, '');
+  check('letting go of the ladder puts out the weight', released.weight, 0, 0.001, '');
+  check('letting go of the ladder preserves the phase', released.phase, frozenPhase, 1e-9, '');
 
-  // -- o timão -----------------------------------------------------------------
+  // -- the helm ----------------------------------------------------------------
 
-  // 19. A propriedade central do timão, gêmea da escada: a roda dá exatamente uma
-  //     volta de batente a batente, e uma volta são os oito punhos. Varrer o
-  //     curso inteiro tem de fechar oito ciclos e devolver a fase de onde ela
-  //     saiu — que é o mesmo que dizer que a mão volta ao **mesmo punho**.
+  // 19. The helm's central property, twin of the ladder's: the wheel turns exactly one
+  //     revolution from stop to stop, and one revolution is the eight handles. Sweeping the
+  //     whole travel has to close eight cycles and return the phase to where it started —
+  //     which is the same as saying the hand comes back to the **same handle**.
   //
-  //     Este é o teste que amarra o clipe à roda desenhada: se alguém mudar
-  //     `MAX_WHEEL` ou o número de punhos sem regerar a animação, ele quebra
-  //     aqui, exatamente como o caso da escada quebra se o espaçamento mudar.
+  //     This is the test that ties the clip to the drawn wheel: if somebody changes
+  //     `MAX_WHEEL` or the number of handles without regenerating the animation, it breaks
+  //     here, exactly as the ladder's case breaks if the spacing changes.
   const starboard = sweepWheel(1);
-  check('a roda vai de batente a batente em oito punhos', starboard.cycles, 8, 0, ' punhos');
-  check('e a mão volta ao mesmo punho', starboard.phase, 0, 1e-9, '');
+  check('the wheel goes stop to stop in eight handles', starboard.cycles, 8, 0, ' handles');
+  check('and the hand comes back to the same handle', starboard.phase, 0, 1e-9, '');
 
-  // 20. O caminho de volta é o mesmo clipe com a fase recuando — é isso que
-  //     dispensa um segundo clipe e o que garante que os contatos de uma guinada
-  //     a bombordo caiam nos mesmos oito punhos da guinada a boreste.
+  // 20. The way back is the same clip with the phase running backward — that is what does
+  //     away with a second clip and what guarantees that the contacts of a turn to port
+  //     land on the same eight handles as a turn to starboard.
   const port = sweepWheel(-1);
-  check('bombordo desfaz os mesmos oito punhos', port.cycles, 8, 0, ' punhos');
-  check('e fecha o curso na mesma fase', port.phase, 0, 1e-9, '');
+  check('port undoes the same eight handles', port.cycles, 8, 0, ' handles');
+  check('and closes the travel at the same phase', port.phase, 0, 1e-9, '');
 
-  // 21. Metade do curso vive em ângulo negativo, e é aí que a linguagem morde:
-  //     `-0.3 % 1` dá `-0.3` em JS, não `0.7`. Uma fase negativa em `.time` sai
-  //     como quadro do fim do clipe, ou seja, a mão saltando um punho inteiro ao
-  //     cruzar o leme a meio. Os dois casos cobrem o vazamento pelos dois lados:
-  //     o número exato que quebra, e o curso inteiro varrido.
+  // 21. Half the travel lives at a negative angle, and that is where the language bites:
+  //     `-0.3 % 1` gives `-0.3` in JS, not `0.7`. A negative phase in `.time` comes out as
+  //     a frame from the end of the clip, that is, the hand jumping a whole handle as it
+  //     crosses the rudder amidships. The two cases cover the leak from both sides: the
+  //     exact number that breaks it, and the whole travel swept.
   const negative = new HelmClock();
   negative.update(1 / 60, true, -0.3 * HELM_CLIP.step);
-  check('roda a bombordo não vaza fase negativa', negative.phase, 0.7, 1e-9, '');
-  check('e nenhum quadro do curso vaza tampouco', port.minPhase, 0, 1e-9, '');
+  check('a wheel to port does not leak a negative phase', negative.phase, 0.7, 1e-9, '');
+  check('and no frame of the travel leaks either', port.minPhase, 0, 1e-9, '');
 
-  // 22. Largar o leme apaga o clipe sem mexer na fase, como largar a escada. Aqui
-  //     isso é de graça — a fase é função do ângulo da roda, e a roda fica onde
-  //     foi deixada —, mas continua sendo o que faz o timoneiro soltar a roda em
-  //     vez de sair andando pelo convés de mãos em concha.
+  // 22. Letting go of the helm puts the clip out without touching the phase, like letting
+  //     go of the ladder. Here that is free — the phase is a function of the wheel's angle,
+  //     and the wheel stays where it was left —, but it is still what makes the helmsman
+  //     let go of the wheel instead of walking off across the deck with his hands cupped.
   const helmReleased = new HelmClock();
   helmReleased.update(1 / 60, true, 0.6 * HELM_CLIP.step);
   const helmPhase = helmReleased.phase;
   for (let i = 0; i < 90; i++) helmReleased.update(1 / 60, false, 0);
-  check('largar o leme apaga o peso', helmReleased.weight, 0, 0.001, '');
-  check('largar o leme preserva a fase', helmReleased.phase, helmPhase, 1e-9, '');
+  check('letting go of the helm puts out the weight', helmReleased.weight, 0, 0.001, '');
+  check('letting go of the helm preserves the phase', helmReleased.phase, helmPhase, 1e-9, '');
 
-  // -- o corpo vestido ---------------------------------------------------------
+  // -- the worn body -----------------------------------------------------------
 
-  // 23. A altura que a câmera persegue é a **mesma** que o clipe levanta. Nas
-  //     duas velocidades nativas o balanço tem de dar exatamente a amplitude
-  //     escrita no Blender: era aqui que os 4,2 cm inventados da câmera
-  //     discordavam dos 2,1 cm do clipe de caminhada, e a diferença aparecia
-  //     como o tronco deslizando por baixo do olho de quem veste o corpo.
+  // 23. The height the camera chases is the **same** one the clip raises. At both native
+  //     speeds the bob has to give exactly the amplitude written in Blender: this is where
+  //     the camera's invented 4.2 cm disagreed with the walk clip's 2.1 cm, and the
+  //     difference showed up as the torso sliding under the eye of whoever wears the
+  //     body.
   const bobWalk = new GaitClock();
   for (let t = 0; t < 1; t += 1 / 60) bobWalk.update(1 / 60, WALK_CLIP.speed, true);
   bobWalk.phase = 0.25;
-  check('andando, a câmera sobe o que o clipe de andar sobe',
+  check('walking, the camera rises what the walk clip rises',
     bobWalk.bounceMeters, WALK_CLIP.bounceAmplitude, 1e-4, 'm');
 
   const bobRun = new GaitClock();
   for (let t = 0; t < 2; t += 1 / 60) bobRun.update(1 / 60, RUN_CLIP.speed * 1.5, true);
   bobRun.phase = RUN_CLIP.bouncePhase + 0.25;
-  check('correndo, a câmera sobe o que o clipe de correr sobe',
+  check('running, the camera rises what the run clip rises',
     bobRun.bounceMeters, RUN_CLIP.bounceAmplitude, 1e-3, 'm');
 
-  // 24. O strafe puro é o caso que quebra um limiar único: o desvio fica cravado
-  //     em 90°, e sem histerese as pernas dariam meia-volta de 180° a cada
-  //     quadro. Alimentado sempre com o mesmo desvio, o estado tem de ficar onde
-  //     estava — nos dois sentidos.
+  // 24. The pure strafe is the case that breaks a single threshold: the deviation sits
+  //     pinned at 90°, and without hysteresis the legs would flip 180° every frame. Fed
+  //     the same deviation over and over, the state has to stay where it was — from both
+  //     directions.
   let straferForward = false;
   let straferBack = true;
   for (let i = 0; i < 120; i++) {
     straferForward = foldLegHeading(Math.PI / 2, 0, straferForward).reversed;
     straferBack = foldLegHeading(Math.PI / 2, 0, straferBack).reversed;
   }
-  check('strafe puro não oscila entrando de frente', straferForward ? 1 : 0, 0, 0, '');
-  check('strafe puro não oscila entrando de ré', straferBack ? 1 : 0, 1, 0, '');
+  check('a pure strafe does not oscillate entering forward', straferForward ? 1 : 0, 0, 0, '');
+  check('a pure strafe does not oscillate entering backward', straferBack ? 1 : 0, 1, 0, '');
 
-  // 25. E a dobra continua acontecendo onde tem de acontecer: andar de ré vira
-  //     ré, e o rumo dobrado volta a apontar para onde a animação sabe andar.
+  // 25. And the flip still happens where it has to: walking backward becomes reverse, and
+  //     the flipped heading points back to where the animation knows how to walk.
   const backwards = foldLegHeading(Math.PI, 0, false);
-  check('andar de ré dobra as pernas', backwards.reversed ? 1 : 0, 1, 0, '');
-  check('e o rumo dobrado alinha com o tronco',
+  check('walking backward flips the legs', backwards.reversed ? 1 : 0, 1, 0, '');
+  check('and the flipped heading lines up with the torso',
     Math.abs(wrapAngle(backwards.heading - 0)), 0, 1e-9, 'rad');
 
-  // -- o corpo do adversário ---------------------------------------------------
+  // -- the opponent's body -----------------------------------------------------
   //
-  // O corpo que a rede move não recebe velocidade nenhuma: ele recebe posições,
-  // e `applyRemoteStep` deriva o resto. Os casos abaixo cobrem as três formas de
-  // essa derivação sair errada — e nenhuma delas produz erro, exceção ou log.
+  // The body the network moves receives no velocity at all: it receives positions, and
+  // `applyRemoteStep` derives the rest. The cases below cover the three ways that
+  // derivation can come out wrong — and none of them produces an error, an exception or a
+  // log.
 
-  // 26. **O pé do adversário não patina.** É a mesma igualdade da passada local,
-  //     medida pelo caminho oposto: lá a velocidade é conhecida e a distância
-  //     sai dela; aqui só as posições chegam, e é a velocidade que é deduzida.
-  //     Se a dedução escalar errado — dividir pelo dt errado, por exemplo —, o
-  //     ciclo deixa de cobrir a distância do clipe e o pé do outro jogador
-  //     desliza pelo convés. É o defeito clássico de personagem em rede.
-  check('a passada do adversário cobre a distância do clipe de andar',
+  // 26. **The opponent's foot does not skate.** It is the same equality as the local
+  //     stride, measured from the opposite direction: there the speed is known and the
+  //     distance comes out of it; here only the positions arrive, and it is the speed that
+  //     is deduced. If the deduction scales wrong — dividing by the wrong dt, for example
+  //     —, the cycle stops covering the clip's distance and the other player's foot slides
+  //     across the deck. It is the classic networked-character defect.
+  check('the opponent stride covers the distance of the walk clip',
     remoteWalkCycle(WALK_CLIP.speed, 6), WALK_DISTANCE, 0.02, 'm');
-  check('e a de correr, na velocidade de corrida',
+  check('and the run one, at running speed',
     remoteWalkCycle(RUN_CLIP.speed, 6), RUN_DISTANCE, 0.02, 'm');
 
-  // 27. Assumir o leme **teleporta** os pés dele: `takeHelm` escreve o posto do
-  //     timoneiro, que pode estar a dois metros. Derivar velocidade daquele
-  //     salto daria 120 m/s por um quadro — o adversário em disparada com pose
-  //     de corrida, e um pouso disparado logo em seguida quando o "voo"
-  //     terminasse. O teleporte tem de zerar a velocidade, e o pulo tem de ser
-  //     assentado em vez de alimentado.
+  // 27. Taking the helm **teleports** his feet: `takeHelm` writes the helmsman's station,
+  //     which can be two meters away. Deriving velocity from that jump would give 120 m/s
+  //     for one frame — the opponent tearing off in a running pose, and a landing fired
+  //     right afterward when the "flight" ended. The teleport has to zero the velocity, and
+  //     the jump has to be settled instead of fed.
   {
     const controller = new PlayerController();
     controller.spawn();
@@ -827,18 +827,17 @@ export function runLocomotionTests(): TestReport {
     pose.local.set(0, controller.local.y, controller.local.z + 2);
     controller.applyRemoteStep(1 / 60, pose, ship);
 
-    check('assumir o leme não põe o adversário em disparada',
+    check('taking the helm does not send the opponent tearing off',
       controller.velocity.length(), 0, 1e-9, 'm/s');
-    check('nem o faz aterrissar de pé atrás da roda', controller.jump.land, 0, 1e-9, '');
-    check('e o corpo é avisado da troca de posto',
+    check('nor make him land on his feet behind the wheel', controller.jump.land, 0, 1e-9, '');
+    check('and the body is told about the station change',
       controller.stationChangeCount > 1 ? 1 : 0, 1, 0, '');
   }
 
-  // 28. O pulo dele também sai da posição, e o clipe de ar é indexado pela
-  //     velocidade **vertical**: no ápice a fase tem de estar na metade, como no
-  //     pulo local. Um sinal trocado na derivada põe o adversário caindo na
-  //     subida e subindo na queda, com as pernas na pose errada nos dois
-  //     trechos.
+  // 28. His jump also comes out of the position, and the air clip is indexed by the
+  //     **vertical** speed: at the apex the phase has to be halfway, as in the local jump.
+  //     A flipped sign in the derivative puts the opponent falling on the way up and
+  //     rising on the way down, with his legs in the wrong pose on both stretches.
   {
     const controller = new PlayerController();
     controller.spawn();
@@ -854,46 +853,46 @@ export function runLocomotionTests(): TestReport {
       pose.local.y += vertical * dt;
       vertical -= GRAVITY * dt;
       controller.applyRemoteStep(dt, pose, ship);
-      // O ápice é onde a subida vira queda.
+      // The apex is where the climb turns into a fall.
       if (Math.abs(vertical) < GRAVITY * dt) peak = controller.jump.airPhase;
     }
 
-    check('no ápice do salto do adversário, o clipe de ar está na metade',
+    check('at the apex of the opponent leap, the air clip is halfway through',
       peak, 0.5, 0.05, '');
-    check('e o clipe de ar chegou a peso cheio', controller.jump.air, 1, 0.05, '');
+    check('and the air clip reached full weight', controller.jump.air, 1, 0.05, '');
   }
 
-  // -- o mar -------------------------------------------------------------------
+  // -- the sea -----------------------------------------------------------------
   //
-  // Sair do navio era **geometricamente impossível** até agora: `resolveHull`
-  // grampeava x dentro do costado em todo quadro, e `surfaceAt` nunca devolvia
-  // "sem chão". Os casos abaixo cobrem a exceção que abriu essa porta e tudo que
-  // desce por ela — e o primeiro deles é o que impede a exceção de virar buraco: o
-  // costado tem de continuar sendo costado em todo lugar que não é o portaló.
+  // Leaving the ship was **geometrically impossible** until now: `resolveHull` clamped x
+  // inside the side every frame, and `surfaceAt` never returned "no floor". The cases below
+  // cover the exception that opened that door and everything that goes down through it —
+  // and the first of them is what keeps the exception from becoming a hole: the side has to
+  // go on being the side everywhere that is not the gangway.
   //
-  // Todos rodam o `fixedUpdate` de verdade, com o casco parado na origem (ver
-  // `fakeShip`) e o mar plano em y = 0 (`flatSea`). Assim os metros que aparecem
-  // aqui são os metros do navio, sem tradução.
+  // They all run the real `fixedUpdate`, with the hull sitting at the origin (see
+  // `fakeShip`) and the sea flat at y = 0 (`flatSea`). That way the meters that appear here
+  // are the ship's meters, with no translation.
 
   const spec = BOARDING_LADDERS[0]!;
   const gangwayEdge = deckHalfWidth(zToT(spec.z));
 
-  // 29. **O costado continua sendo costado.** Meio metro a ré do vão, andando para
-  //     fora com força cheia por três segundos — mais que o dobro do necessário
-  //     para cobrir a largura do navio —, o corpo tem de parar na borda do convés
-  //     e ficar lá. Sem este caso, "abrir o portaló" e "apagar a colisão do casco"
-  //     passariam pelo mesmo teste.
+  // 29. **The side goes on being the side.** Half a meter aft of the opening, walking
+  //     outboard at full throttle for three seconds — more than twice what it takes to
+  //     cover the ship's width —, the body has to stop at the deck's edge and stay there.
+  //     Without this case, "opening the gangway" and "erasing the hull's collision" would
+  //     pass the same test.
   {
     const controller = atGangway(1);
     controller.local.z = spec.z + spec.gangwayHalfWidth + 0.5;
     stepPlayer(controller, walkForward(), 3);
-    // A borda é medida no Z **do corpo**, e não no do portaló: meio metro a ré do
-    // vão o casco já afinou 14 cm, e cobrar o número do vão aqui reprovaria o
-    // grampeamento certo.
+    // The edge is measured at the **body's** Z, and not the gangway's: half a meter aft of
+    // the opening the hull has already narrowed by 14 cm, and demanding the opening's
+    // number here would fail the correct clamping.
     const edgeHere = deckHalfWidth(zToT(controller.local.z)) - 0.3;
-    check('o costado segura quem tenta sair por fora do portaló',
+    check('the side holds whoever tries to leave outside the gangway',
       controller.local.x, edgeHere, 0.01, ' m');
-    check('e quem está fora do vão não cai', controller.inWater ? 1 : 0, 0, 0, '');
+    check('and whoever is outside the opening does not fall', controller.inWater ? 1 : 0, 0, 0, '');
   }
 
   // 30. **E o portaló deixa passar — passando pela soleira.** Mesmo gesto, mesmo
