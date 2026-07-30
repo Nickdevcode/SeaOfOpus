@@ -1,33 +1,30 @@
 /**
- * A escada de embarque: como se volta a bordo depois de cair no mar.
+ * The boarding ladder: how you get back aboard after falling into the sea.
  *
- * Uma por bordo, na popa, ao lado do timão. Ela existe para **subir da água**, e
- * só para isso: descer é pular pelo portaló. Por isso ela nasce submersa e morre
- * no piso do tombadilho, sem parte nenhuma acima da amurada.
+ * One per side, aft, beside the helm. It exists to **climb out of the water**, and only
+ * for that: getting down means jumping through the gangway. That is why it is born
+ * submerged and dies at the quarterdeck's floor, with no part above the bulwark.
  *
- * Este módulo é a **fonte única** das medidas, no mesmo espírito de
- * `RUDDER_BLADE` e `MAST_LADDER`: a malha (`ShipParts.buildBoardingLadders`), o
- * alcance da interação e o passo de escalada do `PlayerController` leem daqui.
- * Ficou em arquivo próprio porque três coisas dependem dele — geometria, física
- * do jogador e o clipe do Blender — e nenhuma das três é dona das outras.
+ * This module is the **single source** of the measurements, in the same spirit as
+ * `RUDDER_BLADE` and `MAST_LADDER`: the mesh (`ShipParts.buildBoardingLadders`), the
+ * interaction's reach and `PlayerController`'s climbing step all read from here. It ended
+ * up in a file of its own because three things depend on it — geometry, player physics
+ * and the Blender clip — and none of the three owns the others.
  *
- * ## As três amarras que ditam cada número
+ * ## The three constraints that dictate every number
  *
- * 1. **O clipe manda no espaçamento.** `ClimbUp` sobe `CLIMB_CLIP.rise` por
- *    ciclo cobrindo *dois* enfrechates, então a única grade em que a mão cai na
- *    barra desenhada é a de `CLIMB_CLIP.rise / 2`. A escada do mastro chegou
- *    nesse número por arredondamento (tinha altura fixa a vencer); aqui a
- *    profundidade é livre, então usa-se o espaçamento **exato** e a base cai
- *    onde cair.
- * 2. **O casco manda na inclinação.** O bojo recolhe quase um metro entre o
- *    tombadilho e a linha d'água, então uma escada a prumo penduraria a base
- *    1,3 m fora do costado. Ela é inclinada — e como o clipe é de escada
- *    vertical, o corpo se inclina o mesmo ângulo (`tilt`), que é o que mantém a
- *    pegada casada: relativo ao corpo, a barra de cima volta a ficar
- *    exatamente acima.
- * 3. **A onda manda na profundidade.** A barra mais baixa tem de estar debaixo
- *    d'água mesmo na cava de uma onda grande, senão o nadador chega na escada e
- *    não tem onde pegar.
+ * 1. **The clip rules the spacing.** `ClimbUp` rises `CLIMB_CLIP.rise` per cycle
+ *    covering *two* ratlines, so the only grid where the hand lands on the rung that is
+ *    drawn is `CLIMB_CLIP.rise / 2`. The mast ladder reached that number by rounding (it
+ *    had a fixed height to cover); here the depth is free, so the **exact** spacing is
+ *    used and the foot falls where it falls.
+ * 2. **The hull rules the rake.** The bilge pulls in nearly a meter between the
+ *    quarterdeck and the waterline, so a vertical ladder would hang its foot 1.3 m
+ *    outboard. It is raked — and since the clip is for a vertical ladder, the body tilts
+ *    by the same angle (`tilt`), which is what keeps the grip married: relative to the
+ *    body, the rung above is exactly above again.
+ * 3. **The wave rules the depth.** The lowest rung has to be underwater even in a big
+ *    wave's trough, or the swimmer reaches the ladder with nothing to grab.
  */
 
 import {
@@ -39,140 +36,143 @@ import {
 import { CLIMB_CLIP } from '../player/Locomotion';
 
 /**
- * Estação da escada, em `t`.
+ * The ladder's station, in `t`.
  *
- * `STATIONS.helm` é 0,105 e a roda fica em z = +6,32: a escada sobe **no plano
- * do timão**, então quem volta a bordo já chega ao posto. O vão é livre nos dois
- * bordos: as colunas do toldo estão em z = +7,25 e +5,00 (`CANOPY_BLOCKERS`), os
- * degraus do tombadilho ficam a t ≈ 0,20 e os brandais de popa em z = +7,45.
+ * `STATIONS.helm` is 0.105 and the wheel sits at z = +6.32: the ladder climbs **in the
+ * plane of the helm**, so whoever comes back aboard arrives at the station already. The
+ * passage is clear on both sides: the awning's columns are at z = +7.25 and +5.00
+ * (`CANOPY_BLOCKERS`), the quarterdeck's steps are at t ≈ 0.20 and the after shrouds at
+ * z = +7.45.
  */
 export const BOARDING_LADDER_T = 0.106;
 
-/** Meia largura entre montantes. A mesma da escada do mastro, e pelo mesmo
- *  motivo: `anim_climb.RUNG_HALF_WIDTH` está gravado no clipe. */
+/** Half width between the stiles. The same as the mast ladder's, and for the same
+ *  reason: `anim_climb.RUNG_HALF_WIDTH` is baked into the clip. */
 export const BOARDING_LADDER_HALF_WIDTH = 0.24;
 
 /**
- * Espaçamento entre barras: metade da subida de um ciclo do clipe.
+ * Spacing between rungs: half the rise of one clip cycle.
  *
- * Não arredondar aqui é o que diferencia esta escada da do mastro — ver a nota
- * 1 no topo do arquivo.
+ * Not rounding here is what makes this ladder different from the mast's — see note 1 at
+ * the top of the file.
  */
 export const BOARDING_RUNG_SPACING = CLIMB_CLIP.rise / 2;
 
-/** Quantos vãos a escada tem. Oito põe a barra de baixo a 69 cm da superfície
- *  de repouso do mar, fundo o bastante para a cava de uma onda grande não
- *  deixar o nadador sem pegada. */
+/** How many gaps the ladder has. Eight puts the bottom rung 69 cm below the sea's
+ *  resting surface, deep enough that a big wave's trough does not leave the swimmer
+ *  without a grip. */
 export const BOARDING_RUNG_COUNT = 8;
 
 /**
- * Quanto a escada recua na horizontal do topo até a base.
+ * How far the ladder sets back horizontally from top to bottom.
  *
- * É o número mais disputado da peça, e sai de um aperto entre duas coisas:
- * seguir o casco pediria 1,0 m de recuo (26° de prumo), e o clipe de escalada
- * pede o mínimo possível — o corpo se inclina o mesmo ângulo que a escada, e
- * uma escada muito deitada põe o personagem pendurado em vez de em pé. 0,61 m dá
- * **14,11°**, e é ele que decide onde a curva do bojo mais se aproxima da reta:
- * em y ≈ 1,33, que é onde a folga de `BOARDING_LADDER_CLEARANCE` é medida.
+ * It is the piece's most contested number, and it comes from a squeeze between two
+ * things: following the hull would ask for 1.0 m of setback (26° from vertical), and the
+ * climbing clip asks for the least possible — the body tilts by the same angle as the
+ * ladder, and a ladder laid too far back leaves the character hanging instead of
+ * standing. 0.61 m gives **14.11°**, and it is what decides where the bilge's curve comes
+ * closest to the straight line: at y ≈ 1.33, which is where
+ * `BOARDING_LADDER_CLEARANCE`'s gap is measured.
  */
 export const BOARDING_LADDER_RUN = 0.61;
 
-/** Raio do montante. A malha (`ShipParts`) desenha com ele, e a folga ao casco
- *  é resolvida a partir dele — é a madeira mais grossa da peça. */
+/** Radius of the stile. The mesh (`ShipParts`) draws with it, and the clearance to the
+ *  hull is solved from it — it is the thickest wood in the piece. */
 export const BOARDING_STILE_RADIUS = 0.04;
-/** Raio da barra. Igual ao enfrechate da escada do mastro. */
+/** Radius of the rung. The same as the mast ladder's ratline. */
 export const BOARDING_RUNG_RADIUS = 0.026;
 
 /**
- * Folga mínima que a madeira da escada guarda do costado, em qualquer altura e
- * em **qualquer** das estações que ela ocupa.
+ * Minimum clearance the ladder's wood keeps from the planking, at any height and at
+ * **any** of the stations it occupies.
  *
- * Quatro centímetros é pouco de propósito: é o bastante para o costado e a
- * escada nunca se interpenetrarem (nem com o casco desenhado em cordas de 18 cm,
- * que caem para dentro da curva analítica), e pouco o suficiente para não
- * empurrar a peça para fora do navio. Ver `BOARDING_LADDER_CLEARANCE`.
+ * Four centimeters is deliberately little: it is enough for the planking and the ladder
+ * never to interpenetrate (not even with the hull drawn in 18 cm chords, which fall
+ * inside the analytic curve), and little enough not to push the piece off the ship. See
+ * `BOARDING_LADDER_CLEARANCE`.
  */
 export const BOARDING_LADDER_HULL_GAP = 0.04;
 
 /**
- * Folga entre o plano dos degraus e o costado, medida no topo. **Calculada.**
+ * Clearance between the plane of the rungs and the planking, measured at the top.
+ * **Computed.**
  *
- * Era 8 cm, escolhido a mão, e 8 cm estava errado por um motivo que só aparece
- * quando se mede a escada como um objeto de 48 cm de largura em vez de um perfil:
- * **a folga não se mede na estação da escada, e sim na mais larga que ela toca.**
- * A popa afina 26 cm por metro de comprimento nessa faixa, então entre os dois
- * montantes (z = 6,06 e z = 6,54) o costado muda 12,6 cm de meia boca. Com 8 cm
- * o montante de vante ficava **5,7 cm dentro do casco** em y = 1,33 — e com ele
- * a ponta de vante de três barras. O perfil no plano dos degraus dava os 4,5 cm
- * anunciados; a peça inteira atravessava o costado.
+ * It was 8 cm, chosen by hand, and 8 cm was wrong for a reason that only shows when you
+ * measure the ladder as a 48 cm wide object instead of a profile: **the clearance is not
+ * measured at the ladder's station, but at the widest one it touches.** The stern narrows
+ * 26 cm per meter of length in that stretch, so between the two stiles (z = 6.06 and
+ * z = 6.54) the planking moves 12.6 cm of half breadth. With 8 cm the forward stile ended
+ * up **5.7 cm inside the hull** at y = 1.33 — and with it the forward end of three rungs.
+ * The profile in the plane of the rungs gave the 4.5 cm announced; the whole piece went
+ * through the planking.
  *
- * Por isso o número deixou de ser escolhido: `solveClearance` varre a largura da
- * escada e devolve o menor recuo que mantém `BOARDING_LADDER_HULL_GAP` em toda
- * ela. Hoje dá **17,7 cm**, que põe a barra de topo 18 cm fora do costado — daí a
- * soleira do portaló (`HullGeometry.buildGangways`) avançar até a barra de topo,
- * senão seria um vão de 18 cm entre o último degrau e o convés. O preço do plano reto
- * numa popa que recolhe um metro nessa faixa está na base: ela fica 79 cm fora do
- * costado, que é o que qualquer escada de popa de barco pequeno faz de verdade —
- * e o que deixa o nadador alcançá-la em água aberta em vez de debaixo do bojo.
+ * That is why the number stopped being chosen: `solveClearance` sweeps the ladder's width
+ * and returns the smallest setback that keeps `BOARDING_LADDER_HULL_GAP` across all of
+ * it. Today it comes to **17.7 cm**, which puts the top rung 18 cm outboard of the
+ * planking — hence the gangway's sill (`HullGeometry.buildGangways`) reaching out to the
+ * top rung, or there would be an 18 cm gap between the last rung and the deck. The price
+ * of a straight plane on a stern that pulls in a meter over that stretch is at the foot:
+ * it sits 79 cm outboard, which is what any small boat's stern ladder really does — and
+ * what lets the swimmer reach it in open water instead of under the bilge.
  *
- * ⚠️ A conta ignora os cintados de propósito, e isso é uma **amarra com
- * `HullGeometry`**: `WALE_HEIGHTS` põe um em y = 1,02 avançando 5,5 cm da
- * madeira, e ele passa por dentro do vão da escada. Contá-lo empurraria a escada
- * outros 5,5 cm para fora do navio; a saída é a mesma que a braçola da escotilha
- * usa para deixar a escada do porão subir — **o cintado se interrompe no vão** —
- * e é `buildWales` que cumpre a parte dele. Tirar aquela interrupção sem mexer
- * aqui põe o montante dentro do cintado.
+ * ⚠️ The calculation deliberately ignores the wales, and that is a **constraint shared
+ * with `HullGeometry`**: `WALE_HEIGHTS` puts one at y = 1.02 standing 5.5 cm proud of the
+ * wood, and it passes through the ladder's opening. Counting it would push the ladder
+ * another 5.5 cm off the ship; the way out is the same one the hatch coaming uses to let
+ * the hold's stair through — **the wale breaks at the opening** — and it is `buildWales`
+ * that holds up its end. Removing that break without touching here puts the stile inside
+ * the wale.
  */
 export const BOARDING_LADDER_CLEARANCE = solveClearance();
 
 /**
- * Distância do corpo ao plano dos degraus, medida na perpendicular.
+ * Distance from the body to the plane of the rungs, measured perpendicular.
  *
- * **Não é um número desta peça**, e por isso não é escrito aqui: quem dita é o
- * casaco do pirata, não a barra, e o mesmo afastamento vale para a escada do
- * mastro. Ele mora com o clipe que o gravou (`CLIMB_CLIP.standoff`) porque é de lá
- * que ele saiu — e enquanto a escada e o `PlayerController` tinham cada um a sua
- * cópia de 0,29, uma divergência entre as duas não reprovaria teste nenhum.
+ * **It is not this piece's number**, and that is why it is not written here: what
+ * dictates it is the pirate's coat, not the rung, and the same standoff applies to the
+ * mast ladder. It lives with the clip that baked it (`CLIMB_CLIP.standoff`) because that
+ * is where it came from — and while the ladder and `PlayerController` each had their own
+ * copy of 0.29, a divergence between the two would fail no test at all.
  */
 export const BOARDING_LADDER_STANDOFF = CLIMB_CLIP.standoff;
 
 /**
- * Meia largura do portaló — a abertura na amurada por onde se cai no mar.
+ * Half width of the gangway — the opening in the bulwark you fall into the sea through.
  *
- * A escada não serve para descer, então a saída é esta: um vão no falcaseio, do
- * piso ao topo da amurada, largo o bastante para o jogador passar (o cilindro
- * dele tem 30 cm de raio) e estreito o bastante para não virar a maneira normal
- * de cair — quem passa por ali fez força para isso.
+ * The ladder is not for going down, so this is the way out: a gap in the bulwark, from
+ * the floor to the top, wide enough for the player to pass (their cylinder has a 30 cm
+ * radius) and narrow enough not to become the normal way of falling — whoever goes
+ * through there meant to.
  */
 export const BOARDING_GANGWAY_HALF_WIDTH = 0.42;
 
-/** Uma escada de embarque, em números absolutos e no referencial do navio. */
+/** One boarding ladder, in absolute numbers and in the ship's frame. */
 export interface BoardingLadderSpec {
-  /** +1 boreste, −1 bombordo. */
+  /** +1 starboard, −1 port. */
   readonly side: 1 | -1;
-  /** Z local do plano dos degraus. */
+  /** Local Z of the plane of the rungs. */
   readonly z: number;
-  /** Meia largura entre montantes. */
+  /** Half width between the stiles. */
   readonly halfWidth: number;
-  /** Altura da barra de topo, que coincide com o piso de saída. */
+  /** Height of the top rung, which coincides with the exit floor. */
   readonly topY: number;
-  /** Altura da barra mais baixa, submersa em água calma. */
+  /** Height of the lowest rung, submerged in calm water. */
   readonly bottomY: number;
-  /** Espaçamento vertical entre barras. */
+  /** Vertical spacing between rungs. */
   readonly rungSpacing: number;
-  /** Número de vãos (barras = vãos + 1). */
+  /** Number of gaps (rungs = gaps + 1). */
   readonly rungCount: number;
-  /** `|x|` do plano dos degraus na barra de topo. */
+  /** `|x|` of the plane of the rungs at the top rung. */
   readonly topX: number;
-  /** `|x|` do plano dos degraus na barra de baixo. */
+  /** `|x|` of the plane of the rungs at the bottom rung. */
   readonly bottomX: number;
-  /** Inclinação do plano dos degraus em relação ao prumo, em radianos. */
+  /** Rake of the plane of the rungs from vertical, in radians. */
   readonly tilt: number;
-  /** Distância do corpo ao plano dos degraus, na perpendicular. */
+  /** Distance from the body to the plane of the rungs, perpendicular. */
   readonly standoff: number;
-  /** Piso em que se termina a subida — o tombadilho. */
+  /** The floor the climb ends on — the quarterdeck. */
   readonly exitY: number;
-  /** Meia largura do portaló, em Z. */
+  /** Half width of the gangway, in Z. */
   readonly gangwayHalfWidth: number;
 }
 
@@ -199,18 +199,18 @@ function makeSpec(side: 1 | -1): BoardingLadderSpec {
   };
 }
 
-/** As duas escadas: boreste primeiro, para casar com a ordem dos canhões. */
+/** The two ladders: starboard first, to match the cannons' order. */
 export const BOARDING_LADDERS: readonly BoardingLadderSpec[] = [
   makeSpec(1),
   makeSpec(-1),
 ];
 
 /**
- * `|x|` do plano dos degraus na altura *y*, extrapolando fora da faixa.
+ * `|x|` of the plane of the rungs at height *y*, extrapolating outside the range.
  *
- * Extrapolar em vez de grampear é de propósito: o passo de escalada consulta
- * alturas ligeiramente fora das pontas (o corpo alcança a barra de topo vindo de
- * baixo dela) e um grampeamento poria um degrau em falso ali.
+ * Extrapolating instead of clamping is on purpose: the climbing step queries heights
+ * slightly outside the ends (the body reaches the top rung coming from below it) and a
+ * clamp would put a false step there.
  */
 export function boardingLadderX(spec: BoardingLadderSpec, y: number): number {
   const k = (spec.topY - y) / (spec.topY - spec.bottomY);
@@ -218,8 +218,8 @@ export function boardingLadderX(spec: BoardingLadderSpec, y: number): number {
 }
 
 /**
- * Ponto do plano dos degraus na altura *y*, em coordenadas locais do navio.
- * Escreve em *out* para não alocar no passo de física.
+ * Point on the plane of the rungs at height *y*, in the ship's local coordinates.
+ * It writes into *out* so it does not allocate in the physics step.
  */
 export function boardingLadderPoint(
   spec: BoardingLadderSpec,
@@ -233,47 +233,46 @@ export function boardingLadderPoint(
 }
 
 /**
- * Onde o corpo fica, em `|x|`, quando agarrado à escada na altura *y*.
+ * Where the body sits, in `|x|`, when gripping the ladder at height *y*.
  *
- * O afastamento é medido na **perpendicular** ao plano dos degraus, não na
- * horizontal: numa escada inclinada 14° as duas contas divergem 3 cm, e 3 cm é
- * a diferença entre a palma envolver a barra e passar ao lado dela.
+ * The standoff is measured **perpendicular** to the plane of the rungs, not
+ * horizontally: on a ladder raked 14° the two calculations diverge by 3 cm, and 3 cm is
+ * the difference between the palm wrapping the rung and passing beside it.
  */
 export function boardingLadderStandX(spec: BoardingLadderSpec, y: number): number {
   return boardingLadderX(spec, y) + spec.standoff * Math.cos(spec.tilt);
 }
 
-/** A escada do bordo em que *x* está. */
+/** The ladder on the side *x* is on. */
 export function boardingLadderForSide(x: number): BoardingLadderSpec {
   return x >= 0 ? BOARDING_LADDERS[0]! : BOARDING_LADDERS[1]!;
 }
 
-/** Verdade quando *z* cai dentro do vão do portaló. */
+/** True when *z* falls inside the gangway's opening. */
 export function insideGangway(z: number): boolean {
   const spec = BOARDING_LADDERS[0]!;
   return Math.abs(z - spec.z) <= spec.gangwayHalfWidth;
 }
 
-/** `t` da estação da escada, para quem precisa consultar o casco ali. */
+/** `t` of the ladder's station, for whoever needs to query the hull there. */
 export function boardingLadderT(): number {
   return zToT(BOARDING_LADDERS[0]!.z);
 }
 
 /**
- * O menor recuo que mantém a escada inteira a `BOARDING_LADDER_HULL_GAP` do
- * costado — ver `BOARDING_LADDER_CLEARANCE`.
+ * The smallest setback that keeps the whole ladder `BOARDING_LADDER_HULL_GAP` off the
+ * planking — see `BOARDING_LADDER_CLEARANCE`.
  *
- * Varredura, e não bisseção: a restrição é uma desigualdade linear no recuo
- * (`x` do plano é o recuo menos uma parcela que só depende da altura), então o
- * mínimo viável é o **máximo** do que cada ponto exige, e isso se lê direto sem
- * iterar. Nove estações ao longo da largura, com o raio do montante nas duas
- * pontas e o da barra no meio: as pontas é que mandam, mas amostrar o meio custa
- * nada e cobre uma tabela de balizas futura em que o costado deixe de ser monótono
- * na largura da escada.
+ * A sweep, and not a bisection: the constraint is a linear inequality in the setback
+ * (the plane's `x` is the setback minus a term that depends only on the height), so the
+ * smallest feasible value is the **maximum** of what each point demands, and that reads
+ * straight off without iterating. Nine stations across the width, with the stile's radius
+ * at both ends and the rung's in between: the ends are what rule, but sampling the middle
+ * costs nothing and covers a future station table where the planking stops being
+ * monotonic across the ladder's width.
  *
- * Roda uma vez, no carregamento do módulo. As alturas param na barra de baixo
- * porque abaixo dela o costado só recolhe — o pedaço de montante que sobra
- * embaixo nunca é o pior caso.
+ * It runs once, at module load. The heights stop at the bottom rung because below it the
+ * planking only pulls in — the stub of stile left underneath is never the worst case.
  */
 function solveClearance(): number {
   const topY = QUARTERDECK_Y;
@@ -290,8 +289,9 @@ function solveClearance(): number {
 
     for (let j = 0; j <= heights; j++) {
       const y = bottomY + ((topY - bottomY) * j) / heights;
-      // O plano dos degraus naquela altura é `recuo + reference - k * run`; o que
-      // o casco exige ali é `casco + folga + raio`. Isolar o recuo dá isto.
+      // The plane of the rungs at that height is `setback + reference - k * run`; what
+      // the hull demands there is `hull + gap + radius`. Isolating the setback gives
+      // this.
       const k = (topY - y) / (topY - bottomY);
       const demand =
         halfWidthAtHeight(t, y) + BOARDING_LADDER_HULL_GAP + radius - reference + k * BOARDING_LADDER_RUN;
