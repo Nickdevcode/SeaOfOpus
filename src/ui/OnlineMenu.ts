@@ -1,31 +1,31 @@
 /**
- * As três telas do duelo em rede: escolher como encontrar alguém, digitar um
- * código, e esperar.
+ * The three screens of the networked duel: choosing how to find someone, typing a code,
+ * and waiting.
  *
- * Constrói DOM e nada mais. Véu, folha, foco, `Voltar` e navegação por controle
- * continuam sendo de `Menu` — ver o cabeçalho de lá para o porquê da divisa. O que
- * torna estas três diferentes das outras é o relógio: o conteúdo delas muda por
- * evento de socket, não por clique, e é `render` que absorve essa diferença.
+ * It builds DOM and nothing else. Veil, sheet, focus, `Back` and gamepad navigation still
+ * belong to `Menu` — see the header over there for why the line is drawn where it is.
+ * What makes these three different from the others is the clock: their content changes on
+ * a socket event, not on a click, and it is `render` that absorbs that difference.
  *
- * ## `render` é chamada muitas vezes por segundo
+ * ## `render` is called many times a second
  *
- * Enquanto o cronômetro da fila corre, `render` roda a cada quadro. Duas regras
- * saem daí, e as duas são obrigatórias:
+ * While the queue's timer runs, `render` runs every frame. Two rules follow from that,
+ * and both are mandatory:
  *
- * 1. **Nunca reconstruir DOM.** Só escrever `textContent` e alternar `hidden`.
- *    Um `replaceChildren` por quadro apagaria o elemento focado, e o foco do
- *    navegador voltaria para o corpo do documento — o d-pad pararia de funcionar
- *    sozinho, no meio da espera.
- * 2. **Sair cedo quando nada mudou.** A chave de comparação em `lastKey` é a
- *    mesma técnica de `Menu.syncGlyphs`, pelo mesmo motivo.
+ * 1. **Never rebuild DOM.** Only write `textContent` and toggle `hidden`. One
+ *    `replaceChildren` per frame would wipe out the focused element, and the browser's
+ *    focus would fall back to the document body — the d-pad would stop working on its
+ *    own, in the middle of the wait.
+ * 2. **Bail out early when nothing changed.** The comparison key in `lastKey` is the same
+ *    technique as `Menu.syncGlyphs`, for the same reason.
  *
- * ## Quem navega é o clique, não o estado
+ * ## What navigates is the click, not the state
  *
- * `render` **não** troca de tela. Quem leva de "online" para "esperando" é o
- * ouvinte do botão, no mesmo instante em que o jogador aperta. Se a navegação
- * viesse do estado da rede, a tela mudaria sozinha em cima da mão de quem está
- * apertando outra coisa, e o histórico do `Voltar` passaria a depender da latência
- * do servidor.
+ * `render` does **not** change screens. What takes you from "online" to "waiting" is the
+ * button's listener, at the very instant the player presses it. If the navigation came
+ * from the network's state, the screen would change on its own under the hand of someone
+ * pressing something else, and the `Back` history would come to depend on the server's
+ * latency.
  */
 
 import { NICKNAME_MAX_LENGTH, readString, settings } from '../core/Settings';
@@ -33,19 +33,19 @@ import { el } from './dom';
 import type { Menu } from './Menu';
 
 /**
- * Alfabeto do código de sala: 32 caracteres sem par ambíguo.
+ * The room code's alphabet: 32 characters with no ambiguous pair.
  *
- * Fora `I`, `O`, `0` e `1` — os quatro que se confundem quando alguém lê um
- * código em voz alta ou o copia de uma tela para um papel. Sobram 32 símbolos e
- * quatro casas, que dão 1.048.576 salas: o bastante para a colisão ser um caso
- * raro tratado pelo servidor, e curto o suficiente para caber num ditado.
+ * `I`, `O`, `0` and `1` are out — the four that get confused when someone reads a code
+ * out loud or copies it from a screen onto paper. That leaves 32 symbols and four slots,
+ * which give 1,048,576 rooms: enough for a collision to be a rare case handled by the
+ * server, and short enough to fit into something dictated over the phone.
  */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-/** Casas do código. Ver `CODE_ALPHABET` para o tamanho do espaço. */
+/** Slots in the code. See `CODE_ALPHABET` for the size of the space. */
 export const CODE_LENGTH = 4;
 
-/** Em que pé está a conversa com o servidor de sala. */
+/** Where the conversation with the room server stands. */
 export type OnlinePhase =
   | 'idle'
   | 'connecting'
@@ -55,27 +55,27 @@ export type OnlinePhase =
   | 'ready'
   | 'error';
 
-/** Tudo que as telas de rede precisam saber para se desenharem. */
+/** Everything the network screens have to know in order to draw themselves. */
 export interface OnlineViewState {
   phase: OnlinePhase;
-  /** O código desta sala, quando já há um. */
+  /** This room's code, once there is one. */
   code: string | null;
-  /** Apelido de quem está do outro lado, quando já entrou. */
+  /** The nickname of whoever is on the other side, once they have joined. */
   opponent: string | null;
-  /** O que deu errado, ou uma linha de contexto. */
+  /** What went wrong, or a line of context. */
   message: string | null;
-  /** Há quanto tempo se espera, para o cronômetro da fila. */
+  /** How long the wait has been, for the queue's timer. */
   waitingSeconds: number;
 }
 
 export interface OnlineMenuCallbacks {
-  /** Entrar na fila e pegar quem estiver esperando. */
+  /** Get into the queue and take whoever is waiting. */
   onQuickMatch(nickname: string): void;
-  /** Abrir uma sala e receber um código para passar adiante. */
+  /** Open a room and get a code to pass along. */
   onCreateRoom(nickname: string): void;
-  /** Entrar numa sala existente pelo código. */
+  /** Join an existing room by its code. */
   onJoinRoom(nickname: string, code: string): void;
-  /** Desistir do que estiver em curso. Tem de ser idempotente. */
+  /** Give up on whatever is underway. It has to be idempotent. */
   onCancel(): void;
 }
 
@@ -87,17 +87,17 @@ const IDLE_STATE: OnlineViewState = {
   waitingSeconds: 0,
 };
 
-/** `74` vira `1:14`. O cronômetro da espera não passa de minutos. */
+/** `74` becomes `1:14`. The waiting timer never goes past minutes. */
 function formatWait(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
   return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, '0')}`;
 }
 
 export class OnlineMenu {
-  /** As telas prontas, para `Menu` registrar no mapa dele. */
+  /** The finished screens, for `Menu` to register in its map. */
   readonly screens: ReadonlyMap<'online' | 'join' | 'room', HTMLDivElement>;
 
-  /** Os quatro botões do código, cada um com o índice dele no alfabeto. */
+  /** The code's four buttons, each with its index into the alphabet. */
   private readonly slots: HTMLButtonElement[] = [];
   private readonly codeIndices: number[] = new Array(CODE_LENGTH).fill(0);
 
@@ -110,9 +110,9 @@ export class OnlineMenu {
   private readonly nickInput: HTMLInputElement;
   private readonly onlineActions: HTMLButtonElement[] = [];
 
-  /** Última pintura, para `render` sair cedo. Ver o cabeçalho. */
+  /** The last paint, so `render` can bail out early. See the header. */
   private lastKey: string | null = null;
-  /** Rótulo do "Copy", que vira "Copied" por um instante. */
+  /** The "Copy" label, which turns into "Copied" for a moment. */
   private copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -143,12 +143,12 @@ export class OnlineMenu {
   }
 
   /**
-   * Repinta as telas de rede. Barata e idempotente — ver o cabeçalho do módulo.
+   * Repaints the network screens. Cheap and idempotent — see the module's header.
    */
   render(state: OnlineViewState): void {
-    // O cronômetro entra na chave em segundos inteiros: sem isso a espera nunca
-    // andaria; com o valor bruto, a comparação nunca casaria e a saída cedo
-    // deixaria de existir.
+    // The timer goes into the key as whole seconds: without that the wait would never
+    // move; with the raw value, the comparison would never match and the early bail-out
+    // would stop existing.
     const key = [
       state.phase,
       state.code ?? '',
@@ -166,8 +166,9 @@ export class OnlineMenu {
     this.roomCode.hidden = !showCode;
     if (showCode && state.code) this.roomCodeText.textContent = state.code;
 
-    // O relógio só corre enquanto de fato se espera. Numa tela de erro ou de
-    // "achei", um cronômetro andando diria que ainda há o que aguardar.
+    // The clock only runs while you are actually waiting. On an error screen or on a
+    // "found them" screen, a running timer would say there is still something to wait
+    // for.
     const waiting = state.phase === 'queued' || state.phase === 'hosting';
     this.roomTimer.hidden = !waiting;
     if (waiting) this.roomTimer.textContent = formatWait(state.waitingSeconds);
@@ -212,7 +213,7 @@ export class OnlineMenu {
     }
   }
 
-  // -- construção ---------------------------------------------------------------
+  // -- construction -------------------------------------------------------------
 
   private buildOnline(root: HTMLElement): {
     overlay: HTMLDivElement;
@@ -221,8 +222,8 @@ export class OnlineMenu {
     const overlay = el('div', 'overlay', root);
     const sheet = el('div', 'sheet sheet--narrow', overlay);
 
-    // Sem a marca: subtela não repete logotipo — é a mesma regra que Ajustes e
-    // Controles já seguem, e o cabeçalho de seção dá o título que falta.
+    // No wordmark: a subscreen does not repeat the logo — it is the same rule Settings
+    // and Controls already follow, and the section header gives the title it is missing.
     const nameSection = el('div', 'section', sheet);
     el('h2', 'section__label', nameSection, 'Sail under the name');
 
@@ -232,12 +233,12 @@ export class OnlineMenu {
     nickInput.value = settings.preferences.nickname;
     nickInput.spellcheck = false;
     nickInput.autocomplete = 'off';
-    // O rótulo visível é o cabeçalho da seção, que não é um `<label>`; daí o
-    // `aria-label`, que diz a mesma coisa sem inventar um id só para o `for`.
+    // The visible label is the section's header, which is not a `<label>`; hence the
+    // `aria-label`, which says the same thing without inventing an id just for `for`.
     nickInput.setAttribute('aria-label', 'Your name');
     nickInput.addEventListener('input', () => {
-      // Grava cru e saneia na leitura: cortar acentos ou espaços **enquanto** se
-      // digita mexe na posição do cursor, e o campo passa a "comer" letras.
+      // Store it raw and sanitize on read: trimming accents or spaces **while** typing
+      // moves the caret, and the field starts "eating" letters.
       settings.update({ nickname: nickInput.value });
     });
 
@@ -292,16 +293,16 @@ export class OnlineMenu {
     for (let i = 0; i < CODE_LENGTH; i++) {
       const slot = el('button', 'code__slot', box, CODE_ALPHABET[0]);
       slot.type = 'button';
-      // `spinbutton` é o papel de um campo cujo valor se percorre numa lista
-      // ordenada — que é exatamente o que ↑/↓ fazem aqui.
+      // `spinbutton` is the role of a field whose value is walked through an ordered
+      // list — which is exactly what ↑/↓ do here.
       slot.setAttribute('role', 'spinbutton');
       slot.setAttribute('aria-label', `Character ${i + 1} of ${CODE_LENGTH}`);
       slot.setAttribute('aria-valuetext', CODE_ALPHABET[0] ?? 'A');
       this.slots.push(slot);
       this.menu.registerWidget(slot, {
-        // ←/→ **não** mudam a letra: eles andam entre as casas, que é como se lê
-        // um código. Devolver `false` entrega o passo a `moveFocus`, e do último
-        // slot ele escapa para o botão de confirmar. Ver `MenuWidget.step`.
+        // ←/→ do **not** change the letter: they walk between the slots, which is how a
+        // code is read. Returning `false` hands the step over to `moveFocus`, and from
+        // the last slot it escapes to the confirm button. See `MenuWidget.step`.
         cycle: () => false,
         step: (direction) => {
           this.nudgeSlot(i, direction);
@@ -310,9 +311,9 @@ export class OnlineMenu {
       });
     }
 
-    // Digitar é o caminho de quem tem teclado, e ele tem de ser o mais direto:
-    // a letra entra na casa focada e o foco anda sozinho, como num campo de
-    // código de banco.
+    // Typing is the path for whoever has a keyboard, and it has to be the most direct
+    // one: the letter goes into the focused slot and the focus moves on its own, like in
+    // a bank's code field.
     box.addEventListener('keydown', (event) => this.onCodeKey(event));
     box.addEventListener('paste', (event) => this.onCodePaste(event));
 
@@ -353,9 +354,9 @@ export class OnlineMenu {
 
     const codeBox = el('div', 'code-display', sheet);
     const codeText = el('span', 'code-display__value', codeBox, '····');
-    // `aria-live` na região do código, e não no título: o código é a única coisa
-    // desta tela que alguém precisa **anotar**, e é o que tem de ser lido em voz
-    // alta assim que aparece.
+    // `aria-live` on the code's region, and not on the title: the code is the one thing
+    // on this screen someone has to **write down**, and it is what has to be read out
+    // loud as soon as it appears.
     codeBox.setAttribute('aria-live', 'polite');
 
     const copy = el('button', 'button code-display__copy', codeBox, 'Copy');
@@ -372,9 +373,9 @@ export class OnlineMenu {
     return { overlay, title, blurb, codeBox, codeText, copy, timer };
   }
 
-  // -- código de sala -----------------------------------------------------------
+  // -- room code ----------------------------------------------------------------
 
-  /** Move uma casa do código um passo no alfabeto, dando a volta nas pontas. */
+  /** Moves one slot of the code a step through the alphabet, wrapping at the ends. */
   private nudgeSlot(index: number, direction: 1 | -1): void {
     const size = CODE_ALPHABET.length;
     const next = (this.codeIndices[index]! + direction + size) % size;
@@ -390,16 +391,16 @@ export class OnlineMenu {
     slot.setAttribute('aria-valuetext', character);
   }
 
-  /** Põe um caractere na casa focada e avança, se ele existir no alfabeto. */
+  /** Puts a character into the focused slot and moves on, if it exists in the alphabet. */
   private typeCharacter(character: string): void {
     const focused = document.activeElement as HTMLElement | null;
     const index = focused ? this.slots.indexOf(focused as HTMLButtonElement) : -1;
     if (index < 0) return;
 
     const alphabetIndex = CODE_ALPHABET.indexOf(character.toUpperCase());
-    // Caractere fora do alfabeto é ignorado em silêncio. Adivinhar (mapear `0`
-    // para `O`) seria pior: nenhum dos dois existe aqui, e o palpite entraria uma
-    // letra errada com a mesma confiança de uma certa.
+    // A character outside the alphabet is ignored in silence. Guessing (mapping `0` to
+    // `O`) would be worse: neither of the two exists here, and the guess would enter a
+    // wrong letter with the same confidence as a right one.
     if (alphabetIndex < 0) return;
 
     this.writeSlot(index, alphabetIndex);
@@ -412,14 +413,15 @@ export class OnlineMenu {
       const focused = document.activeElement as HTMLElement | null;
       const index = focused ? this.slots.indexOf(focused as HTMLButtonElement) : -1;
       if (index < 0) return;
-      // Apaga a casa atual e recua, que é o que a tecla faz em qualquer campo.
+      // It clears the current slot and steps back, which is what the key does in any
+      // field.
       this.writeSlot(index, 0);
       this.slots[index - 1]?.focus();
       return;
     }
 
-    // Uma tecla só, e sem modificador: `Tab`, as setas e os atalhos do navegador
-    // continuam sendo de quem já os trata.
+    // A single key, and no modifier: `Tab`, the arrows and the browser's shortcuts stay
+    // with whoever already handles them.
     if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
     event.preventDefault();
     this.typeCharacter(event.key);
@@ -430,9 +432,8 @@ export class OnlineMenu {
     if (!text) return;
     event.preventDefault();
 
-    // Aceita o código colado de qualquer forma — com espaços, em minúsculas, ou
-    // dentro de um link de convite: o que interessa são os últimos caracteres
-    // válidos, que é o que um código é.
+    // It accepts the code pasted in any shape — with spaces, in lowercase, or inside an
+    // invite link: what matters are the valid characters, which is what a code is.
     const characters = [...text.toUpperCase()].filter((c) => CODE_ALPHABET.includes(c));
     const code = characters.slice(0, CODE_LENGTH);
     for (let i = 0; i < code.length; i++) {
@@ -452,9 +453,9 @@ export class OnlineMenu {
       await navigator.clipboard.writeText(code);
       this.flashCopied('Copied');
     } catch {
-      // Área de transferência negada (contexto inseguro, permissão recusada): o
-      // código continua na tela em corpo grande, que é o plano de fundo desde o
-      // começo. Dizer o que houve vale mais que um botão que não reage.
+      // Clipboard denied (insecure context, permission refused): the code is still on
+      // the screen in large type, which has been the fallback from the start. Saying what
+      // happened is worth more than a button that does not react.
       this.flashCopied('Copy failed');
     }
   }
@@ -468,11 +469,12 @@ export class OnlineMenu {
     }, 1400);
   }
 
-  /** O apelido já saneado, que é o que vai para o servidor. */
+  /** The nickname already sanitized, which is what goes to the server. */
   private nickname(): string {
     const clean = readString(this.nickInput.value, NICKNAME_MAX_LENGTH, 'Sailor');
-    // O campo é reescrito com o que de fato será usado: quem digitou só espaços
-    // tem de ver o nome com que vai entrar, e não descobri-lo pelo adversário.
+    // The field is rewritten with what will actually be used: whoever typed only spaces
+    // has to see the name they are going in with, and not find it out from their
+    // opponent.
     if (clean !== this.nickInput.value) {
       this.nickInput.value = clean;
       settings.update({ nickname: clean });
