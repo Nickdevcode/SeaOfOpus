@@ -1,13 +1,13 @@
 /**
- * O mundo desempacotado, num formato que se pode interpolar.
+ * The unpacked world, in a form you can interpolate.
  *
- * Fica entre o codec e o jogo por uma razão só: **interpolar exige dois**. O
- * cliente que não simula recebe quinze instantâneos por segundo e desenha a
- * cento e quarenta e quatro quadros; entre um pacote e o seguinte ele tem de
- * saber de onde e para onde. Aplicar direto no `Match` daria um navio que salta
- * de pose em pose quinze vezes por segundo.
+ * It sits between the codec and the game for one reason only: **interpolating takes
+ * two**. The client that does not simulate receives fifteen snapshots per second and
+ * draws a hundred and forty-four frames; between one packet and the next it has to know
+ * from where and to where. Applying straight into `Match` would give a ship that jumps
+ * from pose to pose fifteen times a second.
  *
- * Tudo aqui é pré-alocado e reescrito no lugar. Ver a nota de alocação em
+ * Everything here is preallocated and rewritten in place. See the allocation note in
  * `snapshotCodec`.
  */
 
@@ -32,7 +32,7 @@ export interface BreachState {
   repair: number;
 }
 
-/** Uma tábua pregada, como ela chega do lado que simula. Ver `Patch`. */
+/** A nailed plank, as it arrives from the simulating side. See `Patch`. */
 export interface PatchState {
   id: number;
   readonly local: THREE.Vector3;
@@ -61,19 +61,18 @@ export interface ShipState {
   readonly cannons: [CannonState, CannonState];
   floodFraction: number;
   sinkTime: number;
-  /** `null` quando o instantâneo não trouxe a lista (ela não mudou). */
+  /** `null` when the snapshot did not carry the list (it did not change). */
   breaches: BreachState[] | null;
-  /** Idem, e as duas vêm sempre juntas: uma tábua nasce de um rombo que fecha. */
+  /** Same, and the two always come together: a plank is born from a breach closing. */
   patches: PatchState[] | null;
 }
 
 /**
- * O corpo do marujo como ele chega do lado que simula.
+ * The sailor's body as it arrives from the simulating side.
  *
- * É o que `PlayerController.applyRemoteStep` consome para o adversário andar,
- * correr, pular, subir escada, governar e pregar tábua deste lado — os campos
- * daqui são exatamente as grandezas de que os relógios de animação precisam, e
- * nada além delas.
+ * It is what `PlayerController.applyRemoteStep` consumes so the opponent walks, runs,
+ * jumps, climbs, steers and nails planks on this side — the fields here are exactly the
+ * quantities the animation clocks need, and nothing beyond them.
  */
 export interface CrewState {
   readonly local: THREE.Vector3;
@@ -84,29 +83,29 @@ export interface CrewState {
   grounded: boolean;
   onLadder: boolean;
   atCapstan: boolean;
-  /** `true` quando ele está com a tábua nas mãos. Ver `Interaction.patching`. */
+  /** `true` when he has the plank in his hands. See `Interaction.patching`. */
   patching: boolean;
   /**
-   * `true` quando ele está no mar.
+   * `true` when he is in the sea.
    *
-   * O único estado da água que atravessa o fio — o resto se deriva da posição, que
-   * já viaja. Ver `PlayerController.inWater`.
+   * The only water state that crosses the wire — the rest is derived from the position,
+   * which already travels. See `PlayerController.inWater`.
    */
   inWater: boolean;
 }
 
-/** O céu e o tempo, como eles chegam do lado que simula. Ver `writeSky`. */
+/** The sky and the weather, as they arrive from the simulating side. See `writeSky`. */
 export interface SkyState {
-  /** Fração do dia, 0..1. */
+  /** Fraction of the day, 0..1. */
   timeOfDay: number;
-  /** O tempo que está no ar, e para onde ele está virando. */
+  /** The weather that is up, and what it is turning into. */
   current: (typeof WEATHER_ID)[number];
   target: (typeof WEATHER_ID)[number];
-  /** Vento de base, sem a rajada. É dele que sai a severidade. */
+  /** Base wind, without the gust. The severity comes out of it. */
   baseWind: number;
   clouds: number;
   rain: number;
-  /** Alcance de visibilidade, em metros. */
+  /** Visibility range, in meters. */
   visibility: number;
   flash: number;
 }
@@ -114,14 +113,14 @@ export interface SkyState {
 export interface WorldState {
   tick: number;
   bufferDepth: number;
-  /** Passos sem comando no host desde o instantâneo anterior. Ver o codec. */
+  /** Steps with no command on the host since the previous snapshot. See the codec. */
   starved: number;
   /**
-   * Último tick de entrada que o host consumiu.
+   * The last input tick the host consumed.
    *
-   * Não é telemetria: é o **recibo**. É por ele que o cliente sabe se o comando
-   * que o fez assumir o timão aqui já foi visto do outro lado — ver
-   * `GuestSession.applyCrew`.
+   * It is not telemetry: it is the **receipt**. It is how the client knows whether the
+   * command that made it take the helm on this side has already been seen on the other —
+   * see `GuestSession.applyCrew`.
    */
   ackTick: number;
   over: boolean;
@@ -129,12 +128,12 @@ export interface WorldState {
   windDirection: number;
   windStrength: number;
   waveTime: number;
-  /** Rumo da ondulação de fundo. Ver a nota no codec — sem ele, dois mares. */
+  /** The background swell's heading. See the note in the codec — without it, two seas. */
   swellDirection: number;
   readonly sky: SkyState;
   readonly ships: [ShipState, ShipState];
   readonly crew: [CrewState, CrewState];
-  /** Eventos deste intervalo. Consumidos uma vez e limpos. */
+  /** This interval's events. Consumed once and cleared. */
   readonly events: MatchEvent[];
 }
 
@@ -208,7 +207,7 @@ export function createWorldState(): WorldState {
   };
 }
 
-/** Reserva de rombos e tábuas, para a leitura não alocar por quadro. */
+/** A pool of breaches and planks, so the read does not allocate per frame. */
 const breachPool: BreachState[][] = [[], []];
 const patchPool: PatchState[][] = [[], []];
 
@@ -240,9 +239,9 @@ function readShip(r: Reader, target: ShipState, slot: ShipSlot, withBreaches: bo
     dequantize(r.i16(), QUANT.quaternion),
     dequantize(r.i16(), QUANT.quaternion),
   );
-  // Quantizar quatro componentes independentes tira o quaternion do comprimento
-  // um por alguns décimos de milésimo. Normalizar aqui é uma raiz por navio por
-  // instantâneo, e evita que o erro entre numa composição de rotações.
+  // Quantizing four independent components takes the quaternion off unit length by a few
+  // ten-thousandths. Normalizing here is one square root per ship per snapshot, and it
+  // keeps the error from entering a composition of rotations.
   target.orientation.normalize();
 
   target.velocity.set(
@@ -279,9 +278,10 @@ function readShip(r: Reader, target: ShipState, slot: ShipSlot, withBreaches: bo
     return;
   }
 
-  // ⚠️ Sem `Math.min` aqui: o escritor já grampeia em `MAX_BREACHES`, e cortar
-  // de novo **deste lado** era justamente o defeito — o leitor parava antes do
-  // escritor e todo o resto do instantâneo saía do lugar. Um teto só, na fonte.
+  // ⚠️ No `Math.min` here: the writer already clamps at `MAX_BREACHES`, and clamping
+  // again **on this side** was precisely the defect — the reader stopped before the
+  // writer and all the rest of the snapshot came out shifted. One ceiling only, at the
+  // source.
   const breachCount = r.u8();
   const breaches: BreachState[] = [];
   for (let i = 0; i < breachCount; i++) {
@@ -308,7 +308,7 @@ function readShip(r: Reader, target: ShipState, slot: ShipSlot, withBreaches: bo
   target.patches = patches;
 }
 
-/** O céu e o tempo. Ver `writeSky`, do outro lado. */
+/** The sky and the weather. See `writeSky`, on the other side. */
 function readSky(r: Reader, sky: SkyState): void {
   sky.timeOfDay = r.u16() / QUANT.timeOfDay;
   sky.current = WEATHER_ID[r.u8()] ?? 'breeze';
@@ -370,24 +370,24 @@ function readEvents(r: Reader, out: MatchEvent[]): void {
         break;
       }
       default:
-        // Tipo desconhecido: veio de uma versão que este cliente não entende, e
-        // não há como saber quantos bytes pular. Parar de ler é o único caminho
-        // seguro — o resto do quadro está perdido de qualquer forma.
+        // Unknown type: it came from a version this client does not understand, and
+        // there is no way to know how many bytes to skip. Stopping the read is the only
+        // safe path — the rest of the frame is lost anyway.
         return;
     }
   }
 }
 
 /**
- * Lê um instantâneo para dentro de um `WorldState`.
+ * Reads a snapshot into a `WorldState`.
  *
- * O corpo real é `readSnapshot`; isto aqui é a casca que transforma um quadro
- * truncado ou de outra versão em `null` em vez de numa exceção. `DataView`
- * lança ao ler além do fim, e essa exceção subiria pelo `onmessage` do socket:
- * um único pacote ruim derrubaria o tratador de rede do jogo inteiro, e o
- * sintoma seria o mundo congelando sem nenhum erro visível.
+ * The real body is `readSnapshot`; this is the shell that turns a truncated frame or one
+ * from another version into `null` instead of into an exception. `DataView` throws when
+ * reading past the end, and that exception would go up through the socket's `onmessage`:
+ * a single bad packet would take down the whole game's network handler, and the symptom
+ * would be the world freezing with no visible error at all.
  *
- * @returns o cabeçalho, ou `null` se o quadro não for um instantâneo válido.
+ * @returns the header, or `null` if the frame is not a valid snapshot.
  */
 export function decodeSnapshot(buffer: ArrayBuffer, target: WorldState): SnapshotHeader | null {
   try {
@@ -434,7 +434,7 @@ function readSnapshot(buffer: ArrayBuffer, target: WorldState): SnapshotHeader |
     crew.onLadder = (packed & (1 << 4)) !== 0;
     crew.atCapstan = (packed & (1 << 5)) !== 0;
     crew.patching = (packed & (1 << 6)) !== 0;
-    // O último bit do byte. Ver a nota do escritor.
+    // The byte's last bit. See the writer's note.
     crew.inWater = (packed & (1 << 7)) !== 0;
   }
 

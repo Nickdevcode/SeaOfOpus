@@ -1,17 +1,17 @@
 /**
- * O lado que simula.
+ * The side that simulates.
  *
- * O host roda `Match.fixedUpdate` exatamente como no duelo contra a máquina — a
- * única diferença é de onde vem a entrada do segundo navio: em vez do `ShipAI`,
- * ela vem da fila alimentada pela rede. Nenhuma linha de física sabe disso, e é
- * de propósito: um caminho de código só é um caminho só para divergir.
+ * The host runs `Match.fixedUpdate` exactly as in the duel against the machine — the only
+ * difference is where the second ship's input comes from: instead of `ShipAI`, it comes
+ * from the queue the network feeds. No line of physics knows this, and that is on
+ * purpose: one code path is one code path fewer to diverge.
  *
- * ## Por que quinze instantâneos por segundo, e não sessenta
+ * ## Why fifteen snapshots per second, and not sixty
  *
- * Porque não muda nada que se veja e muda tudo que se paga. O casco é interpolado
- * do lado de lá, então mais pacotes dariam a mesma imagem; e a 60 Hz o mesmo
- * duelo custaria quatro vezes mais requests no plano gratuito. Quinze com
- * interpolação é a mesma suavidade por um quarto do preço.
+ * Because it changes nothing you can see and changes everything you pay. The hull is
+ * interpolated over there, so more packets would give the same picture; and at 60 Hz the
+ * same duel would cost four times as many requests on the free plan. Fifteen with
+ * interpolation is the same smoothness for a quarter of the price.
  */
 
 import { MessageType, QUANT } from '../../shared/protocol';
@@ -22,32 +22,32 @@ import { InputBuffer } from './InputBuffer';
 import { decodeInput, encodeSnapshot } from './snapshotCodec';
 import type { RoomClient } from './RoomClient';
 
-/** Um instantâneo a cada quatro passos: 15 Hz sobre uma simulação de 60. */
+/** One snapshot every four steps: 15 Hz over a 60 Hz simulation. */
 const SNAPSHOT_EVERY = 4;
 
 /**
- * Instantâneos entre dois reenvios da lista de estrago, mesmo parada. Um por
- * segundo.
+ * Snapshots between two resends of the damage list, even when it is unchanged. One per
+ * second.
  *
- * O batimento que carrega o que a assinatura deixa de fora: o progresso do
- * reparo, que anda sem mudar nada estrutural. Uma vez por segundo é folgado
- * para a barra do rombo do adversário encolher de forma convincente, e raro o
- * bastante para a correção na barra de quem está pregando a tábua passar
- * despercebida — uma nudge por segundo contra quinze.
+ * It is the heartbeat that carries what the signature leaves out: the repair's progress,
+ * which advances without changing anything structural. Once a second is generous enough
+ * for the opponent's breach bar to shrink convincingly, and rare enough for the
+ * correction on the bar of whoever is nailing the plank to go unnoticed — one nudge per
+ * second against fifteen.
  *
- * É também a rede de segurança da assinatura: se duas listas diferentes um dia
- * derem o mesmo inteiro, o erro dura um segundo em vez de durar a partida.
+ * It is also the signature's safety net: if two different lists ever give the same
+ * integer, the error lasts a second instead of lasting the match.
  */
 const RESEND_EVERY = 15;
 
 export class HostSession {
   private readonly buffer = new InputBuffer();
-  /** Quadros desempacotados de um lote. Reaproveitados — nada aloca por pacote. */
+  /** Frames unpacked from a batch. Reused — nothing allocates per packet. */
   private readonly incoming: InputFrame[] = Array.from({ length: 8 }, createInputFrame);
 
-  /** Assinatura do estrago de cada casco, para saber se a lista mudou. */
+  /** Each hull's damage signature, to know whether the list changed. */
   private lastDamageKeys: [number, number] = [-1, -1];
-  /** Instantâneos desde o último envio da lista de estrago. Ver `RESEND_EVERY`. */
+  /** Snapshots since the damage list was last sent. See `RESEND_EVERY`. */
   private sinceDamageSent = 0;
   private sentOver = false;
 
@@ -56,7 +56,7 @@ export class HostSession {
     private readonly client: RoomClient,
   ) {}
 
-  /** Telemetria para o painel do F3. */
+  /** Telemetry for the F3 panel. */
   get depth(): number {
     return this.buffer.depth;
   }
@@ -72,7 +72,7 @@ export class HostSession {
     this.sentOver = false;
   }
 
-  /** Um lote de entrada chegou do outro lado. */
+  /** A batch of input arrived from the other side. */
   onFrame(frame: ArrayBuffer): void {
     const view = new DataView(frame);
     if (view.byteLength < 2 || view.getUint8(0) !== MessageType.Input) return;
@@ -81,41 +81,39 @@ export class HostSession {
     for (let i = 0; i < count; i++) this.buffer.push(this.incoming[i]!);
   }
 
-  /** A entrada do navio inimigo neste passo. Nunca falta — ver `InputBuffer`. */
+  /** The enemy ship's input on this step. It is never missing — see `InputBuffer`. */
   enemyInput(tick: number): InputFrame {
     return this.buffer.consume(tick);
   }
 
   /**
-   * A assinatura do estrago de um casco, para saber se ele mudou desde o
-   * último instantâneo.
+   * A hull's damage signature, to know whether it changed since the last snapshot.
    *
-   * ⚠️ **Era a contagem de rombos, e a contagem mente em três casos que
-   * acontecem o tempo todo:**
+   * ⚠️ **It used to be the breach count, and the count lies in three cases that happen
+   * all the time:**
    *
-   * - Um tiro em cima de um rombo aberto **alarga** o buraco sem criar outro. O
-   *   número não muda, e o outro lado continua vendo — e calculando o esguicho
-   *   de — um rombo do tamanho antigo.
-   * - O progresso do reparo anda de zero a um sem mexer no número. Quem olhava o
-   *   casco do adversário nunca via a tábua sendo pregada.
-   * - Um rombo fechar no mesmo intervalo em que outro abre deixa o número
-   *   idêntico. A lista do outro lado congelava com um buraco fantasma e sem o
-   *   buraco de verdade, e ficava assim **até a contagem mudar de novo**.
+   * - A shot on top of an open breach **widens** the hole without creating another one.
+   *   The number does not change, and the other side goes on seeing — and computing the
+   *   jet of — a breach of the old size.
+   * - The repair's progress runs from zero to one without touching the number. Whoever
+   *   looked at the opponent's hull never saw the plank being nailed up.
+   * - A breach closing in the same interval another one opens leaves the number
+   *   identical. The list on the other side froze with a phantom hole and without the
+   *   real one, and stayed that way **until the count changed again**.
    *
-   * A assinatura cobre o que **muda de uma vez**: quais rombos existem, quanto
-   * cada um vale e quais tábuas estão pregadas. O progresso do reparo fica de
-   * fora de propósito — ele anda continuamente, e pô-lo aqui faria a lista
-   * inteira ser reenviada quinze vezes por segundo enquanto alguém trabalha. Do
-   * lado de lá isso não seria só tráfego: quem está pregando a tábua prevê o
-   * próprio progresso, e ser corrigido quinze vezes por segundo por um valor de
-   * meia ida e volta atrás daria uma barra em dente de serra na mão de quem
-   * está segurando o botão. Quem cuida do progresso é `RESEND_EVERY`.
+   * The signature covers what **changes all at once**: which breaches exist, how much
+   * each one is worth and which planks are nailed up. The repair's progress is left out
+   * on purpose — it advances continuously, and putting it here would have the whole list
+   * resent fifteen times a second while somebody works. Over there that would not only be
+   * traffic: whoever is nailing the plank predicts their own progress, and being
+   * corrected fifteen times a second by a value half a round trip old would give a
+   * sawtooth bar in the hand of whoever is holding the button. What takes care of the
+   * progress is `RESEND_EVERY`.
    *
-   * Quantizar igual ao codec é o que impede a lista de ser reenviada por causa
-   * de uma diferença que não caberia no fio de qualquer forma. O resultado é um
-   * inteiro de 32 bits misturado por multiplicação; uma colisão custa um
-   * instantâneo atrasado, e não um estado errado para sempre, porque o campo é
-   * reenviado na mudança seguinte e no batimento.
+   * Quantizing the same way the codec does is what keeps the list from being resent
+   * because of a difference that would not fit on the wire anyway. The result is a 32-bit
+   * integer mixed by multiplication; a collision costs one late snapshot, and not a wrong
+   * state forever, because the field is resent on the next change and on the heartbeat.
    */
   private damageKey(ship: Ship): number {
     const { damage } = ship;
@@ -131,33 +129,31 @@ export class HostSession {
   }
 
   /**
-   * Depois do passo: manda o mundo, se for a vez.
+   * After the step: it sends the world, if it is time.
    *
-   * A lista de rombos e tábuas só entra quando **mudou** — ver `damageKey`. É um
-   * campo condicional, não uma diferença: o quadro continua se lendo sozinho.
+   * The list of breaches and planks only goes in when it **changed** — see `damageKey`.
+   * It is a conditional field, not a delta: the frame still reads on its own.
    */
   afterStep(tick: number): void {
-    // ⚠️ **Acabou é acabou, e o instantâneo para aqui.** `Match.tick` congela
-    // quando a partida sai de `fighting`, então a conta de cadência abaixo passa
-    // a dar o mesmo resultado para sempre. Sem esta linha, o host que terminasse
-    // num tick múltiplo de quatro mandava sessenta instantâneos por segundo de
-    // um mundo parado — cada um deles um request pago na sala — até alguém
-    // fechar a aba.
+    // ⚠️ **Over is over, and the snapshot stops here.** `Match.tick` freezes when the
+    // match leaves `fighting`, so the cadence arithmetic below starts giving the same
+    // result forever. Without this line, a host that finished on a tick that was a
+    // multiple of four sent sixty snapshots per second of a frozen world — each of them a
+    // billed request on the room — until somebody closed the tab.
     if (this.sentOver) return;
 
     const over = this.match.state === 'won' || this.match.state === 'lost';
 
-    // ⚠️ **E o fim não espera a vez.**
+    // ⚠️ **And the end does not wait its turn.**
     //
-    // Este era o defeito mais silencioso do duelo em rede, e ele engolia três de
-    // cada quatro partidas. O naufrágio cai num passo qualquer; o instantâneo
-    // sai de quatro em quatro. Se o casco fosse ao fundo num tick que não fosse
-    // múltiplo de quatro, esta função saía aqui — e como `Match.tick` para de
-    // andar no mesmo instante, ela ia sair aqui **em todos os passos
-    // seguintes**, para sempre. O resultado nunca subia pelo lobby, e o lobby é
-    // quem encerra a sala dos dois lados: os dois jogadores ficavam olhando um
-    // mar congelado, sem tela de fim, sem erro e sem nada a fazer além de
-    // recarregar a página.
+    // This was the quietest defect in the networked duel, and it swallowed three out of
+    // every four matches. The sinking lands on any step; the snapshot goes out every
+    // four. If the hull went down on a tick that was not a multiple of four, this
+    // function bailed out here — and since `Match.tick` stops advancing at the same
+    // instant, it would bail out here **on every following step**, forever. The result
+    // never went up through the lobby, and the lobby is what closes the room on both
+    // sides: both players were left staring at a frozen sea, with no end screen, no error
+    // and nothing to do but reload the page.
     if (!over && tick % SNAPSHOT_EVERY !== 0) return;
 
     const keys: [number, number] = [
@@ -175,8 +171,8 @@ export class HostSession {
     this.client.sendFrame(
       encodeSnapshot(this.match, {
         bufferDepth: this.buffer.depth,
-        // Zerado ao ser lido: o que vai no fio é sempre "desde o último
-        // instantâneo", que é a janela que o cliente sabe interpretar.
+        // Zeroed on read: what goes on the wire is always "since the last snapshot",
+        // which is the window the client knows how to interpret.
         starved: this.buffer.takeStarvedSinceReport(),
         ackTick: this.buffer.lastConsumedTick,
         includeBreaches,
@@ -185,13 +181,13 @@ export class HostSession {
       }),
     );
 
-    // A fila de eventos é esvaziada **aqui**, e só aqui: ela existe justamente
-    // para acumular entre um instantâneo e o próximo. Ver `Match.netEvents`.
+    // The event queue is emptied **here**, and only here: it exists precisely to
+    // accumulate between one snapshot and the next. See `Match.netEvents`.
     this.match.netEvents.length = 0;
 
-    // O resultado sobe uma vez só, pelo lobby: é ele que encerra a sala dos dois
-    // lados. O instantâneo carrega a mesma notícia para o caso de a mensagem de
-    // lobby chegar depois — quem vê primeiro encerra.
+    // The result goes up once only, through the lobby: it is what closes the room on
+    // both sides. The snapshot carries the same news in case the lobby message arrives
+    // later — whoever sees it first closes.
     if (over && !this.sentOver) {
       this.sentOver = true;
       this.client.sendLobby({ t: 'result', winner: this.match.state === 'won' ? 0 : 1 });

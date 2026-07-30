@@ -1,20 +1,19 @@
 /**
- * As balas em voo: um pool de projéteis com física e colisão varrida.
+ * The balls in flight: a pool of projectiles with physics and swept collision.
  *
- * **Por que varrida.** A 95 m/s a bala anda 1,58 m por passo de física. Um casco
- * de 13 cm de tábua tem 8% de chance de ser notado por um teste pontual — a bala
- * atravessaria o navio inteiro entre dois quadros e cairia do outro lado. Cada
- * passo é dividido em quatro, e cada sub-passo testa o **segmento** de onde a
- * bala estava até onde ela foi. É o mesmo motivo pelo qual jogo de tiro varre o
- * projétil em vez de teletransportá-lo.
+ * **Why swept.** At 95 m/s the ball travels 1.58 m per physics step. A hull of 13 cm of
+ * planking has an 8% chance of being noticed by a point test — the ball would go through
+ * the whole ship between two frames and land on the other side. Each step is split into
+ * four, and each substep tests the **segment** from where the ball was to where it went.
+ * It is the same reason a shooter sweeps the projectile instead of teleporting it.
  *
- * **Pool.** Nada é alocado durante o combate: 64 lugares, todos criados no início,
- * e uma `InstancedMesh` única desenha todos numa chamada só. Uma bala "morre"
- * virando um `false` num array.
+ * **Pool.** Nothing is allocated during combat: 64 slots, all created at startup, and a
+ * single `InstancedMesh` draws them all in one call. A ball "dies" by becoming a `false`
+ * in an array.
  *
- * O raio visual é maior que o físico de propósito. Uma bala real de 10 cm a 80 m
- * de distância ocupa meio pixel — some. A colisão usa o raio verdadeiro; o
- * desenho usa um exagero honesto, do mesmo jeito que o Sea of Thieves faz.
+ * The visual radius is larger than the physical one on purpose. A real 10 cm ball at 80 m
+ * takes up half a pixel — it disappears. The collision uses the true radius; the drawing
+ * uses an honest exaggeration, the same way Sea of Thieves does.
  */
 
 import * as THREE from 'three';
@@ -24,37 +23,37 @@ import type { Ship } from '../ship/Ship';
 import type { FireSolution } from '../ship/Cannon';
 import type { WaveField } from '../world/WaveField';
 
-/** Balas simultâneas em voo. Dois navios com dois canhões não chegam perto. */
+/** Simultaneous balls in flight. Two ships with two guns each do not come close. */
 const CAPACITY = 64;
-/** Divisões do passo de física para a varredura. */
+/** Subdivisions of the physics step for the sweep. */
 const SUBSTEPS = 4;
-/** Segundos até a bala desistir, se não bateu em nada. */
+/** Seconds until the ball gives up, if it hit nothing. */
 const MAX_LIFETIME = 14;
-/** Fator de exagero do raio desenhado. */
+/** Exaggeration factor for the drawn radius. */
 const VISUAL_SCALE = 2.4;
-/** Voltas de bisseção para achar onde a bala furou a superfície do mar. */
+/** Bisection rounds to find where the ball pierced the sea's surface. */
 const WATER_REFINE = 6;
 
 export type ImpactKind = 'water' | 'ship';
 
 /**
- * Dono de uma bala que existe só para ser vista. Ver `spawnGhost`.
+ * The owner of a ball that exists only to be seen. See `spawnGhost`.
  *
- * É um nome de navio que nenhum navio tem, e isso basta: `resolveSegment` já pula
- * o casco cujo nome bate com o dono do tiro, e uma bala de enfeite é pulada antes
- * disso.
+ * It is a ship name no ship has, and that is enough: `resolveSegment` already skips the
+ * hull whose name matches the shot's owner, and a decorative ball is skipped before
+ * that.
  */
 const GHOST_OWNER = '\0ghost';
 
 export interface BallImpact {
   kind: ImpactKind;
-  /** Ponto do impacto, no mundo. */
+  /** The point of impact, in the world. */
   readonly position: THREE.Vector3;
-  /** Velocidade da bala no instante do impacto — dita o tamanho do respingo. */
+  /** The ball's velocity at the instant of impact — it sets the splash's size. */
   readonly velocity: THREE.Vector3;
-  /** Preenchido só quando `kind === 'ship'`. */
+  /** Filled in only when `kind === 'ship'`. */
   ship: Ship | null;
-  /** Detalhe do acerto no casco; compartilhado, válido só durante a chamada. */
+  /** Detail of the hit on the hull; shared, valid only during the call. */
   hit: ShipHit | null;
 }
 
@@ -102,9 +101,9 @@ export class CannonballPool {
   readonly mesh: THREE.InstancedMesh;
 
   private readonly balls: Ball[] = [];
-  /** Rascunho do teste de cada navio. */
+  /** Scratch space for each ship's test. */
   private readonly hit: ShipHit = createHit();
-  /** Cópia do acerto mais próximo até agora — ver `resolveSegment`. */
+  /** A copy of the nearest hit so far — see `resolveSegment`. */
   private readonly best: ShipHit = createHit();
   private readonly impact: BallImpact = {
     kind: 'water',
@@ -115,8 +114,8 @@ export class CannonballPool {
   };
 
   constructor(private readonly onImpact: ImpactHandler) {
-    // Icosaedro em vez de esfera UV: 80 triângulos dão silhueta redonda o
-    // bastante num objeto de 12 cm que passa voando, por um sexto do custo.
+    // An icosahedron instead of a UV sphere: 80 triangles give a round enough silhouette
+    // on a 12 cm object flying past, for a sixth of the cost.
     const geometry = new THREE.IcosahedronGeometry(1, 1);
     const material = new THREE.MeshStandardMaterial({
       color: 0x14161a,
@@ -127,8 +126,8 @@ export class CannonballPool {
     this.mesh = new THREE.InstancedMesh(geometry, material, CAPACITY);
     this.mesh.name = 'cannonballs';
     this.mesh.castShadow = true;
-    // A caixa envolvente da malha fica na origem enquanto as instâncias voam a
-    // centenas de metros; deixar o culling ligado apagaria todas as balas.
+    // The mesh's bounding box stays at the origin while the instances fly hundreds of
+    // meters away; leaving culling on would erase every ball.
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
@@ -148,7 +147,7 @@ export class CannonballPool {
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 
-  /** Quantas balas estão no ar. Só o overlay de depuração usa. */
+  /** How many balls are in the air. Only the debug overlay uses it. */
   get activeCount(): number {
     let count = 0;
     for (const ball of this.balls) if (ball.active) count++;
@@ -156,10 +155,10 @@ export class CannonballPool {
   }
 
   /**
-   * Põe no ar o tiro que um canhão acabou de dar.
+   * Puts into the air the shot a cannon has just fired.
    *
-   * Sem lugar livre, o tiro é descartado em silêncio: com 64 lugares isso não
-   * acontece em jogo, e travar o disparo seria pior que perder uma bala.
+   * With no free slot, the shot is discarded in silence: with 64 slots that does not
+   * happen in play, and stalling the shot would be worse than losing a ball.
    */
   spawn(shot: FireSolution): void {
     const ball = this.balls.find((candidate) => !candidate.active);
@@ -176,16 +175,16 @@ export class CannonballPool {
   }
 
   /**
-   * Põe no ar uma bala que **só existe para ser vista**.
+   * Puts into the air a ball that **exists only to be seen**.
    *
-   * É o que o cliente que não simula usa: ele recebe o evento de tiro com a
-   * posição e a velocidade exatas da boca, e a bala voa aqui pela mesma função
-   * pura de balística que o host usa. A trajetória sai idêntica — e mais suave do
-   * que se a posição viesse pelo fio quinze vezes por segundo.
+   * It is what the client that does not simulate uses: it receives the shot event with
+   * the muzzle's exact position and velocity, and the ball flies here through the same
+   * pure ballistics function the host uses. The trajectory comes out identical — and
+   * smoother than if the position came over the wire fifteen times a second.
    *
-   * O que ela **não** faz é acertar. Respingo, lasca, som e rombo chegam todos
-   * pela lista de eventos do host, e uma bala que também os disparasse aqui
-   * duplicaria os quatro. Ver `GHOST_OWNER`.
+   * What it does **not** do is hit. Splash, splinter, sound and breach all arrive through
+   * the host's event list, and a ball that also fired them here would duplicate all four.
+   * See `GHOST_OWNER`.
    */
   spawnGhost(position: THREE.Vector3, velocity: THREE.Vector3, mass: number, radius: number): void {
     const ball = this.balls.find((candidate) => !candidate.active);
@@ -201,15 +200,15 @@ export class CannonballPool {
     ball.owner = GHOST_OWNER;
   }
 
-  /** Tira todas as balas do ar — fim de partida, respawn. */
+  /** Takes every ball out of the air — end of match, respawn. */
   clear(): void {
     for (const ball of this.balls) ball.active = false;
   }
 
   /**
-   * Um passo de física de todas as balas.
+   * One physics step for every ball.
    *
-   * @param ships todos os navios em jogo; o dono do tiro é pulado.
+   * @param ships every ship in play; the shot's owner is skipped.
    */
   fixedUpdate(dt: number, ships: readonly Ship[], waves: WaveField): void {
     const sub = dt / SUBSTEPS;
@@ -229,14 +228,13 @@ export class CannonballPool {
         stepBallistic(ball.position, ball.velocity, ball.dragK, sub);
         _to.copy(ball.position);
 
-        // Bala de enfeite não colide com nada: quem decide o que ela acerta é o
-        // host, e a notícia chega pela lista de eventos. Ver `spawnGhost`.
+        // A decorative ball collides with nothing: what decides what it hits is the
+        // host, and the news arrives through the event list. See `spawnGhost`.
         //
-        // Mas ela **para no mar**, e não por realismo: sem isso, uma bala que
-        // erra o alvo continua descendo por catorze segundos debaixo d'água, e a
-        // superfície do oceano é translúcida o bastante para se ver o borrão
-        // afundando. O respingo continua sendo do host — aqui só se recolhe a
-        // bala, sem anunciar nada.
+        // But it **stops at the sea**, and not out of realism: without that, a ball that
+        // misses goes on descending for fourteen seconds underwater, and the ocean's
+        // surface is translucent enough for the sinking blur to be seen. The splash is
+        // still the host's — here the ball is only collected, with nothing announced.
         if (ball.owner === GHOST_OWNER) {
           if (ball.position.y <= waves.sampleHeight(ball.position.x, ball.position.z)) {
             ball.active = false;
@@ -250,9 +248,9 @@ export class CannonballPool {
   }
 
   /**
-   * Escreve as matrizes das instâncias, interpolando entre os dois últimos
-   * passos de física — a bala é o objeto mais rápido da cena e sem isso ela
-   * anda em degraus de 1,6 m quando o render está acima de 60 Hz.
+   * Writes the instances' matrices, interpolating between the last two physics steps —
+   * the ball is the fastest object in the scene and without this it moves in 1.6 m steps
+   * when the render is above 60 Hz.
    */
   syncModel(alpha: number): void {
     for (let i = 0; i < CAPACITY; i++) {
@@ -270,7 +268,7 @@ export class CannonballPool {
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 
-  /** Percorre as balas vivas. O rastro de fumaça é quem usa. */
+  /** Walks the live balls. The smoke trail is what uses it. */
   forEachActive(visit: (position: THREE.Vector3, velocity: THREE.Vector3) => void): void {
     for (const ball of this.balls) {
       if (ball.active) visit(ball.position, ball.velocity);
@@ -278,14 +276,13 @@ export class CannonballPool {
   }
 
   /**
-   * Testa o segmento `_from → _to` contra navios e contra o mar.
+   * Tests the segment `_from → _to` against ships and against the sea.
    *
-   * A ordem importa: o navio vence o mar mesmo quando o ponto de impacto está
-   * abaixo da linha d'água, porque um tiro que entra pela borda molhada do casco
-   * é justamente o que abre rombo — se o mar ganhasse, todo tiro rasante viraria
-   * respingo.
+   * The order matters: the ship beats the sea even when the impact point is below the
+   * waterline, because a shot that enters through the hull's wet edge is precisely what
+   * opens a breach — if the sea won, every grazing shot would become a splash.
    *
-   * @returns `true` quando a bala morreu neste segmento.
+   * @returns `true` when the ball died on this segment.
    */
   private resolveSegment(ball: Ball, ships: readonly Ship[], waves: WaveField): boolean {
     let closest = Infinity;
@@ -296,8 +293,8 @@ export class CannonballPool {
       if (!raycastShip(ship.body, _from, _to, this.hit)) continue;
       if (this.hit.fraction >= closest) continue;
 
-      // Copiado, e não referenciado: o navio seguinte sobrescreve `this.hit` no
-      // próprio teste, e a bala acerta quem estava mais perto, não o último.
+      // Copied, and not referenced: the next ship overwrites `this.hit` in its own test,
+      // and the ball hits whoever was nearest, not the last one.
       closest = this.hit.fraction;
       copyHit(this.hit, this.best);
       target = ship;
@@ -332,11 +329,11 @@ export class CannonballPool {
   }
 
   /**
-   * Onde exatamente o segmento cruzou a superfície do mar.
+   * Where exactly the segment crossed the sea's surface.
    *
-   * Bisseção sobre a própria função de onda, e não sobre `y = 0`: com ondas de
-   * 1,8 m de altura significativa, tratar o mar como plano põe o respingo até um
-   * metro fora do lugar — bem visível quando a bala cai numa crista.
+   * Bisection over the wave function itself, and not over `y = 0`: with a significant
+   * wave height of 1.8 m, treating the sea as flat puts the splash up to a meter out of
+   * place — plainly visible when the ball lands on a crest.
    */
   private findSplash(waves: WaveField): THREE.Vector3 {
     let low = 0;
