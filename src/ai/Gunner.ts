@@ -1,69 +1,66 @@
 /**
- * O artilheiro bot: uma peça, um alvo, e a decisão de quando soltar o tiro.
+ * The bot gunner: one gun, one target, and the decision of when to let the shot go.
  *
- * Ele usa **o mesmo solucionador que o teste de balística valida** — nada de
- * parábola de vácuo nem de "acerta com X% de chance". O caminho é o de um
- * artilheiro de verdade:
+ * It uses **the same solver the ballistics test validates** — no vacuum parabola and no
+ * "hits with X% chance". The path is a real gunner's:
  *
- * 1. Onde o alvo vai estar quando a bala chegar lá (`solveIntercept`).
- * 2. Que elevação e que azimute levam a bala até aquele ponto, **com arrasto**.
- * 3. Que travessia e que elevação *da carreta* apontam a alma naquela direção
- *    agora, com o navio na atitude em que ele está (`Cannon.solveAim`).
- * 4. Girar a peça para lá, no ritmo que dois braços num espeque conseguem.
- * 5. Esperar. E é o passo 5 que faz o combate parecer combate.
+ * 1. Where the target will be when the ball gets there (`solveIntercept`).
+ * 2. Which elevation and which azimuth take the ball to that point, **with drag**.
+ * 3. Which traverse and which elevation *of the carriage* point the bore in that
+ *    direction now, with the ship in the attitude it is in (`Cannon.solveAim`).
+ * 4. Turning the gun there, at the rate two arms on a handspike can manage.
+ * 5. Waiting. And it is step 5 that makes the combat feel like combat.
  *
- * ## Um homem, duas mãos, um serviço de cada vez
+ * ## One man, two hands, one job at a time
  *
- * **A medição que motivou esta seção:** o intervalo entre tiros do capitão Lenda era
- * de 1,533 s, e o *mínimo* era exatamente igual à *mediana* — 1,533 s também. Um
- * artilheiro que nunca, em oitenta tiros, perde um décimo de segundo não é um
- * artilheiro: é um metrônomo. E era isso que se sentia jogando contra ele.
+ * **The measurement that motivated this section:** the Legend captain's interval between
+ * shots was 1.533 s, and the *minimum* was exactly equal to the *median* — 1.533 s as
+ * well. A gunner who never, in eighty shots, loses a tenth of a second is not a gunner:
+ * he is a metronome. And that is what it felt like playing against him.
  *
- * O erro não estava num número mal escolhido, e sim numa omissão: o único custo de
- * um ciclo de tiro era o tempo de socar a bala, e ele corria **em paralelo** com a
- * pontaria e com o recuo. O servente carregava, apontava e mirava tudo ao mesmo
- * tempo, com dois braços que ele não tem. Três coisas passaram a ser serializadas,
- * que é como elas acontecem numa peça de bordo servida por um homem só:
+ * The error was not a badly chosen number, it was an omission: the only cost in a firing
+ * cycle was the time to ram the ball home, and it ran **in parallel** with the aiming and
+ * with the recoil. The server loaded, laid and aimed all at once, with two arms he does
+ * not have. Three things became serialized, which is how they happen on a shipboard gun
+ * served by one man:
  *
- * - **A carreta corre de volta ao batente** antes de a peça aceitar a carga. Isso
- *   vive em `Cannon.beginLoad` porque é da peça, não de quem a serve, e por isso
- *   vale igual para o jogador.
- * - **Ele leva um tempo para largar o espeque e pegar a bala seguinte**
- *   (`servingTime`). É o análogo exato de o jogador ter de notar o tiro e apertar
- *   recarregar.
- * - **Ele não aponta enquanto soca.** Este é o que muda o duelo: quando o serviço
- *   acaba, o alvo andou, e a peça — que gira a 29°/s — tem de reencontrá-lo. Uma
- *   manobra do jogador durante a recarga do inimigo passou a custar caro *para o
- *   inimigo*, que é o que faz manobrar valer a pena.
+ * - **The carriage runs back to its stop** before the gun accepts the charge. That lives
+ *   in `Cannon.beginLoad` because it belongs to the gun, not to whoever serves it, and so
+ *   it applies equally to the player.
+ * - **He takes time to drop the handspike and fetch the next ball** (`servingTime`). It
+ *   is the exact analogue of the player having to notice the shot and press reload.
+ * - **He does not aim while ramming.** This is the one that changes the duel: when the
+ *   service is over, the target has moved, and the gun — which traverses at 29°/s — has
+ *   to find it again. A player maneuvering during the enemy's reload started costing *the
+ *   enemy* dearly, which is what makes maneuvering worth it.
  *
- * O ritmo que sai disso é irregular por construção, e é o ritmo que o texto acima
- * sempre prometeu: o inimigo espera a onda, e agora espera de verdade.
+ * The rhythm that comes out of this is irregular by construction, and it is the rhythm
+ * the text above always promised: the enemy waits for the wave, and now it really waits.
  *
- * ## Por que ele espera, e o que isso produz de graça
+ * ## Why it waits, and what that produces for free
  *
- * A conversão do passo 3 é feita **a cada passo de física**, com a orientação do
- * casco daquele instante. Enquanto o navio caturra e balança, os ângulos que
- * acertam o alvo passeiam; a peça, presa ao convés, não consegue acompanhar. O
- * tiro só sai quando os dois coincidem dentro de `fireTolerance`.
+ * Step 3's conversion is redone **on every physics step**, with the hull's attitude at
+ * that instant. While the ship pitches and rolls, the angles that hit the target wander;
+ * the gun, fixed to the deck, cannot follow. The shot only goes off when the two coincide
+ * within `fireTolerance`.
  *
- * O resultado emergente é exatamente o que a artilharia naval fazia: **atira-se no
- * alto do balanço**, quando o costado do inimigo abre. Ninguém escreveu essa
- * regra aqui — ela cai da geometria. E ela é o que dá ritmo ao duelo: o inimigo
- * não cospe fogo continuamente, ele espera a onda, e o jogador aprende a ler esse
- * compasso.
+ * The emergent result is exactly what naval gunnery did: **you shoot at the top of the
+ * roll**, when the enemy's side opens up. Nobody wrote that rule here — it falls out of
+ * the geometry. And it is what gives the duel its rhythm: the enemy does not spit fire
+ * continuously, it waits for the wave, and the player learns to read that beat.
  *
- * ## Onde entra o erro humano
+ * ## Where the human error comes in
  *
- * O desvio é somado **nos ângulos da peça**, depois da balística, e é sorteado
- * **uma vez por carga** — não por quadro. As duas escolhas importam:
+ * The bias is added **to the gun's angles**, after the ballistics, and it is drawn **once
+ * per charge** — not per frame. Both choices matter:
  *
- * - Nos ângulos, porque é a mão do artilheiro que erra, não a física da bala. Erro
- *   na física daria trajetórias impossíveis; erro na pontaria dá um tiro perfeito
- *   dado para o lugar errado, que é o que acontece.
- * - Uma vez por carga, porque erro sorteado por quadro viraria tremor: a peça
- *   nunca convergiria e a condição de fogo dispararia por sorte. Fixo por tiro, o
- *   artilheiro *acredita* na pontaria dele, aponta com firmeza e erra com
- *   convicção — e dois tiros seguidos erram para o mesmo lado, como erra gente.
+ * - On the angles, because it is the gunner's hand that misses, not the ball's physics.
+ *   Error in the physics would give impossible trajectories; error in the aim gives a
+ *   perfect shot delivered to the wrong place, which is what happens.
+ * - Once per charge, because an error drawn per frame would become jitter: the gun would
+ *   never converge and the firing condition would trigger by luck. Fixed per shot, the
+ *   gunner *believes* in his aim, lays with confidence and misses with conviction — and
+ *   two shots in a row miss to the same side, the way people miss.
  */
 
 import * as THREE from 'three';
@@ -73,68 +70,69 @@ import { BALL_MASS, BALL_RADIUS, MUZZLE_SPEED, type AimAngles } from '../ship/Ca
 import type { Ship } from '../ship/Ship';
 import type { DifficultyPreset } from './Difficulty';
 
-/** Fator de arrasto da bala. Constante — massa e raio não mudam em voo. */
+/** The ball's drag factor. Constant — mass and radius do not change in flight. */
 const DRAG_K = dragFactor(BALL_MASS, BALL_RADIUS);
 
 /**
- * Velocidade de pontaria da peça, em rad/s (~29°/s).
+ * The gun's laying speed, in rad/s (~29°/s).
  *
- * Não é perícia, é ferro: uma carreta de meia tonelada é girada a espeque, e
- * varrer o batente inteiro (52°) leva perto de dois segundos. **Igual para os três
- * capitães**, de propósito — é isso que garante que um alvo cruzando de perto
- * escape da travessia mesmo da Lenda, e que aproximar-se demais seja tática e não
- * suicídio.
+ * It is not skill, it is iron: a half-ton carriage is levered around with a handspike,
+ * and sweeping the whole arc (52°) takes close to two seconds. **The same for all three
+ * captains**, on purpose — it is what guarantees a target crossing close aboard escapes
+ * even the Legend's traverse, and that closing too far is tactics and not suicide.
  */
 const AIM_RATE = 0.5;
 
 /**
- * Fração do tempo de reação do capitão que o servente gasta para largar o espeque,
- * buscar a bala no paiol ao pé da peça e encostá-la na boca.
+ * Fraction of the captain's reaction time the server spends dropping the handspike,
+ * fetching the ball from the ready locker at the gun's foot and bringing it to the
+ * muzzle.
  *
- * Sai de `reaction` em vez de ser número próprio porque é a mesma perícia medida de
- * outro ângulo: quem demora a perceber que a situação virou também demora a perceber
- * que a peça esvaziou. Dá 0,60 s ao Grumete, 0,28 s ao Corsário e 0,11 s à Lenda —
- * a mesma faixa em que um jogador nota o estrondo e leva o dedo à tecla de recarga.
+ * It comes from `reaction` instead of being a number of its own because it is the same
+ * skill measured from another angle: whoever is slow to notice the situation has turned
+ * is also slow to notice the gun has emptied. It gives 0.60 s to the Deckhand, 0.28 s to
+ * the Corsair and 0.11 s to the Legend — the same range in which a player notices the
+ * bang and gets a finger to the reload key.
  *
- * Metade, e não o valor cheio: reagir a um plano tático é decisão, e reagir à peça
- * vazia é reflexo. Cobrar o mesmo dos dois deixaria o Grumete com 1,2 s de pausa
- * antes de *começar* a carregar, o que na tela lê como travamento e não como um
- * marujo devagar.
+ * Half, and not the full value: reacting to a tactical plan is a decision, and reacting
+ * to an empty gun is a reflex. Charging the same for both would leave the Deckhand with
+ * 1.2 s of pause before *starting* to load, which on screen reads as a freeze and not as
+ * a slow sailor.
  */
 const SERVING_REACTION = 0.5;
 
 /**
- * Meia-extensão em que o fogo é distribuído ao longo do alvo, em metros.
+ * Half the extent the fire is spread over along the target, in meters.
  *
- * **Este número já foi uma muleta, e não é mais.** Ele nasceu para compensar um
- * defeito do modelo de avaria: com a fusão de rombos a 90 cm e o teto de vazão fixo
- * por furo, tiro concentrado valia uma fração de tiro varrido, e um artilheiro
- * perfeito que sempre mirava no mesmo ponto causava **dez vezes menos dano** que um
- * mediano cujos erros espalhavam a salva. A IA ganhou a doutrina de varredura e
- * passou a jogar no lado bom daquela curva; o jogador, que não tinha como saber que
- * a curva existia, ficou no lado ruim.
+ * **This number used to be a crutch, and is not one anymore.** It was born to compensate
+ * for a defect in the damage model: with breach merging at 90 cm and a fixed per-hole
+ * inflow ceiling, concentrated fire was worth a fraction of swept fire, and a perfect
+ * gunner who always aimed at the same point did **ten times less damage** than a mediocre
+ * one whose errors spread the salvo. The AI got the sweeping doctrine and started playing
+ * on the good side of that curve; the player, who had no way to know the curve existed,
+ * stayed on the bad side.
  *
- * O defeito foi consertado onde ele morava — ver `MERGE_DISTANCE` e `MAX_JET_SPEED`
- * em `ShipDamage`. Hoje um acerto vale um acerto, caia onde cair, e este número
- * deixou de ser vantagem para ser o que sempre devia ter sido: **doutrina de
- * artilharia naval, e nada além disso.** Varre-se o costado do inimigo porque um
- * casco furado em cinco lugares afunda mais depressa que um furado em um só, e
- * porque a guarnição não sabe de antemão qual tábua vai ceder.
+ * The defect was fixed where it lived — see `MERGE_DISTANCE` and `MAX_JET_SPEED` in
+ * `ShipDamage`. Today one hit is worth one hit, wherever it lands, and this number
+ * stopped being an advantage and became what it should always have been: **naval gunnery
+ * doctrine, and nothing more.** You sweep the enemy's side because a hull holed in five
+ * places sinks faster than one holed in a single place, and because the gun crew does not
+ * know in advance which plank is going to give.
  *
- * ±3 m num casco de 16 m, e não mais ±5: sem a fusão larga para compensar, um
- * espalhamento largo demais só joga tiro na água a meio-navio de distância.
+ * ±3 m on a 16 m hull, and no longer ±5: without the wide merging to compensate, too wide
+ * a spread only throws shot into the water half a ship's length away.
  */
 const FIRE_SPREAD = 3;
 
-/** O que o artilheiro está tentando acertar. */
+/** What the gunner is trying to hit. */
 export interface GunneryTarget {
-  /** Centro do ponto de mira, no mundo. */
+  /** Center of the aim point, in the world. */
   readonly point: THREE.Vector3;
-  /** Velocidade do alvo, no mundo. */
+  /** The target's velocity, in the world. */
   readonly velocity: THREE.Vector3;
   /**
-   * Direção da proa do alvo, no mundo. É o eixo ao longo do qual o fogo é
-   * distribuído — varrer o costado só faz sentido no comprimento dele.
+   * Direction of the target's bow, in the world. It is the axis the fire is spread
+   * along — sweeping the side only makes sense along its length.
    */
   readonly forward: THREE.Vector3;
 }
@@ -146,42 +144,42 @@ const _desiredWorld = new THREE.Vector3();
 const _desiredLocal = new THREE.Vector3();
 
 export class Gunner {
-  /** Distância da boca ao alvo no último passo, em metros. */
+  /** Distance from the muzzle to the target on the last step, in meters. */
   range = Infinity;
-  /** `true` quando a peça consegue apontar no alvo dentro dos batentes. */
+  /** `true` when the gun can point at the target within its stops. */
   bearing = false;
-  /** Tiros que esta peça deu na partida. Telemetria. */
+  /** Shots this gun has fired in the match. Telemetry. */
   shots = 0;
 
   private readonly angles: AimAngles = { traverse: 0, elevation: 0, bears: false };
-  /** Desvio da carga atual, em radianos. Ver a nota sobre erro humano no topo. */
+  /** The current charge's bias, in radians. See the human-error note at the top. */
   private biasTraverse = 0;
   private biasElevation = 0;
-  /** Onde no comprimento do alvo esta carga vai cair, em metros. Ver `FIRE_SPREAD`. */
+  /** Where along the target's length this charge will land, in meters. See `FIRE_SPREAD`. */
   private spread = 0;
   /**
-   * Segundos que o servente já gastou indo buscar a carga seguinte.
+   * Seconds the server has already spent fetching the next charge.
    *
-   * Zera ao largar a peça: quem sai do posto no meio do gesto larga a bala onde
-   * estava, e quem volta recomeça. Guardar o progresso daria ao inimigo uma
-   * recarga adiantada de graça toda vez que ele atravessasse o convés.
+   * It zeroes on leaving the gun: whoever leaves the station mid-gesture drops the ball
+   * where it was, and whoever comes back starts over. Keeping the progress would give the
+   * enemy a free head start on the reload every time it crossed the deck.
    */
   private serving = 0;
 
   constructor(
     private readonly ship: Ship,
-    /** Índice em `ship.cannons`. */
+    /** Index in `ship.cannons`. */
     private readonly index: number,
     private readonly preset: DifficultyPreset,
     private readonly random: () => number,
   ) {}
 
   /**
-   * Um passo de artilharia.
+   * One step of gunnery.
    *
-   * @param manned `false` quando o marujo está em outro posto. Peça sem gente não
-   *   carrega, não aponta e não atira — fica onde foi deixada, e é por isso que a
-   *   alocação de tripulação de `Crew` tem consequência tática.
+   * @param manned `false` when the sailor is at another post. An unmanned gun does not
+   *   load, does not lay and does not fire — it stays where it was left, and that is why
+   *   `Crew`'s crew allocation has tactical consequences.
    */
   fixedUpdate(dt: number, target: GunneryTarget | null, manned: boolean): void {
     const cannon = this.ship.cannons[this.index];
@@ -193,10 +191,10 @@ export class Gunner {
       return;
     }
 
-    // Serve a peça vazia: primeiro o tempo de largar o espeque e trazer a bala,
-    // depois o comando de carga. `Cannon` ainda espera a carreta assentar antes de
-    // deixar o soquete entrar — ver `beginLoad`. O desvio da próxima carga é
-    // sorteado aqui: um tiro, um erro.
+    // Serving the empty gun: first the time to drop the handspike and bring the ball,
+    // then the load command. `Cannon` still waits for the carriage to settle before
+    // letting the rammer in — see `beginLoad`. The next charge's bias is drawn here: one
+    // shot, one error.
     if (cannon.state === 'empty') {
       this.serving += dt;
       if (
@@ -206,26 +204,26 @@ export class Gunner {
         this.serving = 0;
         this.biasTraverse = gaussian(this.random) * this.preset.aimSigma;
         this.biasElevation = gaussian(this.random) * this.preset.aimSigma;
-        // Uniforme, e não gaussiano: varrer o costado é escolher um ponto novo de
-        // propósito, e uma normal concentraria os tiros no meio-navio — justamente o
-        // que este espalhamento existe para evitar.
+        // Uniform, and not gaussian: sweeping the side means choosing a new point on
+        // purpose, and a normal would concentrate the shots amidships — precisely what
+        // this spread exists to avoid.
         this.spread = (this.random() * 2 - 1) * FIRE_SPREAD;
       }
     } else {
       this.serving = 0;
     }
 
-    // Ponto de mira desta carga: o centro do alvo deslocado ao longo da proa dele.
+    // This charge's aim point: the target's center shifted along its own bow.
     _aim.copy(target.point).addScaledVector(target.forward, this.spread);
 
     cannon.getMuzzleLocal(_muzzle);
     this.ship.body.localToWorld(_muzzle, _muzzle);
     this.range = _muzzle.distanceTo(_aim);
 
-    // Velocidade **relativa**, como `solveIntercept` pede: a bala já nasce com a
-    // velocidade do navio que atira somada, então o que sobra a liderar é o
-    // quanto o alvo se desloca em relação a nós. `leadFraction` é o quanto deste
-    // raciocínio o capitão consegue fazer — abaixo de 1, ele atira atrás.
+    // **Relative** velocity, as `solveIntercept` asks: the ball is already born with
+    // the firing ship's velocity added in, so what is left to lead is how far the target
+    // moves relative to us. `leadFraction` is how much of that reasoning the captain
+    // manages — below 1, he shoots behind.
     _relative
       .subVectors(target.velocity, this.ship.body.velocity)
       .multiplyScalar(this.preset.leadFraction);
@@ -240,15 +238,15 @@ export class Gunner {
     );
 
     if (!solution) {
-      // Fora de alcance mesmo na elevação máxima: nada a apontar.
+      // Out of range even at maximum elevation: nothing to point at.
       this.bearing = false;
       return;
     }
 
-    // Remonta a direção de mundo a partir dos dois ângulos da solução. O azimute
-    // de `solveIntercept` é `atan2(x, z)`, então a horizontal dele é
-    // `(sen, cos)` — convenção diferente da de `heading`, e trocar as duas aqui
-    // espelha o tiro para o outro bordo.
+    // Rebuilds the world direction from the solution's two angles. `solveIntercept`'s
+    // azimuth is `atan2(x, z)`, so its horizontal is `(sin, cos)` — a different
+    // convention from `heading`'s, and swapping the two here mirrors the shot to the
+    // other side.
     const cosElevation = Math.cos(solution.elevation);
     _desiredWorld.set(
       Math.sin(solution.azimuth) * cosElevation,
@@ -256,7 +254,7 @@ export class Gunner {
       Math.cos(solution.azimuth) * cosElevation,
     );
 
-    // E aqui a atitude do casco entra na conta, de graça.
+    // And here the hull's attitude enters the arithmetic, for free.
     this.ship.body.worldDirToLocal(_desiredWorld, _desiredLocal);
     cannon.solveAim(_desiredLocal, this.angles);
     this.bearing = this.angles.bears;
@@ -264,25 +262,25 @@ export class Gunner {
     const wantTraverse = this.angles.traverse + this.biasTraverse;
     const wantElevation = this.angles.elevation + this.biasElevation;
 
-    // **A peça só é apontada por quem está com as mãos livres.** Enquanto a carreta
-    // corre de volta e a bala é socada, o servente acompanha o alvo com o olho e
-    // não com o espeque; a peça fica onde o tiro anterior a deixou. É daqui que
-    // sai o ritmo irregular do inimigo — e é daqui que sai o prêmio de manobrar
-    // durante a recarga dele. Ver a nota no topo.
+    // **The gun is only laid by somebody with free hands.** While the carriage runs
+    // back and the ball is rammed home, the server follows the target with his eye and
+    // not with the handspike; the gun stays where the previous shot left it. This is
+    // where the enemy's irregular rhythm comes from — and this is where the reward for
+    // maneuvering during its reload comes from. See the note at the top.
     if (!cannon.isLoaded) return;
 
-    // Gira a peça no ritmo do ferro. `aim` já grampeia nos batentes, então pedir
-    // além deles encosta a carreta no limite em vez de dar erro — que é o que uma
-    // peça de verdade faz quando o alvo sai do setor.
+    // Turns the gun at the iron's pace. `aim` already clamps at the stops, so asking
+    // beyond them rests the carriage against the limit instead of raising an error —
+    // which is what a real gun does when the target leaves the arc.
     const step = AIM_RATE * dt;
     cannon.aim(
       clamp(wantTraverse - cannon.traverse, -step, step),
       clamp(wantElevation - cannon.elevation, -step, step),
     );
 
-    // Disciplina de fogo: bala é finita, e tiro longe é bala no mar. É o único
-    // lugar onde `engageRange` age, e é o que faz o Grumete deixar o jogador se
-    // aproximar enquanto a Lenda já está atirando.
+    // Fire discipline: shot is finite, and a long shot is a ball in the sea. It is the
+    // only place `engageRange` acts, and it is what makes the Deckhand let the player
+    // close while the Legend is already firing.
     if (this.range > this.preset.engageRange) return;
     if (!this.angles.bears) return;
 
@@ -294,7 +292,7 @@ export class Gunner {
     this.shots++;
   }
 
-  /** Zera a telemetria para uma partida nova. */
+  /** Zeroes the telemetry for a fresh match. */
   reset(): void {
     this.range = Infinity;
     this.bearing = false;
