@@ -1,36 +1,35 @@
 /**
- * Chuva: riscos de água caindo em volta de quem está olhando.
+ * Rain: streaks of water falling around whoever is looking.
  *
- * ## A ideia que faz isto custar quase nada
+ * ## The idea that makes this cost almost nothing
  *
- * As gotas **não são simuladas**. Elas vivem numa caixa fixa em torno da câmera,
- * e o que se anima é uma única variável: o tempo. A posição de cada gota é uma
- * função do tempo com módulo pela altura da caixa, então uma gota que sai por
- * baixo reaparece em cima sem que ninguém precise testar nada, e a caixa inteira
- * é transladada para a câmera a cada quadro. Não há estado por gota para
- * atualizar, não há alocação e não há laço na CPU — só um uniform de tempo.
+ * The drops are **not simulated**. They live in a fixed box around the camera, and what
+ * is animated is a single variable: time. Each drop's position is a function of time
+ * modulo the box's height, so a drop that leaves at the bottom reappears at the top
+ * without anyone having to test anything, and the whole box is translated to the camera
+ * every frame. There is no per-drop state to update, no allocation and no loop on the
+ * CPU — only a time uniform.
  *
- * O preço é que a chuva não interage com nada: não bate no convés, não se
- * acumula, não é bloqueada pela vela. É o preço certo. O que a chuva precisa
- * fazer é dizer ao jogador, sem texto, que o tempo virou; para isso ela precisa
- * estar em todo lugar e custar zero, e é o que ela faz.
+ * The price is that the rain interacts with nothing: it does not hit the deck, it does
+ * not pool, it is not blocked by the sail. That is the right price. What the rain has to
+ * do is tell the player, with no text, that the weather has turned; for that it has to be
+ * everywhere and cost zero, and that is what it does.
  *
- * ## Por que riscos e não pontos
+ * ## Why streaks and not dots
  *
- * Gota de chuva vista por olho humano (e por câmera) é um **traço**, não um
- * ponto: ela percorre alguns centímetros durante o tempo de exposição. Desenhar
- * pontos dá aquela neve de televisão que nenhum jogo consegue fazer ler como
- * chuva. Cada gota aqui é um segmento vertical, e o comprimento dele cresce com
- * a intensidade — porque chover mais forte é chover mais rápido.
+ * A raindrop seen by a human eye (and by a camera) is a **streak**, not a dot: it travels
+ * a few centimeters during the exposure time. Drawing dots gives that television snow no
+ * game manages to make read as rain. Each drop here is a vertical segment, and its length
+ * grows with the intensity — because raining harder is raining faster.
  */
 
 import * as THREE from 'three';
 
-/** Meia aresta da caixa de chuva, em metros. */
+/** Half the rain box's edge, in meters. */
 const BOX_HALF = 26;
-/** Altura da caixa. Precisa cobrir do convés ao topo do mastro com folga. */
+/** The box's height. It has to cover from the deck to the masthead with room to spare. */
 const BOX_HEIGHT = 30;
-/** Gotas na caixa, no máximo. A densidade visível é modulada pela intensidade. */
+/** Drops in the box, at most. The visible density is modulated by the intensity. */
 const DROP_COUNT = 4200;
 
 const VERTEX_SHADER = /* glsl */ `
@@ -43,45 +42,45 @@ uniform vec2 uWind;
 uniform float uBoxHalf;
 uniform float uBoxHeight;
 
-/** (x, z, semente, fase) da gota; a altura sai do tempo. */
+/** The drop's (x, z, seed, phase); the height comes out of the time. */
 attribute vec4 aSeed;
-/** −1 no topo do risco, +1 no pé. */
+/** −1 at the streak's top, +1 at its foot. */
 attribute float aEnd;
 
 varying float vFade;
 
 void main() {
-  // Chuva forte cai mais rápido: de 14 a 26 m/s.
+  // Heavy rain falls faster: from 14 to 26 m/s.
   float fall = 14.0 + uIntensity * 12.0;
-  // O comprimento do risco é o quanto a gota anda num tempo de exposição.
+  // The streak's length is how far the drop travels in one exposure time.
   float streak = 0.28 + uIntensity * 0.75;
 
-  // Densidade: as gotas de semente alta só entram quando a chuva engrossa. É o
-  // que faz o aguaceiro virar temporal sem trocar de geometria.
+  // Density: the high-seed drops only come in when the rain thickens. It is what makes
+  // the downpour become a storm without swapping geometry.
   vFade = step(aSeed.z, uIntensity) * uIntensity;
 
-  // A queda é o tempo com módulo pela altura da caixa. A fase espalha as gotas
-  // para elas não caírem todas na mesma linha do relógio.
+  // The fall is time modulo the box's height. The phase spreads the drops so they do not
+  // all fall on the same line of the clock.
   float drop = mod(uTime * fall + aSeed.w * uBoxHeight, uBoxHeight);
   float y = uOrigin.y + uBoxHeight * 0.5 - drop;
 
-  // A caixa acompanha a câmera em saltos de meia aresta, e não de forma
-  // contínua: assim as gotas não escorregam junto com o observador, que é o
-  // artefato que denuncia chuva presa na câmera.
+  // The box follows the camera in half-edge jumps, and not continuously: that way the
+  // drops do not slide along with the observer, which is the artifact that gives away
+  // rain pinned to the camera.
   //
-  // Arredonda em vez de truncar, e o passo é metade da aresta: truncando por
-  // aresta inteira, a câmera podia ficar a uma aresta cheia do canto da célula
-  // e saía da caixa — a chuva sumia da tela assim que o navio se afastava da
-  // origem do mundo. Com este passo o observador nunca fica a mais de um quarto
-  // de aresta do centro, e sobra chuva em todas as direções em volta dele.
+  // It rounds instead of truncating, and the step is half the edge: truncating by a whole
+  // edge, the camera could end up a full edge from the cell's corner and leave the box —
+  // the rain disappeared from the screen as soon as the ship moved away from the world's
+  // origin. With this step the observer is never more than a quarter of an edge from the
+  // center, and there is rain left in every direction around them.
   float cell = uBoxHalf;
   vec2 anchor = floor(uOrigin.xz / cell + 0.5) * cell;
   vec2 xz = anchor + aSeed.xy;
 
-  // Inclinação pelo vento: a chuva de temporal cai deitada.
+  // Slant from the wind: storm rain falls sideways.
   xz += uWind * (drop * 0.16);
 
-  // O risco: a ponta de cima fica atrás na trajetória.
+  // The streak: the upper end sits behind along the trajectory.
   y += aEnd * streak * 0.5;
 
   gl_Position = projectionMatrix * viewMatrix * vec4(xz.x, y, xz.y, 1.0);
@@ -108,7 +107,7 @@ export class Rain {
   constructor() {
     const geometry = new THREE.BufferGeometry();
 
-    // Dois vértices por gota: o risco é um segmento.
+    // Two vertices per drop: the streak is a segment.
     const seeds = new Float32Array(DROP_COUNT * 2 * 4);
     const ends = new Float32Array(DROP_COUNT * 2);
     const positions = new Float32Array(DROP_COUNT * 2 * 3);
@@ -116,9 +115,9 @@ export class Rain {
     for (let i = 0; i < DROP_COUNT; i++) {
       const x = (Math.random() * 2 - 1) * BOX_HALF;
       const z = (Math.random() * 2 - 1) * BOX_HALF;
-      // A semente de densidade é o limiar de intensidade em que a gota aparece.
-      // Distribuída pela raiz para a contagem crescer de forma perceptualmente
-      // linear: dobrar a intensidade tem de parecer o dobro de chuva.
+      // The density seed is the intensity threshold at which the drop appears.
+      // Distributed by the square root so the count grows perceptually linearly:
+      // doubling the intensity has to look like twice the rain.
       const threshold = Math.sqrt(Math.random());
       const phase = Math.random();
 
@@ -135,8 +134,8 @@ export class Rain {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 4));
     geometry.setAttribute('aEnd', new THREE.BufferAttribute(ends, 1));
-    // A caixa acompanha a câmera, então nunca sai de campo. Calcular uma esfera
-    // envolvente para ela seria descartá-la por engano.
+    // The box follows the camera, so it never leaves the frustum. Computing a bounding
+    // sphere for it would be culling it by mistake.
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
 
     this.material = new THREE.ShaderMaterial({
@@ -159,15 +158,15 @@ export class Rain {
     this.object = new THREE.LineSegments(geometry, this.material);
     this.object.frustumCulled = false;
     this.object.matrixAutoUpdate = false;
-    // Depois do mar (1) e antes do céu (1000): a chuva é transparente e precisa
-    // do que está atrás dela já desenhado.
+    // After the sea (1) and before the sky (1000): the rain is transparent and needs
+    // what is behind it already drawn.
     this.object.renderOrder = 900;
     this.object.visible = false;
   }
 
   /**
-   * @param intensity 0 (seco) a 1 (temporal).
-   * @param wind vetor do vento no plano, para deitar a chuva.
+   * @param intensity 0 (dry) to 1 (storm).
+   * @param wind the wind's vector in the plane, to slant the rain.
    */
   update(dt: number, camera: THREE.Vector3, intensity: number, wind: THREE.Vector2): void {
     const uniforms = this.material.uniforms;

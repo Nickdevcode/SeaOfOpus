@@ -371,9 +371,9 @@ export class ShipAI {
     return 'engaging';
   }
 
-  /** Qual bordo briga, com histerese para não atravessar o convés à toa. */
+  /** Which side fights, with hysteresis so the sailor does not cross the deck for nothing. */
   private chooseSide(): void {
-    // `relativeBearing < 0` é alvo a boreste, que é o bordo `+1`.
+    // `relativeBearing < 0` is a target to starboard, which is side `+1`.
     const onStarboard = this.relativeBearing < 0;
     const usingStarboard = this.firingSide === 1;
     if (onStarboard === usingStarboard) return;
@@ -383,44 +383,46 @@ export class ShipAI {
   }
 
   /**
-   * Manda o marujo para onde ele é mais necessário — e o traz de volta antes de o
-   * serviço estar pronto.
+   * Sends the sailor where he is most needed — and brings him back before the job is
+   * done.
    *
-   * **O rodízio é a resposta a "não dá para afundar esse navio".** A regra antiga
-   * era um só limiar: descia com o porão em `floodAlarm` e só subia com o casco
-   * fechado *e* o porão seco. Medindo, isso queria dizer que oito rombos na linha
-   * d'água viravam um casco estanque em 25 segundos, sempre, enquanto o timoneiro
-   * seguia governando. O jogador não estava enfrentando um adversário com um par de
-   * mãos: estava enfrentando um estaleiro.
+   * **The rotation is the answer to "you cannot sink that ship".** The old rule was a
+   * single threshold: he went below with the hold at `floodAlarm` and only came up with
+   * the hull closed *and* the hold dry. Measured, that meant eight breaches at the
+   * waterline became a watertight hull in 25 seconds, every time, while the helmsman went
+   * on steering. The player was not facing an opponent with one pair of hands: they were
+   * facing a shipyard.
    *
-   * O que entrou no lugar é a escolha que o jogador faz o tempo todo: **a briga
-   * está lá em cima.** O marujo entrega um turno de porão (`holdShift`) e volta
-   * para a peça, tenha fechado o casco ou não, e deve um turno de canhão
-   * (`gunShift`) antes de poder descer de novo. O casco acumula avaria entre uma
-   * descida e outra — e é nesse acúmulo que uma boa salva do jogador vira uma
-   * vantagem que não se desfaz sozinha.
+   * What went in instead is the choice the player makes all the time: **the fight is up
+   * top.** The sailor delivers one hold shift (`holdShift`) and goes back to the gun,
+   * whether he closed the hull or not, and owes one gun shift (`gunShift`) before he can
+   * go below again. The hull accumulates damage between one trip down and the next — and
+   * it is in that accumulation that a good broadside from the player becomes an advantage
+   * that does not undo itself.
    *
-   * **A exceção é o que mantém a IA esperta.** Com o porão em `BREAK_OFF_FLOOD` o
-   * capitão já largou o combate (`desiredIntent`), e aí não há turno que valha:
-   * salvar o navio passa a ser a única tarefa e o marujo fica embaixo até o casco
-   * fechar. Um inimigo que subisse para a peça com o porão pela metade não seria
-   * mais difícil, seria só suicida.
+   * **The exception is what keeps the AI smart.** With the hold at `BREAK_OFF_FLOOD` the
+   * captain has already broken off the fight (`desiredIntent`), and then no shift is worth
+   * anything: saving the ship becomes the only task and the sailor stays below until the
+   * hull is closed. An enemy who went up to the gun with the hold half full would not be
+   * harder, he would just be suicidal.
    */
   private assignCrew(dt: number): void {
     const damage = this.ship.damage;
     const flood = damage.floodFraction;
-    // Só conta trabalho: o tempo de escada é de `Crew.transit`. Ver `postTime`.
+    // Only work counts: the time on the stairs belongs to `Crew.transit`. See
+    // `postTime`.
     if (this.crew.onStation) this.postTime += dt;
 
     const emergency = this.intent === 'repairing';
 
     if (this.inHold) {
-      // Não há mais o que fazer lá embaixo, e ele sobe antes de o turno acabar. São
-      // duas condições, e a segunda é a que fecha o caso degenerado: o porão tem de
-      // estar no nível que ele aceita levar para o combate (o piso **não** é zero —
-      // ver `bilgeFloor`), e não pode haver buraco que ele **consiga** tapar. Sem
-      // tábua no paiol, um casco furado deixa de ser trabalho: insistir ali prenderia
-      // o marujo num porão em que ele não tem nada a fazer nem nada a bombear.
+      // There is nothing left to do down there, and he comes up before the shift is
+      // over. There are two conditions, and the second is the one that closes the
+      // degenerate case: the hold has to be at the level he is willing to carry into the
+      // fight (the floor is **not** zero — see `bilgeFloor`), and there cannot be a hole
+      // he **can** patch. With no plank in the locker, a holed hull stops being work:
+      // insisting there would trap the sailor in a hold with nothing to do and nothing to
+      // pump.
       const canPatch = damage.breaches.length > 0 && this.ship.hasPlanks;
       const finished = !canPatch && flood < this.preset.bilgeFloor;
       if (finished || (!emergency && this.postTime >= this.preset.holdShift)) {
@@ -441,9 +443,9 @@ export class ShipAI {
     this.crew.orderTo(this.firingSide === 1 ? 'starboard' : 'port');
   }
 
-  // -- navegação ---------------------------------------------------------------
+  // -- navigation --------------------------------------------------------------
 
-  /** O rumo que a intenção atual pede, já corrigido pelo vento. */
+  /** The heading the current intent asks for, already corrected for the wind. */
   private plotCourse(waves: WaveField): number {
     const bearing = wrapAngle(this.ship.heading + this.relativeBearing);
 
@@ -461,13 +463,12 @@ export class ShipAI {
   }
 
   /**
-   * O rumo que põe o alvo na marcação de través corrigida pela distância.
+   * The heading that puts the target on the beam bearing, corrected by the range.
    *
-   * `heading = marcação + bordo · β` sai de `marcação_relativa = marcação −
-   * rumo`: para o alvo cair em `−bordo · β` de marcação relativa, o rumo tem de
-   * ser a marcação mais `bordo · β`. Errar este sinal faz o navio girar para o
-   * lado oposto ao inimigo — e, como a realimentação fica positiva, girar cada
-   * vez mais rápido.
+   * `heading = bearing + side · β` comes out of `relative_bearing = bearing − heading`:
+   * for the target to land at `−side · β` of relative bearing, the heading has to be the
+   * bearing plus `side · β`. Getting this sign wrong makes the ship turn away from the
+   * enemy — and, since the feedback becomes positive, turn faster and faster.
    */
   private broadside(bearing: number, gain: number, limit: number): number {
     const rangeError = this.range - this.preset.standoff;
@@ -476,13 +477,13 @@ export class ShipAI {
   }
 
   /**
-   * Rumo de fuga: o mais rápido entre os que abrem distância.
+   * The escape heading: the fastest among those that open the range.
    *
-   * Fugir na direção oposta ao inimigo é o óbvio e às vezes é o pior — se aquele
-   * rumo for contra o vento, ele foge a 65% da velocidade enquanto o perseguidor
-   * decide o dele. Então entre "de costas para o inimigo" e "vento em popa" ele
-   * escolhe o de popa, desde que este ainda o afaste (menos de 90° do rumo de
-   * fuga puro). É o manual da chalupa perseguida, ao contrário.
+   * Running in the direction opposite the enemy is the obvious choice and sometimes the
+   * worst — if that heading is upwind, he runs at 65% speed while the pursuer picks his
+   * own. So between "back to the enemy" and "wind astern" he picks the one astern,
+   * provided it still opens the range (less than 90° from the pure escape heading). It is
+   * the manual of the pursued sloop, in reverse.
    */
   private escape(bearing: number, waves: WaveField): number {
     const away = wrapAngle(bearing + Math.PI);
@@ -490,26 +491,26 @@ export class ShipAI {
 
     if (Math.abs(angleDelta(away, downwind)) < HALF_PI) return downwind;
 
-    // Nem o rumo de popa serve: mantém o alvo bem pela alheta, que ao menos deixa
-    // um canhão em setor enquanto ele se afasta.
+    // Not even the downwind heading will do: keep the target well on the quarter, which
+    // at least leaves one gun bearing while he draws away.
     return wrapAngle(bearing + this.firingSide * EVADE_BEARING);
   }
 
   /**
-   * Empurra um rumo para fora do cone de vento pela proa.
+   * Pushes a heading out of the no-go cone dead to windward.
    *
-   * Só age quando a geometria pediu um curso dentro do cone: nesse caso ele sai
-   * pela borda **mais próxima**, que é a mesma escolha de quem dá uma guinada de
-   * bordo. O efeito visível é o navio subir contra o vento em ziguezague em vez
-   * de encostar nele e ficar parado com a vela batendo.
+   * It only acts when the geometry asked for a course inside the cone: in that case it
+   * leaves by the **nearest** edge, which is the same choice as whoever tacks. The visible
+   * effect is the ship beating to windward in a zigzag instead of running up into it and
+   * sitting there with the sail flogging.
    */
   private avoidNoGo(course: number, waves: WaveField): number {
     const upwind = wrapAngle(downwindHeading(waves) + Math.PI);
     const off = angleDelta(upwind, course);
     if (Math.abs(off) >= NO_GO_HALF_ANGLE) return course;
 
-    // `off` pode ser exatamente 0 (vento na cara cravado); nesse caso qualquer
-    // bordo serve, e o de boreste é tão bom quanto o outro.
+    // `off` can be exactly 0 (wind dead ahead); in that case either tack will do, and
+    // the starboard one is as good as the other.
     const side = off >= 0 ? 1 : -1;
     return wrapAngle(upwind + side * NO_GO_HALF_ANGLE);
   }

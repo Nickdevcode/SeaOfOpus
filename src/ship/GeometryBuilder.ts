@@ -1,27 +1,27 @@
 /**
- * Acumulador de malha usado por todas as peças do navio.
+ * The mesh accumulator used by every part of the ship.
  *
- * Existe porque quase tudo na Chalupa é uma superfície varrida — casco, convés,
- * amurada, cano de canhão — e escrever `Float32Array` na mão para cada uma delas
- * seria o mesmo laço copiado uma dúzia de vezes.
+ * It exists because almost everything on the sloop is a swept surface — hull, deck,
+ * bulwark, cannon barrel — and writing a `Float32Array` by hand for each of them would be
+ * the same loop copied a dozen times.
  *
- * Duas decisões que valem a explicação:
+ * Two decisions worth explaining:
  *
- * 1. **Cada faixa emitida tem vértices próprios.** Não há reuso entre chamadas,
- *    então a quina entre o costado e a borda falsa nasce dura sem ninguém pedir,
- *    enquanto o interior de cada faixa continua suave. Costurar tudo num índice
- *    global daria menos vértices e um navio com aparência de plástico derretido.
+ * 1. **Every emitted strip has vertices of its own.** There is no reuse between calls, so
+ *    the corner between the side and the false rail is born hard without anyone asking,
+ *    while the interior of each strip stays smooth. Stitching everything into a global
+ *    index would give fewer vertices and a ship that looks like melted plastic.
  *
- * 2. **As normais saem da área dos triângulos.** O produto vetorial dos lados já
- *    é proporcional à área, então somá-lo sem normalizar pondera cada face pela
- *    própria importância — e triângulos degenerados (a quilha, onde as duas
- *    metades do casco se encontram em x = 0) contribuem com zero e somem
- *    sozinhos, em vez de virarem `NaN`.
+ * 2. **The normals come out of the triangles' area.** The cross product of the sides is
+ *    already proportional to the area, so summing it without normalizing weights each
+ *    face by its own importance — and degenerate triangles (the keel, where the hull's
+ *    two halves meet at x = 0) contribute zero and disappear on their own, instead of
+ *    turning into `NaN`.
  */
 
 import * as THREE from 'three';
 
-/** Um vértice em construção: posição e UV. A normal é calculada no fim. */
+/** A vertex under construction: position and UV. The normal is computed at the end. */
 export interface Vertex {
   x: number;
   y: number;
@@ -50,13 +50,13 @@ export class GeometryBuilder {
     return index;
   }
 
-  /** Triângulo avulso, na ordem anti-horária vista de fora. */
+  /** A loose triangle, in counter-clockwise order seen from outside. */
   addTriangle(a: Vertex, b: Vertex, c: Vertex): void {
     const ia = this.push(a);
     this.indices.push(ia, this.push(b), this.push(c));
   }
 
-  /** Quadrilátero, dividido em dois triângulos. */
+  /** A quad, split into two triangles. */
   addQuad(a: Vertex, b: Vertex, c: Vertex, d: Vertex): void {
     const ia = this.push(a);
     const ib = this.push(b);
@@ -66,11 +66,11 @@ export class GeometryBuilder {
   }
 
   /**
-   * Costura duas fileiras de vértices numa faixa de quadriláteros.
+   * Stitches two rows of vertices into a strip of quads.
    *
-   * As fileiras precisam ter o mesmo comprimento. `flip` inverte a orientação —
-   * é o que transforma a superfície externa do casco na interna sem duplicar a
-   * função que gera os pontos.
+   * The rows have to be the same length. `flip` reverses the orientation — it is what
+   * turns the hull's outer surface into the inner one without duplicating the function
+   * that generates the points.
    */
   addStrip(rowA: readonly Vertex[], rowB: readonly Vertex[], flip = false): void {
     const count = Math.min(rowA.length, rowB.length);
@@ -85,10 +85,10 @@ export class GeometryBuilder {
   }
 
   /**
-   * Superfície paramétrica varrida em duas direções.
+   * A parametric surface swept in two directions.
    *
-   * `point(s, t)` devolve o vértice; `s` corre ao longo de uma direção e `t` da
-   * outra, ambos em 0..1. É a forma de praticamente todo o casco.
+   * `point(s, t)` returns the vertex; `s` runs along one direction and `t` along the
+   * other, both in 0..1. It is the shape of practically the whole hull.
    */
   addSurface(
     segmentsS: number,
@@ -106,7 +106,7 @@ export class GeometryBuilder {
     }
   }
 
-  /** Caixa alinhada aos eixos, com UV em metros para a textura ladrilhar. */
+  /** An axis-aligned box, with UV in meters so the texture tiles. */
   addBox(
     center: THREE.Vector3 | { x: number; y: number; z: number },
     size: { x: number; y: number; z: number },
@@ -143,11 +143,11 @@ export class GeometryBuilder {
   }
 
   /**
-   * Sólido de revolução em torno de +Y, com o raio dado por um perfil.
+   * A solid of revolution around +Y, with the radius given by a profile.
    *
-   * Mastro, verga, cabo de canhão, cabrestante e aduela de barril são todos
-   * isto: um raio que varia com a altura. `profile(h)` recebe 0..1 do pé ao topo
-   * e devolve o raio em metros.
+   * Mast, yard, cannon barrel, capstan and barrel stave are all this: a radius that
+   * varies with height. `profile(h)` receives 0..1 from foot to top and returns the
+   * radius in meters.
    */
   addLathe(
     base: { x: number; y: number; z: number },
@@ -200,11 +200,11 @@ export class GeometryBuilder {
   /**
    * Cilindro (ou tronco de cone) entre dois pontos quaisquer.
    *
-   * É a peça de cordame do navio: enxárcias, estais, adriças e as próprias
-   * amarras da âncora são todas isto. Como o eixo é arbitrário, a base ortonormal
-   * é construída na hora a partir do eixo mais distante da direção — pegar sempre
-   * o mesmo vetor de referência produziria produto vetorial nulo em cabos
-   * verticais, que é justamente o caso mais comum aqui.
+   * It is the ship's rigging piece: shrouds, stays, halyards and the anchor's own cable
+   * are all this. Since the axis is arbitrary, the orthonormal basis is built on the spot
+   * from whichever axis is furthest from the direction — always taking the same reference
+   * vector would produce a null cross product on vertical lines, which is precisely the
+   * most common case here.
    */
   addTube(
     from: THREE.Vector3,
@@ -240,10 +240,10 @@ export class GeometryBuilder {
   }
 
   /**
-   * Toro no plano XY, com eixo em +Z.
+   * A torus in the XY plane, with its axis along +Z.
    *
-   * O plano é esse porque a peça que precisa dele é o aro do timão, que fica em
-   * pé virado para a popa e gira em torno do eixo proa-popa.
+   * That is the plane because the piece that needs it is the helm's rim, which stands
+   * upright facing aft and turns around the fore-and-aft axis.
    */
   addTorusZ(
     center: { x: number; y: number; z: number },
@@ -272,7 +272,7 @@ export class GeometryBuilder {
     );
   }
 
-  /** Tampa circular no plano XZ, virada para cima (`up`) ou para baixo. */
+  /** A circular cap in the XZ plane, facing up (`up`) or down. */
   addDisc(
     center: { x: number; y: number; z: number },
     radius: number,
@@ -298,14 +298,14 @@ export class GeometryBuilder {
         Math.cos(a1) * radius * uvScale,
         Math.sin(a1) * radius * uvScale,
       );
-      // O ângulo cresce de +X para +Z, então a ordem direta dá a normal para
-      // baixo; virar a ordem é o que faz `up` significar o que o nome diz.
+      // The angle grows from +X toward +Z, so the direct order gives a downward normal;
+      // reversing the order is what makes `up` mean what its name says.
       if (up) this.addTriangle(middle, p1, p0);
       else this.addTriangle(middle, p0, p1);
     }
   }
 
-  /** Aplica uma transformação a tudo que já foi acumulado a partir de `from`. */
+  /** Applies a transform to everything accumulated from `from` onward. */
   transformFrom(fromVertex: number, matrix: THREE.Matrix4): void {
     const p = new THREE.Vector3();
     for (let i = fromVertex; i < this.vertexCount; i++) {
@@ -318,12 +318,12 @@ export class GeometryBuilder {
   }
 
   /**
-   * Fecha a malha e calcula as normais ponderadas por área.
+   * Closes the mesh and computes the area-weighted normals.
    *
-   * Não usa `computeVertexNormals` do three só por um motivo: ele normaliza a
-   * normal de cada face antes de somar, o que dá peso igual a um triângulo
-   * enorme e a uma lasca — e na quilha, onde os triângulos têm área zero,
-   * normalizar produz `NaN` que se espalha para os vizinhos.
+   * It does not use three's `computeVertexNormals` for one reason only: it normalizes
+   * each face's normal before summing, which gives equal weight to a huge triangle and to
+   * a sliver — and at the keel, where the triangles have zero area, normalizing produces
+   * a `NaN` that spreads to the neighbors.
    */
   toGeometry(): THREE.BufferGeometry {
     const count = this.vertexCount;
@@ -360,8 +360,8 @@ export class GeometryBuilder {
         normals[i * 3 + 1] /= length;
         normals[i * 3 + 2] /= length;
       } else {
-        // Vértice que só participa de triângulos degenerados: qualquer normal
-        // serve, e para cima é a que menos chama atenção.
+        // A vertex that only takes part in degenerate triangles: any normal will do, and
+        // up is the one that draws the least attention.
         normals[i * 3 + 1] = 1;
       }
     }
@@ -371,7 +371,7 @@ export class GeometryBuilder {
     geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     const uv = new THREE.BufferAttribute(new Float32Array(this.uvs), 2);
     geometry.setAttribute('uv', uv);
-    // Segundo conjunto para o `aoMap`, que o three amostra por `uv1`.
+    // A second set for the `aoMap`, which three samples through `uv1`.
     geometry.setAttribute('uv1', uv);
     geometry.setIndex(this.indices);
     geometry.computeBoundingSphere();
