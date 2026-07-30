@@ -280,14 +280,14 @@ function simulate(
     hostTick++;
     const applied = buffer.consume(hostTick);
     consumed++;
-    // Anotado pelo **carimbo de origem**, e não pelo passo do host: `claimAhead`
-    // pode entregar o comando num passo vizinho, e ele continua sendo o comando
-    // que o jogador deu. Ver `InputBuffer.appliedTick`.
+    // Recorded by the **origin stamp**, and not by the host's step: `claimAhead` can
+    // deliver the command on a neighboring step, and it is still the command the player
+    // gave. See `InputBuffer.appliedTick`.
     if (buffer.appliedTick >= 0) {
       arrived.set(buffer.appliedTick, (arrived.get(buffer.appliedTick) ?? 0) | applied.pressed);
     }
 
-    // --- host: manda instantâneo ---
+    // --- host: sends a snapshot ---
     if (hostTick % SNAPSHOT_EVERY === 0) clock.onSnapshot(hostTick, buffer.depth);
     if (step === WARMUP - 1) starvesAtWarmup = buffer.starves;
   }
@@ -309,7 +309,7 @@ function simulate(
   };
 }
 
-/** Quantos bits ligados há num inteiro. Cada bit é um aperto do jogador. */
+/** How many bits are set in an integer. Each bit is one press by the player. */
 function popcount(bits: number): number {
   let count = 0;
   for (let value = bits; value !== 0; value >>>= 1) count += value & 1;
@@ -319,131 +319,131 @@ function popcount(bits: number): number {
 export function runNetClockTests(): TestReport {
   const cases: TestCase[] = [];
 
-  // --- 1. o relógio corrigido alimenta o host ---------------------------------
-  // Alguma fome no começo é esperada e correta: até o primeiro instantâneo
-  // chegar, o cliente nem sabe em que passo o host está, e o avanço ainda não se
-  // acertou com a latência. O que não pode é a fome continuar depois disso —
-  // então o que se mede é o **regime**, não o total.
+  // --- 1. the corrected clock feeds the host ----------------------------------
+  // Some starvation at the start is expected and correct: until the first snapshot
+  // arrives, the client does not even know what step the host is on, and the lead has not
+  // yet settled against the latency. What cannot happen is the starvation continuing after
+  // that — so what gets measured is the **steady state**, not the total.
   for (const latency of [1, 3, 9]) {
     const run = simulate(new GuestClock(), latency);
     const rate = run.lateStarves / run.lateConsumed;
     cases.push({
-      nome: `relógio corrigido · ${latency} passos de rede`,
-      medido: `${run.lateStarves} fomes em ${run.lateConsumed} passos (${(rate * 100).toFixed(1)}%)`,
-      esperado: '< 5% depois de estabilizar',
-      erro: rate < 0.05 ? '—' : 'o host segue simulando sem comando do outro lado',
+      nome: `corrected clock · ${latency} steps of network`,
+      medido: `${run.lateStarves} starvations in ${run.lateConsumed} steps (${(rate * 100).toFixed(1)}%)`,
+      esperado: '< 5% after settling',
+      erro: rate < 0.05 ? '—' : 'the host goes on simulating with no command from the other side',
       passou: rate < 0.05,
     });
   }
 
-  // --- 1b. nenhum comando se perde na correção do relógio ----------------------
+  // --- 1b. no command is lost to the clock's correction ------------------------
   //
-  // O caso que este arquivo passou a existir para provar. Contar fome não bastava
-  // e nunca bastou: uma correção de relógio **para baixo** repete o carimbo, o
-  // host descarta o segundo quadro como duplicata e o comando daquele passo some
-  // sem que nenhum contador se mexa. Uma correção **para cima** abre um buraco, e
-  // esse sim vira fome — que o cliente lê como "preciso correr mais à frente", o
-  // que provoca mais correção e mais buraco. A catraca girava até o teto de
-  // avanço, e do lado de lá isso se vê como um marujo que anda sem obedecer e é
-  // puxado de volta a cada instantâneo.
+  // The case this file came to exist to prove. Counting starvation was not enough and
+  // never was: a **downward** clock correction repeats the stamp, the host discards the
+  // second frame as a duplicate and that step's command disappears without any counter
+  // moving. An **upward** correction opens a gap, and that one does become starvation —
+  // which the client reads as "I have to run further ahead", which causes more correction
+  // and more gap. The ratchet turned all the way to the lead ceiling, and from over there
+  // that looks like a sailor who walks without obeying and gets yanked back on every
+  // snapshot.
   //
-  // O que se mede aqui é o jogador, não o host: de cada comando carimbado,
-  // quantos o host chegou a aplicar. Ver `InputOutbox` para a costura.
+  // What gets measured here is the player, not the host: of every stamped command, how
+  // many the host actually applied. See `InputOutbox` for the stitching.
   {
     const run = simulate(new DriftingClock(), 3);
     const lost = run.stamped - run.delivered;
     cases.push({
-      nome: 'costura · relógio corrigindo não come comando',
-      medido: `${lost} apertos perdidos em ${run.stamped}`,
-      esperado: '0 — a janela costura buraco e duplicata',
-      erro: lost === 0 ? '—' : 'cada correção de relógio custa um comando do jogador',
+      nome: 'stitching · a correcting clock eats no command',
+      medido: `${lost} presses lost out of ${run.stamped}`,
+      esperado: '0 — the window stitches gap and duplicate',
+      erro: lost === 0 ? '—' : 'every clock correction costs the player one command',
       passou: lost === 0,
     });
 
     const rate = run.lateStarves / run.lateConsumed;
     cases.push({
-      nome: 'costura · relógio corrigindo não provoca fome',
-      medido: `${run.lateStarves} fomes em ${run.lateConsumed} passos (${(rate * 100).toFixed(1)}%)`,
-      esperado: '< 2% — sem buraco não há o que faltar',
-      erro: rate < 0.02 ? '—' : 'o buraco do relógio virou fome, e fome faz o avanço subir',
+      nome: 'stitching · a correcting clock causes no starvation',
+      medido: `${run.lateStarves} starvations in ${run.lateConsumed} steps (${(rate * 100).toFixed(1)}%)`,
+      esperado: '< 2% — with no gap there is nothing to be missing',
+      erro: rate < 0.02 ? '—' : 'the clock gap became starvation, and starvation pushes the lead up',
       passou: rate < 0.02,
     });
   }
 
-  // --- 1c. um buraco de um passo é fechado pela fila ---------------------------
+  // --- 1c. a one-step gap is closed by the queue -------------------------------
   //
-  // O outro lado da mesma moeda, medido de dentro do `InputBuffer`: quando o
-  // quadro pedido não veio mas o **seguinte** já está em mãos, ele não vem mais —
-  // a rede entrega em ordem. Repetir o comando anterior nesse caso é jogar fora o
-  // comando certo, que está guardado a um passo de distância.
+  // The other side of the same coin, measured from inside `InputBuffer`: when the
+  // requested frame did not arrive but the **next** one is already in hand, it is not
+  // coming — the network delivers in order. Repeating the previous command in that case is
+  // throwing away the right command, which is sitting one step away.
   {
     const gap = new InputBuffer();
-    const primeiro = createInputFrame();
-    primeiro.tick = 1;
-    primeiro.held = InputBit.MoveForward;
-    gap.push(primeiro);
+    const first = createInputFrame();
+    first.tick = 1;
+    first.held = InputBit.MoveForward;
+    gap.push(first);
 
-    const terceiro = createInputFrame();
-    terceiro.tick = 3;
-    terceiro.held = InputBit.MoveBack;
-    terceiro.pressed = InputBit.Fire;
-    gap.push(terceiro);
+    const third = createInputFrame();
+    third.tick = 3;
+    third.held = InputBit.MoveBack;
+    third.pressed = InputBit.Fire;
+    gap.push(third);
 
     gap.consume(1);
-    const noBuraco = gap.consume(2);
-    const fechou =
+    const inTheGap = gap.consume(2);
+    const closed =
       gap.starves === 0 &&
       gap.appliedTick === 3 &&
-      noBuraco.held === InputBit.MoveBack &&
-      noBuraco.pressed === InputBit.Fire;
+      inTheGap.held === InputBit.MoveBack &&
+      inTheGap.pressed === InputBit.Fire;
 
     cases.push({
-      nome: 'fila · buraco de um passo usa o comando seguinte',
-      medido: `fomes ${gap.starves} · aplicou o tick ${gap.appliedTick} · pressed ${noBuraco.pressed}`,
-      esperado: 'fomes 0 · tick 3 · a borda preservada',
-      erro: fechou ? '—' : 'o comando certo estava na fila e foi trocado por uma repetição',
-      passou: fechou,
+      nome: 'queue · a one-step gap uses the next command',
+      medido: `starvations ${gap.starves} · applied tick ${gap.appliedTick} · pressed ${inTheGap.pressed}`,
+      esperado: 'starvations 0 · tick 3 · the edge preserved',
+      erro: closed ? '—' : 'the right command was in the queue and got swapped for a repeat',
+      passou: closed,
     });
   }
 
-  // --- 1d. um salto de relógio não é confundido com buraco ---------------------
+  // --- 1d. a clock jump is not mistaken for a gap ------------------------------
   //
-  // A guarda do caso acima. Um comando que só vale daqui a meio segundo não pode
-  // ser puxado para agora só porque o de agora está atrasado — aí a espera é o
-  // certo, e é o que a política de fome cobre.
+  // The guard for the case above. A command that is only valid half a second from now
+  // cannot be pulled into the present just because the present one is late — there waiting
+  // is right, and that is what the starvation policy covers.
   {
     const jump = new InputBuffer();
-    const futuro = createInputFrame();
-    futuro.tick = 400;
-    futuro.pressed = InputBit.Fire;
-    jump.push(futuro);
+    const future = createInputFrame();
+    future.tick = 400;
+    future.pressed = InputBit.Fire;
+    jump.push(future);
     jump.consume(1);
 
     cases.push({
-      nome: 'fila · comando de um futuro distante espera a vez dele',
-      medido: `fomes ${jump.starves} · aplicou ${jump.appliedTick}`,
-      esperado: 'fomes 1 · aplicou -1 (repetiu)',
+      nome: 'queue · a command from a distant future waits its turn',
+      medido: `starvations ${jump.starves} · applied ${jump.appliedTick}`,
+      esperado: 'starvations 1 · applied -1 (repeated)',
       erro:
         jump.starves === 1 && jump.appliedTick === -1
           ? '—'
-          : 'um comando de meio segundo à frente foi aplicado agora',
+          : 'a command half a second ahead was applied now',
       passou: jump.starves === 1 && jump.appliedTick === -1,
     });
   }
 
-  // --- 2. o relógio antigo tem de falhar --------------------------------------
-  // Se este caso passar, o teste deixou de testar o que ele existe para testar.
+  // --- 2. the old clock has to fail -------------------------------------------
+  // If this case passes, the test has stopped testing what it exists to test.
   const broken = simulate(new BrokenClock(), 3);
   const brokenRate = broken.starves / broken.consumed;
   cases.push({
-    nome: 'relógio derivado · reproduz o bug',
-    medido: `${broken.starves} fomes (${(brokenRate * 100).toFixed(1)}%)`,
-    esperado: '> 50% — ele tem mesmo de falhar',
-    erro: brokenRate > 0.5 ? '—' : 'o teste não está mais reproduzindo o defeito',
+    nome: 'drifting clock · reproduces the bug',
+    medido: `${broken.starves} starvations (${(brokenRate * 100).toFixed(1)}%)`,
+    esperado: '> 50% — it really does have to fail',
+    erro: brokenRate > 0.5 ? '—' : 'the test is no longer reproducing the defect',
     passou: brokenRate > 0.5,
   });
 
-  // --- 3. o codec preserva o quadro -------------------------------------------
+  // --- 3. the codec preserves the frame ---------------------------------------
   const original = createInputFrame();
   original.tick = 123456;
   original.held = InputBit.MoveForward | InputBit.Sprint | InputBit.Aim;
@@ -452,10 +452,10 @@ export function runNetClockTests(): TestReport {
   original.moveY = 1;
   original.lookX = 0.0731;
   original.lookY = -0.0244;
-  // O olhar absoluto entrou na versão 2 do formato. O rumo vai perto de meia
-  // volta de propósito: é onde a normalização para −π..π tem de agir, e sem ela
-  // o `i16` desta escala satura em ±3,27 rad e a cabeça do adversário fica presa
-  // num canto assim que ele der algumas voltas.
+  // The absolute gaze entered version 2 of the format. The heading goes near half a turn
+  // on purpose: that is where the normalization to −π..π has to act, and without it the
+  // `i16` at this scale saturates at ±3.27 rad and the opponent's head gets stuck in a
+  // corner as soon as they spin around a few times.
   original.yaw = 3.0416;
   original.pitch = -0.6123;
 
@@ -479,39 +479,39 @@ export function runNetClockTests(): TestReport {
     Math.abs(back.moveY - original.moveY) < 0.01;
 
   cases.push({
-    nome: 'codec · ida e volta preserva o comando',
-    medido: `bits ${exact ? 'exatos' : 'ERRADOS'} · delta ±${lookError.toExponential(1)} · olhar ±${viewError.toExponential(1)} rad`,
-    esperado: 'bits exatos · ambos ±1e-4 rad',
+    nome: 'codec · the round trip preserves the command',
+    medido: `bits ${exact ? 'exact' : 'WRONG'} · delta ±${lookError.toExponential(1)} · gaze ±${viewError.toExponential(1)} rad`,
+    esperado: 'exact bits · both ±1e-4 rad',
     erro:
       exact && lookError < 1e-4 && viewError < 1e-4
         ? '—'
-        : 'o comando chega diferente do que saiu',
+        : 'the command arrives different from how it left',
     passou: exact && lookError < 1e-4 && viewError < 1e-4,
   });
 
-  // --- 4b. uma volta inteira não estoura a escala ------------------------------
-  // O rumo cresce sem limite enquanto o jogador gira sempre para o mesmo lado.
-  // O que tem de chegar do outro lado é o **mesmo apontamento**, e não o mesmo
-  // número: 7 rad e 7 − 2π apontam para o lugar idêntico.
-  const girado = createInputFrame();
-  girado.tick = 7;
-  girado.yaw = 7.4;
-  const voltas = Array.from({ length: 4 }, createInputFrame);
-  decodeInput(encodeInput([girado]), voltas);
-  const equivalente = Math.abs(
-    Math.atan2(Math.sin(voltas[0]!.yaw - girado.yaw), Math.cos(voltas[0]!.yaw - girado.yaw)),
+  // --- 4b. a whole turn does not overflow the scale ----------------------------
+  // The heading grows without bound while the player keeps spinning the same way. What has
+  // to arrive on the other side is the **same bearing**, and not the same number: 7 rad and
+  // 7 − 2π point at the identical place.
+  const spun = createInputFrame();
+  spun.tick = 7;
+  spun.yaw = 7.4;
+  const turns = Array.from({ length: 4 }, createInputFrame);
+  decodeInput(encodeInput([spun]), turns);
+  const equivalent = Math.abs(
+    Math.atan2(Math.sin(turns[0]!.yaw - spun.yaw), Math.cos(turns[0]!.yaw - spun.yaw)),
   );
   cases.push({
-    nome: 'codec · rumo além de uma volta aponta para o mesmo lado',
-    medido: `${girado.yaw} rad → ${voltas[0]!.yaw.toFixed(4)} rad (${equivalente.toExponential(1)} de diferença angular)`,
+    nome: 'codec · a heading past one turn points the same way',
+    medido: `${spun.yaw} rad → ${turns[0]!.yaw.toFixed(4)} rad (${equivalent.toExponential(1)} of angular difference)`,
     esperado: '< 1e-4 rad',
-    erro: equivalente < 1e-4 ? '—' : 'o rumo satura e a cabeça do adversário trava num canto',
-    passou: equivalente < 1e-4,
+    erro: equivalent < 1e-4 ? '—' : 'the heading saturates and the head of the opponent sticks in a corner',
+    passou: equivalent < 1e-4,
   });
 
-  // --- 4. a fome repete direito ------------------------------------------------
-  // Repetir `held` mantém quem estava andando andando; repetir `pressed` daria um
-  // tiro que ninguém deu. Ver a política em `InputBuffer`.
+  // --- 4. starvation repeats properly ------------------------------------------
+  // Repeating `held` keeps whoever was walking walking; repeating `pressed` would give a
+  // shot nobody fired. See the policy in `InputBuffer`.
   const buffer = new InputBuffer();
   const held = createInputFrame();
   held.tick = 1;
@@ -523,17 +523,17 @@ export function runNetClockTests(): TestReport {
   buffer.consume(1);
   const repeated = buffer.consume(2);
 
-  const politicaOk =
+  const policyOk =
     repeated.held === InputBit.MoveForward &&
     repeated.moveY === 1 &&
     repeated.pressed === 0 &&
     repeated.lookX === 0;
   cases.push({
-    nome: 'fome · repete o segurado, esquece a borda',
+    nome: 'starvation · repeats the held, forgets the edge',
     medido: `held ${repeated.held} · pressed ${repeated.pressed} · look ${repeated.lookX}`,
-    esperado: 'held mantido · pressed 0 · look 0',
-    erro: politicaOk ? '—' : 'borda repetida vira comando fantasma',
-    passou: politicaOk,
+    esperado: 'held kept · pressed 0 · look 0',
+    erro: policyOk ? '—' : 'a repeated edge becomes a phantom command',
+    passou: policyOk,
   });
 
   cases.push(...renderClockCases());
@@ -542,17 +542,17 @@ export function runNetClockTests(): TestReport {
   return { passou: falhas === 0, total: cases.length, falhas, cases };
 }
 
-// --- o relógio de desenho ------------------------------------------------------
+// --- the render clock ----------------------------------------------------------
 
 /**
- * Simula o desenho de dez segundos e devolve o que se vê da pose.
+ * Simulates ten seconds of drawing and returns what you see of the pose.
  *
- * O que interessa medir não é o relógio em si, é o **fator de interpolação**:
- * ele é o que decide a pose desenhada, e um fator que não anda é uma imagem que
- * não anda. Daí as duas medidas: quantos passos o fator ficou parado (a imagem
- * congelada) e o maior salto que ele deu de um passo para o outro (o tranco).
+ * What matters to measure is not the clock itself, it is the **interpolation factor**: it
+ * is what decides the pose drawn, and a factor that does not move is a picture that does
+ * not move. Hence the two measurements: how many steps the factor sat still (the frozen
+ * picture) and the biggest jump it made from one step to the next (the lurch).
  *
- * @param delay atraso de desenho em passos, contado do instantâneo mais novo.
+ * @param delay render delay in steps, counted from the newest snapshot.
  */
 function simulateRender(delay: number): {
   congelados: number;
@@ -579,8 +579,8 @@ function simulateRender(delay: number): {
   for (let step = 0; step < TICKS; step++) {
     hostTick++;
 
-    // O host manda um instantâneo a cada quatro passos; aqui ele chega no mesmo
-    // passo, porque o que está sob teste é a interpolação e não a rede.
+    // The host sends a snapshot every four steps; here it arrives on the same step,
+    // because what is under test is the interpolation and not the network.
     if (hostTick % SNAPSHOT_EVERY === 0) {
       if (toTick > 0) {
         fromTick = toTick;
@@ -605,10 +605,10 @@ function simulateRender(delay: number): {
     }
 
     total++;
-    // O fator anda para trás quando o par troca (o `to` vira `from` e o fator
-    // volta ao começo do novo intervalo), e isso é normal — o que se conta como
-    // congelamento é ele não sair do lugar de um passo para o outro, e como
-    // avanço só o que acontece dentro de um mesmo par.
+    // The factor moves backward when the pair changes (`to` becomes `from` and the factor
+    // goes back to the start of the new interval), and that is normal — what counts as a
+    // freeze is it not moving from one step to the next, and what counts as advance is
+    // only what happens within one pair.
     const avanco = t - anterior;
     if (Math.abs(avanco) < 1e-9) congelados++;
     else if (avanco > 0) {
@@ -624,79 +624,78 @@ function simulateRender(delay: number): {
 function renderClockCases(): TestCase[] {
   const cases: TestCase[] = [];
 
-  // --- 5. o desenho anda a cada passo -----------------------------------------
-  // O defeito que este caso guarda: com o atraso maior que o intervalo entre
-  // instantâneos, o alvo do desenho cai **antes** do mais velho dos dois que se
-  // tem em mão, o fator vive grampeado em zero e a pose só muda quando chega
-  // pacote. O mundo do cliente passa a andar a quinze quadros por segundo.
+  // --- 5. the drawing advances every step --------------------------------------
+  // The defect this case guards: with the delay larger than the interval between
+  // snapshots, the render target falls **before** the older of the two you have in hand,
+  // the factor lives clamped at zero and the pose only changes when a packet arrives. The
+  // client's world starts running at fifteen frames per second.
   const corrigido = simulateRender(SNAPSHOT_EVERY);
   const taxaCongelada = corrigido.congelados / corrigido.total;
   cases.push({
-    nome: 'desenho · a pose anda em todo passo',
-    medido: `${corrigido.congelados} passos parados em ${corrigido.total} (${(taxaCongelada * 100).toFixed(1)}%)`,
-    esperado: '< 5% — a imagem não congela entre instantâneos',
-    erro: taxaCongelada < 0.05 ? '—' : 'o mundo do cliente anda na taxa dos pacotes, aos trancos',
+    nome: 'render · the pose advances on every step',
+    medido: `${corrigido.congelados} frozen steps out of ${corrigido.total} (${(taxaCongelada * 100).toFixed(1)}%)`,
+    esperado: '< 5% — the picture does not freeze between snapshots',
+    erro: taxaCongelada < 0.05 ? '—' : 'the world of the client runs at the packet rate, in lurches',
     passou: taxaCongelada < 0.05,
   });
 
-  // --- 6. o atraso antigo tem de falhar ----------------------------------------
+  // --- 6. the old delay has to fail --------------------------------------------
   //
-  // Mesma lógica do caso 2: se este passar, o teste parou de testar.
+  // The same logic as case 2: if this one passes, the test has stopped testing.
   //
-  // A conta explica o sintoma melhor que qualquer descrição: com o alvo antes do
-  // instantâneo mais velho dos dois, o relógio gasta o começo de cada intervalo
-  // à esquerda da janela — fator grampeado em zero, imagem parada — e só depois
-  // a pose anda.
+  // The arithmetic explains the symptom better than any description: with the target
+  // before the older of the two snapshots, the clock spends the start of every interval to
+  // the left of the window — factor clamped at zero, picture still — and only afterward
+  // does the pose move.
   //
-  // O limiar é 10%, e a distância entre os dois lados é o que o justifica: o
-  // atraso certo dá **zero** passos parados e o errado dá um quarto deles. Um
-  // corte no meio dessa distância não vira igualdade disfarçada — que foi
-  // exatamente o que aconteceu quando ele ficou colado no valor medido, primeiro
-  // em 50% e depois em 25%, e o caso passou a quebrar a cada ajuste na constante
-  // de correção sem que nada de verdade tivesse mudado.
+  // The threshold is 10%, and the distance between the two sides is what justifies it: the
+  // right delay gives **zero** frozen steps and the wrong one gives a quarter of them. A
+  // cut in the middle of that distance does not become equality in disguise — which is
+  // exactly what happened when it sat glued to the measured value, first at 50% and then at
+  // 25%, and the case started breaking on every tweak to the correction constant without
+  // anything real having changed.
   const antigo = simulateRender(6);
   const taxaAntiga = antigo.congelados / antigo.total;
   cases.push({
-    nome: 'desenho · atraso de seis passos reproduz o bug',
-    medido: `${antigo.congelados} passos parados (${(taxaAntiga * 100).toFixed(1)}%)`,
-    esperado: '> 10% — ele tem mesmo de falhar',
-    erro: taxaAntiga > 0.1 ? '—' : 'o teste não está mais reproduzindo o defeito',
+    nome: 'render · a six-step delay reproduces the bug',
+    medido: `${antigo.congelados} frozen steps (${(taxaAntiga * 100).toFixed(1)}%)`,
+    esperado: '> 10% — it really does have to fail',
+    erro: taxaAntiga > 0.1 ? '—' : 'the test is no longer reproducing the defect',
     passou: taxaAntiga > 0.1,
   });
 
-  // --- 7. e anda com velocidade constante ---------------------------------------
+  // --- 7. and it advances at a constant speed ----------------------------------
   //
-  // **Este é o caso do tremor**, e ele é mais exigente que o anterior de
-  // propósito: uma imagem pode andar em todo passo e ainda assim tremer, se
-  // andar quantidades diferentes a cada um. Era o que acontecia com o relógio
-  // que perseguia `hostTick` por ganho proporcional — como `hostTick` é um
-  // degrau (parado quatro passos, sobe quatro), a perseguição virava um dente de
-  // serra e a velocidade do mundo oscilava 25% a quinze hertz.
+  // **This is the judder case**, and it is more demanding than the previous one on
+  // purpose: a picture can advance every step and still judder, if it advances different
+  // amounts each time. That is what happened with the clock that chased `hostTick` by
+  // proportional gain — since `hostTick` is a staircase (still for four steps, up by
+  // four), the chase became a sawtooth and the world's speed oscillated 25% at fifteen
+  // hertz.
   //
-  // O que se mede é a razão entre o maior e o menor avanço do fator dentro de um
-  // par. Em regime ela tem de ser praticamente 1.
+  // What gets measured is the ratio between the largest and the smallest advance of the
+  // factor within one pair. In steady state it has to be practically 1.
   const variacao = corrigido.maiorAvanco / corrigido.menorAvanco;
   cases.push({
-    nome: 'desenho · a velocidade do mundo não oscila',
-    medido: `avanço entre ${corrigido.menorAvanco.toFixed(4)} e ${corrigido.maiorAvanco.toFixed(4)} (${((variacao - 1) * 100).toFixed(1)}% de oscilação)`,
-    esperado: '< 2% — velocidade constante entre pacotes',
-    erro: variacao < 1.02 ? '—' : 'o mundo acelera e desacelera a cada pacote: é o tremor',
+    nome: 'render · the speed of the world does not oscillate',
+    medido: `advance between ${corrigido.menorAvanco.toFixed(4)} and ${corrigido.maiorAvanco.toFixed(4)} (${((variacao - 1) * 100).toFixed(1)}% of oscillation)`,
+    esperado: '< 2% — constant speed between packets',
+    erro: variacao < 1.02 ? '—' : 'the world speeds up and slows down on every packet: that is the judder',
     passou: variacao < 1.02,
   });
 
-  // --- 8. a estimativa persegue o host sem saltar --------------------------------
-  // Um pacote atrasado não pode puxar a fase de uma vez: o salto entraria como
-  // um solavanco no tempo do mundo. E um desvio grande demais não é deriva —
-  // aí saltar é o certo, porque alcançar de um quinto em um quinto levaria
-  // minutos.
+  // --- 8. the estimate chases the host without jumping -------------------------
+  // A late packet cannot pull the phase all at once: the jump would come in as a lurch in
+  // the world's time. And too large a deviation is not drift — there jumping is right,
+  // because catching up a fifth at a time would take minutes.
   const suave = correctHostEstimate(1000, 1002);
   const salto = correctHostEstimate(1000, 1200);
   const suaveOk = suave > 1000 && suave < 1000.5;
   cases.push({
-    nome: 'desenho · a fase se corrige aos poucos, e salta só no absurdo',
-    medido: `desvio de 2 → +${(suave - 1000).toFixed(2)} · desvio de 200 → ${salto}`,
-    esperado: 'parcial no pequeno · direto no grande',
-    erro: suaveOk && salto === 1200 ? '—' : 'a correção de fase não está graduada',
+    nome: 'render · the phase corrects gradually, and jumps only on the absurd',
+    medido: `deviation of 2 → +${(suave - 1000).toFixed(2)} · deviation of 200 → ${salto}`,
+    esperado: 'partial on the small · direct on the large',
+    erro: suaveOk && salto === 1200 ? '—' : 'the phase correction is not graduated',
     passou: suaveOk && salto === 1200,
   });
 
