@@ -1,68 +1,68 @@
 /**
- * O tempo: o que o mar, o céu e o vento estão fazendo agora.
+ * The weather: what the sea, the sky and the wind are doing right now.
  *
- * ## Por que isto existe separado do resto do mundo
+ * ## Why this exists separately from the rest of the world
  *
- * Antes, o estado do mar era **uma constante**. O vento tinha uma direção e uma
- * intensidade escolhidas na inicialização e nunca mais mudavam, e todas as ondas
- * nasciam num leque estreito em torno dessa direção única. O resultado era o que
- * se via: um mar que vinha sempre do mesmo lado, com a mesma altura, do primeiro
- * ao último minuto de qualquer partida. Não havia por que olhar para o horizonte.
+ * The sea's state used to be **a constant**. The wind had a direction and a strength
+ * chosen at initialization and never changed again, and every wave was born in a narrow
+ * fan around that single direction. The result was what you saw: a sea that always came
+ * from the same side, at the same height, from the first to the last minute of any
+ * match. There was no reason to look at the horizon.
  *
- * Este módulo é a fonte única do que muda. Ele não desenha nada e não sabe o que
- * é uma onda — ele decide **números** (força e rumo do vento, cobertura de nuvem,
- * chuva, visibilidade) e o `Environment` os distribui para quem os consome. É a
- * mesma divisão que o `WaveField` faz com o oceano: um lugar decide, vários leem.
+ * This module is the single source of what changes. It draws nothing and does not know
+ * what a wave is — it decides **numbers** (wind strength and heading, cloud cover, rain,
+ * visibility) and `Environment` distributes them to whoever consumes them. It is the
+ * same split `WaveField` makes with the ocean: one place decides, several read.
  *
- * ## A máquina de estados, e por que ela não é um sorteio a cada minuto
+ * ## The state machine, and why it is not a draw every minute
  *
- * Tempo real tem **inércia e sequência**. Não se passa de céu limpo para
- * temporal: passa-se por um vento que encrespa, uma nuvem que fecha, um aguaceiro
- * que engrossa. Uma cadeia de Markov com transições restritas dá exatamente isso
- * de graça — cada estado só alcança os vizinhos, então a escalada e a calmaria
- * acontecem em ordem, e o jogador aprende a ler o que vem antes de ele chegar.
+ * Real weather has **inertia and sequence**. You do not go from clear skies to a storm:
+ * you go through a wind that ruffles, a cloud that closes in, a downpour that thickens.
+ * A Markov chain with restricted transitions gives exactly that for free — each state
+ * only reaches its neighbors, so the build-up and the calming happen in order, and the
+ * player learns to read what is coming before it arrives.
  *
- * Cada transição leva minutos, não segundos: o que se vê é o mar **virando**, que
- * é o que dá ao horizonte alguma coisa para dizer.
+ * Every transition takes minutes, not seconds: what you see is the sea **turning**,
+ * which is what gives the horizon something to say.
  */
 
 import { clamp01, createRandom, damp, smoothstep, TAU } from '../core/MathUtils';
 
 export type WeatherId = 'clear' | 'breeze' | 'squall' | 'storm';
 
-/** O alvo de cada grandeza num estado de tempo. */
+/** Each quantity's target in one weather state. */
 interface WeatherPreset {
-  /** Nome mostrado ao jogador. */
+  /** The name shown to the player. */
   readonly label: string;
-  /** Intensidade do vento, 0..1 — o que escala amplitude e velocidade da onda. */
+  /** Wind strength, 0..1 — what scales the wave's amplitude and speed. */
   readonly wind: number;
-  /** Cobertura de nuvem, 0 (limpo) a 1 (encoberto). */
+  /** Cloud cover, 0 (clear) to 1 (overcast). */
   readonly clouds: number;
-  /** Densidade da chuva, 0..1. */
+  /** Rain density, 0..1. */
   readonly rain: number;
   /**
-   * Alcance de visibilidade, em metros — a distância em que a névoa engole o
-   * horizonte. Vira densidade em `Environment`; aqui é distância porque é o que
-   * se pode conferir no olho, olhando o navio inimigo sumir.
+   * Visibility range, in meters — the distance at which the haze swallows the horizon.
+   * It becomes a density in `Environment`; here it is a distance because that is what
+   * you can check by eye, watching the enemy ship disappear.
    */
   readonly visibility: number;
-  /** Rajadas por minuto. Zero em céu limpo, muitas no temporal. */
+  /** Gusts per minute. Zero in clear skies, many in a storm. */
   readonly gusts: number;
-  /** Relâmpagos por minuto. Só a tempestade tem. */
+  /** Lightning strikes per minute. Only the storm has them. */
   readonly strikes: number;
-  /** Duração do estado, em segundos: mínimo e máximo. */
+  /** The state's duration, in seconds: minimum and maximum. */
   readonly duration: readonly [number, number];
-  /** Para onde este tempo pode virar, com peso. */
+  /** Where this weather can turn to, with a weight. */
   readonly next: readonly (readonly [WeatherId, number])[];
 }
 
 /**
- * Os quatro tempos.
+ * The four weathers.
  *
- * As durações são longas de propósito. Um duelo dura de três a cinco minutos, e
- * um clima que virasse a cada minuto transformaria o mar num piscar de estados em
- * vez de num lugar. Assim, a maioria das partidas acontece **dentro** de um
- * tempo, e virar o tempo no meio de uma é um acontecimento.
+ * The durations are long on purpose. A duel lasts three to five minutes, and a climate
+ * that turned every minute would make the sea a flicker of states instead of a place.
+ * This way most matches happen **inside** one weather, and the weather turning in the
+ * middle of one is an event.
  */
 const PRESETS: Record<WeatherId, WeatherPreset> = {
   clear: {
@@ -85,8 +85,8 @@ const PRESETS: Record<WeatherId, WeatherPreset> = {
     gusts: 2,
     strikes: 0,
     duration: [200, 480],
-    // O caminho de volta para o céu limpo é mais provável que o de subida: mar
-    // grosso tem de ser exceção, senão deixa de significar alguma coisa.
+    // The road back to clear skies is likelier than the one up: heavy seas have to be
+    // the exception, or they stop meaning anything.
     next: [
       ['clear', 2],
       ['squall', 1],
@@ -119,69 +119,68 @@ const PRESETS: Record<WeatherId, WeatherPreset> = {
   },
 };
 
-/** Ordem crescente de mau tempo. Só serve para o rótulo de severidade. */
+/** Increasing order of bad weather. It only serves the severity label. */
 export const WEATHER_ORDER: readonly WeatherId[] = ['clear', 'breeze', 'squall', 'storm'];
 
 /**
- * Constante de convergência das grandezas do tempo, em 1/s.
+ * Convergence constant of the weather's quantities, in 1/s.
  *
- * 0,022 dá uma meia-vida de ~31 s: a virada leva cerca de dois minutos para se
- * completar. É lento o bastante para ninguém ver o valor "andando" e rápido o
- * bastante para caber numa partida.
+ * 0.022 gives a half-life of ~31 s: the turn takes about two minutes to complete. It is
+ * slow enough that nobody sees the value "moving" and fast enough to fit inside a match.
  */
 const BLEND_RATE = 0.022;
 
 /**
- * Velocidade de rotação do vento, em radianos por segundo.
+ * The wind's rate of rotation, in radians per second.
  *
- * O vento gira sempre, mesmo dentro de um único tempo, e é o que impede o mar de
- * vir eternamente do mesmo lado. 0,006 rad/s são 20° por minuto — perceptível
- * numa partida inteira, invisível de um instante para o outro.
+ * The wind always turns, even inside a single weather, and it is what keeps the sea from
+ * coming eternally from the same side. 0.006 rad/s is 20° per minute — noticeable over a
+ * whole match, invisible from one instant to the next.
  *
- * Girar de verdade em vez de sortear uma direção nova a cada tempo importa:
- * direção de vento é o que decide qual bordo é o rápido, e ela não pode saltar
- * embaixo de quem está no meio de uma manobra.
+ * Really turning instead of drawing a new direction with every weather matters: wind
+ * direction is what decides which tack is the fast one, and it cannot jump out from under
+ * somebody in the middle of a maneuver.
  */
 const WIND_TURN_RATE = 0.006;
 
-/** Duração de uma rajada, em segundos. */
+/** A gust's duration, in seconds. */
 const GUST_DURATION = 7;
-/** Quanto uma rajada acrescenta à intensidade do vento. */
+/** How much a gust adds to the wind's strength. */
 const GUST_STRENGTH = 0.16;
 
-/** Duração do clarão de um relâmpago, em segundos. */
+/** Duration of a lightning flash, in seconds. */
 const FLASH_DURATION = 0.42;
 
 export class Weather {
-  /** O tempo que está no ar. */
+  /** The weather that is up. */
   current: WeatherId;
-  /** Para onde ele está indo. Igual a `current` quando já chegou. */
+  /** Where it is heading. Equal to `current` once it has arrived. */
   target: WeatherId;
 
-  /** Intensidade do vento agora, 0..1. Já com a rajada somada. */
+  /** Wind strength right now, 0..1. With the gust already added. */
   wind = 0;
-  /** Rumo do vento, em radianos. Gira sozinho, sempre. */
+  /** Wind heading, in radians. It turns on its own, always. */
   direction: number;
-  /** Cobertura de nuvem, 0..1. */
+  /** Cloud cover, 0..1. */
   clouds = 0;
-  /** Densidade da chuva, 0..1. */
+  /** Rain density, 0..1. */
   rain = 0;
-  /** Alcance de visibilidade, em metros. */
+  /** Visibility range, in meters. */
   visibility = 4000;
-  /** Clarão do relâmpago neste instante, 0..1. */
+  /** The lightning flash at this instant, 0..1. */
   flash = 0;
   /**
-   * `true` congela a **virada** de tempo, não o tempo.
+   * `true` freezes the weather's **turning**, not the weather.
    *
-   * O vento continua girando e as rajadas continuam vindo: o que a trava
-   * promete ao jogador é "o mar fica assim", e um mar que fica *exatamente*
-   * assim, sem nem uma rajada, deixaria de ser mar.
+   * The wind goes on turning and the gusts go on coming: what the lock promises the
+   * player is "the sea stays like this", and a sea that stays *exactly* like this,
+   * without even a gust, would stop being a sea.
    */
   locked = false;
 
-  /** Segundos até a próxima virada de tempo. */
+  /** Seconds until the next weather change. */
   private countdown = 0;
-  /** Base do vento sem a rajada — é ela que converge para o preset. */
+  /** The wind's base without the gust — it is what converges toward the preset. */
   private baseWind = 0;
   private gust = 0;
   private gustTimer = 0;
@@ -204,12 +203,12 @@ export class Weather {
   }
 
   /**
-   * Recomeça o tempo a partir de uma semente dada.
+   * Restarts the weather from a given seed.
    *
-   * Existe para o duelo em rede: o vento entra na força da vela, então dois
-   * jogadores com climas diferentes teriam velocidades diferentes no mesmo rumo —
-   * e isso é vantagem, não enfeite. A mesma semente dá a mesma sequência de
-   * rajadas, relâmpagos e viradas nas duas máquinas.
+   * It exists for the networked duel: the wind enters the sail's force, so two players
+   * with different climates would have different speeds on the same heading — and that is
+   * an advantage, not decoration. The same seed gives the same sequence of gusts,
+   * lightning and changes on both machines.
    */
   reseed(seed: number, start: WeatherId = 'breeze'): void {
     this.random = createRandom(seed);
@@ -217,16 +216,15 @@ export class Weather {
     this.target = start;
     this.locked = false;
 
-    // ⚠️ **O rumo do vento entra na conta, e ele ficava de fora.**
+    // ⚠️ **The wind's heading enters the arithmetic, and it used to be left out.**
     //
-    // Ele gira sozinho desde que a página abriu (ver `WIND_TURN_RATE`), então
-    // dois jogadores que passaram tempos diferentes na tela de título chegavam
-    // ao duelo com rumos diferentes. O instantâneo corrige o do vento — mas o
-    // rumo da **ondulação de fundo** nasce dele, uma vez, dentro de
-    // `WaveField.generate`, e daí em diante os dois mares eram outros. Semear o
-    // rumo aqui, do mesmo número que semeia tudo, é o que faz "a mesma semente
-    // dá o mesmo mar" ser verdade desde o primeiro quadro, e não só a partir do
-    // primeiro instantâneo.
+    // It turns on its own from the moment the page opens (see `WIND_TURN_RATE`), so two
+    // players who spent different amounts of time on the title screen arrived at the
+    // duel with different headings. The snapshot corrects the wind's — but the
+    // **background swell's** heading is born from it, once, inside `WaveField.generate`,
+    // and from there on the two seas were different. Seeding the heading here, from the
+    // same number that seeds everything, is what makes "the same seed gives the same
+    // sea" true from the first frame, and not only from the first snapshot.
     this.direction = (createRandom(seed ^ 0x571d)() * TAU) % TAU;
 
     const preset = PRESETS[start];
@@ -243,30 +241,30 @@ export class Weather {
   }
 
   /**
-   * Escreve o tempo que veio pronto do outro lado do fio.
+   * Writes the weather that arrived ready from the other side of the wire.
    *
-   * ## Por que receber em vez de simular
+   * ## Why receive it instead of simulating it
    *
-   * A máquina de estados daqui é semeada e determinística, então em tese os dois
-   * lados de um duelo poderiam rodá-la em paralelo e chegar ao mesmo tempo. Na
-   * prática não podem: ela avança somando `dt` em ponto flutuante, e o cliente
-   * que não simula **perde passos por construção** — o motor descarta o
-   * excedente quando a aba engasga, que é o certo para a física local e fatal
-   * para um relógio compartilhado. Um segundo de deriva num `countdown` de
-   * duzentos é a diferença entre ver a tempestade chegar e continuar num céu
-   * limpo enquanto o adversário já está no meio dela.
+   * The state machine in here is seeded and deterministic, so in theory both sides of a
+   * duel could run it in parallel and arrive at the same weather. In practice they
+   * cannot: it advances by summing `dt` in floating point, and the client that does not
+   * simulate **loses steps by construction** — the engine discards the excess when the
+   * tab hitches, which is right for the local physics and fatal for a shared clock. One
+   * second of drift on a `countdown` of two hundred is the difference between watching
+   * the storm arrive and staying under a clear sky while the opponent is already in the
+   * middle of it.
    *
-   * Recebendo, o tempo é o mesmo por construção, e o custo são dez bytes a cada
-   * instantâneo.
+   * By receiving it, the weather is the same by construction, and the cost is ten bytes
+   * per snapshot.
    *
-   * ⚠️ **`baseWind` entra junto, e não é detalhe:** é dele que sai `severity`,
-   * que por sua vez tinge nuvem, névoa e a luz da cena inteira. Sem ele, o guest
-   * receberia a chuva e continuaria com o céu de um dia bonito.
+   * ⚠️ **`baseWind` comes in with it, and it is not a detail:** it is where `severity`
+   * comes from, and severity in turn tints cloud, haze and the whole scene's light.
+   * Without it, the guest would receive the rain and carry on under a fine day's sky.
    *
-   * O que **não** entra é o vento com rajada (`wind`) e o rumo (`direction`):
-   * os dois já viajam no instantâneo como propriedade do mar, porque é o mar que
-   * os consome. Quem chama aqui passa os dois adiante para o HUD ter o que
-   * mostrar.
+   * What does **not** come in is the gusted wind (`wind`) and the heading (`direction`):
+   * both already travel in the snapshot as properties of the sea, because it is the sea
+   * that consumes them. The caller here passes both along so the HUD has something to
+   * show.
    */
   applyRemote(state: {
     current: WeatherId;
@@ -290,32 +288,31 @@ export class Weather {
     this.direction = state.direction;
   }
 
-  /** Nome do tempo, para o HUD. Diz para onde vai quando está virando. */
+  /** The weather's name, for the HUD. It says where it is heading while it turns. */
   get label(): string {
     if (this.target === this.current) return PRESETS[this.current].label;
     return `${PRESETS[this.current].label} → ${PRESETS[this.target].label}`;
   }
 
   /**
-   * O vento **sem** a rajada, que é a grandeza que persegue o preset.
+   * The wind **without** the gust, which is the quantity that chases the preset.
    *
-   * Exposto em leitura porque o instantâneo o carrega: é dele que sai
-   * `severity`, e sem ele o outro lado receberia a chuva e a nuvem certas sob a
-   * luz de um dia bonito. Ver `applyRemote`.
+   * Exposed for reading because the snapshot carries it: it is where `severity` comes
+   * from, and without it the other side would receive the right rain and cloud under a
+   * fine day's light. See `applyRemote`.
    */
   get windBase(): number {
     return this.baseWind;
   }
 
-  /** Quão severo está o tempo, de 0 (limpo) a 1 (temporal). */
+  /** How severe the weather is, from 0 (clear) to 1 (storm). */
   get severity(): number {
     return clamp01((this.baseWind - PRESETS.clear.wind) / (1 - PRESETS.clear.wind));
   }
 
   /**
-   * Um passo de tempo. Roda no passo fixo da física, junto com o mar: a
-   * intensidade do vento entra na força da vela, e força de vela tem de ser
-   * determinística.
+   * One weather step. It runs on the physics' fixed step, along with the sea: the wind's
+   * strength enters the sail's force, and sail force has to be deterministic.
    */
   fixedUpdate(dt: number): void {
     if (!this.locked) {
@@ -325,15 +322,15 @@ export class Weather {
 
     const preset = PRESETS[this.target];
 
-    // As grandezas convergem para o alvo em vez de saltar. Quem estiver
-    // navegando durante a virada vê o mar crescer debaixo do casco.
+    // The quantities converge toward the target instead of jumping. Whoever is sailing
+    // during the change watches the sea grow under the hull.
     this.baseWind = damp(this.baseWind, preset.wind, BLEND_RATE, dt);
     this.clouds = damp(this.clouds, preset.clouds, BLEND_RATE, dt);
     this.rain = damp(this.rain, preset.rain, BLEND_RATE, dt);
     this.visibility = damp(this.visibility, preset.visibility, BLEND_RATE, dt);
 
-    // Chegou perto o bastante: o tempo de destino passa a ser o tempo atual, e o
-    // relógio da próxima virada começa a correr.
+    // Close enough: the destination weather becomes the current one, and the clock for
+    // the next change starts running.
     if (this.target !== this.current && Math.abs(this.baseWind - preset.wind) < 0.02) {
       this.current = this.target;
       this.countdown = this.rollDuration(preset);
@@ -346,12 +343,12 @@ export class Weather {
   }
 
   /**
-   * Rajadas: um empurrão curto no vento, com subida e descida suaves.
+   * Gusts: a short push on the wind, with a smooth rise and fall.
    *
-   * Não é ruído decorativo. A rajada é a única coisa no jogo que muda a
-   * velocidade dos dois navios ao mesmo tempo sem que nenhum dos dois tenha
-   * feito nada — e é ela que faz uma perseguição empatada por física ganhar
-   * momentos em que a distância abre e fecha sozinha.
+   * It is not decorative noise. The gust is the only thing in the game that changes both
+   * ships' speed at once without either of them having done anything — and it is what
+   * gives a chase that physics has tied moments where the distance opens and closes on
+   * its own.
    */
   private updateGusts(dt: number, preset: WeatherPreset): void {
     if (this.gustTimer > 0) {
@@ -360,7 +357,7 @@ export class Weather {
       this.gust = smoothstep(0, 1, k) * GUST_STRENGTH;
     } else {
       this.gust = 0;
-      // Um sorteio por segundo de jogo, escalado pela taxa do preset.
+      // One draw per game second, scaled by the preset's rate.
       if (preset.gusts > 0 && this.random() < (preset.gusts / 60) * dt) {
         this.gustTimer = GUST_DURATION;
       }
@@ -369,12 +366,12 @@ export class Weather {
     this.wind = clamp01(this.baseWind + this.gust);
   }
 
-  /** Relâmpagos: um clarão curto que lava a cena inteira de branco-azulado. */
+  /** Lightning: a short flash that washes the whole scene bluish-white. */
   private updateLightning(dt: number, preset: WeatherPreset): void {
     if (this.flashTimer > 0) {
       this.flashTimer -= dt;
-      // Decaimento rápido com um repique: raio não é um pulso quadrado, é um
-      // estouro que pisca duas ou três vezes em menos de meio segundo.
+      // Fast decay with a flicker: a bolt is not a square pulse, it is a burst that
+      // blinks two or three times in under half a second.
       const k = clamp01(this.flashTimer / FLASH_DURATION);
       this.flash = k * k * (0.6 + 0.4 * Math.abs(Math.sin(k * 22)));
       return;
@@ -386,7 +383,7 @@ export class Weather {
     }
   }
 
-  /** Escolhe o próximo tempo pela cadeia de transições. */
+  /** Picks the next weather from the chain of transitions. */
   private roll(): void {
     const options = PRESETS[this.current].next;
     let total = 0;
@@ -397,8 +394,8 @@ export class Weather {
       pick -= weight;
       if (pick <= 0) {
         this.target = id;
-        // O relógio só reinicia quando a virada **termina**; até lá ele fica
-        // parado, senão um tempo poderia ser trocado no meio da própria entrada.
+        // The clock only restarts when the change **finishes**; until then it stays
+        // still, or a weather could be swapped in the middle of its own arrival.
         this.countdown = Number.POSITIVE_INFINITY;
         return;
       }
@@ -410,7 +407,7 @@ export class Weather {
     return min + this.random() * (max - min);
   }
 
-  /** Força um tempo, sem transição. Usado pela bancada e pelo menu de ajustes. */
+  /** Forces a weather, with no transition. Used by the bench and by the settings menu. */
   set(id: WeatherId): void {
     const preset = PRESETS[id];
     this.current = id;
