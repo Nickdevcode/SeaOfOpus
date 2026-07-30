@@ -8,31 +8,30 @@
  * console.table(t.runContactTests().cases);
  * ```
  *
- * ## Por que ele existe
+ * ## Why it exists
  *
- * Porque as duas coisas que este arquivo prova são **invisíveis olhando a tela**.
- * Um contato fraco e um contato ausente produzem a mesma imagem — dois cascos se
- * atravessando — e nenhuma das duas causas aparece como erro em lugar nenhum. Foi o
- * que aconteceu: `HullContact` existia, rodava todo passo, e ainda assim a queixa
- * era "os barcos entram um dentro do outro". Havia duas razões somadas, e as duas
- * eram de aritmética:
+ * Because the two things this file proves are **invisible from looking at the screen**. A
+ * weak contact and a missing contact produce the same picture — two hulls going through
+ * each other — and neither cause shows up as an error anywhere. That is what happened:
+ * `HullContact` existed, ran every step, and the complaint was still "the boats go inside
+ * each other". There were two reasons added together, and both were arithmetic:
  *
- * 1. **A força era dividida pelo número de sondagens de um bordo (dez), e não pelas
- *    que de fato tocaram.** Um encontro de proa põe uma ou duas sondagens dentro do
- *    outro casco, então ele recebia um décimo da força projetada.
- * 2. **As sondagens paravam a 1,23 m da roda de proa.** Uma proa contra a outra não
- *    tinha o que medir até ter entrado dois metros e meio.
+ * 1. **The force was divided by the number of probes on a side (ten), and not by the ones
+ *    that actually touched.** A bow-on meeting puts one or two probes inside the other
+ *    hull, so it received a tenth of the designed force.
+ * 2. **The probes stopped 1.23 m short of the stem.** One bow against another had nothing
+ *    to measure until it had gone two and a half meters in.
  *
- * O que se prova aqui não é um número afinado, é a **propriedade**: encostados, os
- * dois se afastam, e se afastam com aceleração de ordem de grandeza de colisão em
- * vez de ordem de grandeza de empurrãozinho. Os limites são frouxos de propósito —
- * apertá-los transformaria uma calibração de rigidez num teste quebrado.
+ * What gets proved here is not a tuned number, it is the **property**: touching, the two
+ * push apart, and they push apart with an acceleration of collision order of magnitude
+ * instead of little-nudge order of magnitude. The limits are loose on purpose — tightening
+ * them would turn a stiffness calibration into a broken test.
  *
- * ## E o estrago
+ * ## And the damage
  *
- * A segunda metade do arquivo é `ShipDamage.ram`, e ali sim há números exatos a
- * provar: quantos rombos cada faixa de velocidade abre, que eles não se fundem num
- * só (o que valeria menos que a soma deles) e que um encostão não arranca tábua.
+ * The file's second half is `ShipDamage.ram`, and there are exact numbers to prove there:
+ * how many breaches each band of speed opens, that they do not merge into one (which would
+ * be worth less than their sum) and that a nudge tears out no planking.
  */
 
 import * as THREE from 'three';
@@ -57,17 +56,17 @@ export interface TestReport {
   cases: TestCase[];
 }
 
-/** O passo fixo da simulação. Duplicado para o teste não arrastar `Engine`. */
+/** The simulation's fixed step. Duplicated so the test does not drag `Engine` in. */
 const STEP = 1 / 60;
 
 /**
- * Massa, giração e massa adicionada da Chalupa.
+ * The sloop's mass, gyration and added mass.
  *
- * Copiados de `Ship`, onde eles são privados, e é de propósito — é a mesma escolha
- * de `PROTOCOL_VERSION` em `roomServer.mjs`. Importá-los faria o teste concordar
- * com o código por construção; escritos aqui, uma mudança de casco que altere a
- * ordem de grandeza da resposta ao contato aparece como falha, que é justamente
- * quando alguém precisa olhar de novo para a rigidez.
+ * Copied from `Ship`, where they are private, and that is on purpose — it is the same
+ * choice as `PROTOCOL_VERSION` in `roomServer.mjs`. Importing them would make the test
+ * agree with the code by construction; written here, a hull change that alters the order
+ * of magnitude of the contact response shows up as a failure, which is precisely when
+ * somebody has to look at the stiffness again.
  */
 const GYRATION = new THREE.Vector3(4.16, 4.16, 1.95);
 const ADDED_MASS = new THREE.Vector3(1.9, 2.0, 1.06);
@@ -75,13 +74,13 @@ const CENTER_OF_MASS = new THREE.Vector3(0, -0.55, 0.91);
 const UP = new THREE.Vector3(0, 1, 0);
 
 /**
- * Um casco só com o corpo rígido dentro.
+ * A hull with nothing inside but the rigid body.
  *
- * `resolveHullContact` só toca em `ship.body` — nem malha, nem vela, nem avaria —
- * então o molde é honesto e evita arrastar `createShipAssets` (que desenha textura
- * em canvas) para dentro de um teste de aritmética.
+ * `resolveHullContact` only touches `ship.body` — no mesh, no sail, no damage — so the
+ * mold is honest and avoids dragging `createShipAssets` (which draws textures onto a
+ * canvas) into an arithmetic test.
  *
- * @param heading rumo em radianos. Zero aponta a proa para o −Z do mundo.
+ * @param heading heading in radians. Zero points the bow toward the world's −Z.
  */
 function vessel(x: number, z: number, heading = 0): Ship {
   const body = new ShipBody({
@@ -91,7 +90,7 @@ function vessel(x: number, z: number, heading = 0): Ship {
     addedMass: ADDED_MASS,
   });
   body.orientation.setFromAxisAngle(UP, heading);
-  // Depois da orientação: `setOrigin` a usa para achar o centro de massa.
+  // After the orientation: `setOrigin` uses it to find the center of mass.
   body.setOrigin(x, 0, z);
   return { body } as unknown as Ship;
 }
@@ -101,32 +100,31 @@ const _originB = new THREE.Vector3();
 const _axis = new THREE.Vector3();
 const _relative = new THREE.Vector3();
 
-/** O que um passo de contato produziu nos dois cascos. */
+/** What one contact step produced on the two hulls. */
 interface Encounter {
   contacts: number;
   depth: number;
   /**
-   * Aceleração com que os dois se separam, em m/s², medida ao longo da linha que
-   * liga as duas origens. Negativa é "continuaram se aproximando".
+   * The acceleration with which the two separate, in m/s², measured along the line joining
+   * the two origins. Negative is "they kept closing".
    *
-   * Lida da velocidade depois de `integrate`, e não de uma força espiada por
-   * dentro: é assim que o navio de verdade sente o contato, com a massa adicionada
-   * de cada eixo já aplicada.
+   * Read from the velocity after `integrate`, and not from a force peeked at inside: that
+   * is how the real ship feels the contact, with each axis's added mass already applied.
    */
   separation: number;
   /**
-   * Módulo da aceleração relativa, em m/s², em qualquer direção.
+   * Magnitude of the relative acceleration, in m/s², in any direction.
    *
-   * Existe ao lado de `separation` porque a saída mais curta de um contato **não é
-   * sempre a linha que liga os dois centros**, e no encontro de proa ela nunca é:
-   * duas rodas de proa se tocando estão a meio metro do bordo do outro e a quase um
-   * metro da ponta dele, então a madeira empurra para o lado e as duas chalupas
-   * escorregam uma pela outra em vez de pararem nariz a nariz. É o que acontece no
-   * mar, e é o que o jogo tem de fazer — mas medido no eixo dos centros dá zero, e
-   * zero é indistinguível de não ter havido contato nenhum.
+   * It exists alongside `separation` because a contact's shortest way out is **not always
+   * the line joining the two centers**, and on a bow-on meeting it never is: two stems
+   * touching are half a meter from the other's side and nearly a meter from its tip, so the
+   * wood pushes sideways and the two sloops slide past each other instead of stopping nose
+   * to nose. It is what happens at sea, and it is what the game has to do — but measured on
+   * the axis of the centers it comes to zero, and zero is indistinguishable from there
+   * having been no contact at all.
    */
   push: number;
-  /** Módulo do momento linear que sobrou no par. Zero é reação igual e contrária. */
+  /** Magnitude of the linear momentum left in the pair. Zero is equal and opposite. */
   residualMomentum: number;
 }
 
@@ -154,21 +152,21 @@ function encounter(a: Ship, b: Ship): Encounter {
 }
 
 /**
- * Aceleração de separação que já é colisão, em m/s².
+ * A separation acceleration that is already a collision, in m/s².
  *
- * Cinco é o piso porque a versão com a divisão errada entregava **décimos** —
- * 0,3 m/s² para meio metro de sobreposição, contra os mais de dez que a rigidez
- * projetada dá. Qualquer número nesta ordem de grandeza distingue as duas.
+ * Five is the floor because the version with the wrong division delivered **tenths** —
+ * 0.3 m/s² for half a meter of overlap, against the more than ten the designed stiffness
+ * gives. Any number in this order of magnitude tells the two apart.
  */
 const COLLISION_FLOOR = 5;
 
 /**
- * Teto da mesma aceleração, em m/s².
+ * The same acceleration's ceiling, in m/s².
  *
- * Uma mola de contato mal grampeada vira catapulta, e catapulta é tão errado quanto
- * névoa: o navio sairia dali a vários metros por segundo em um passo. 500 m/s² é
- * folgado para a rigidez de projeto e apertado o bastante para pegar um grampo que
- * alguém tirou. Ver `MAX_PUSH_DEPTH`.
+ * A badly clamped contact spring becomes a catapult, and a catapult is as wrong as fog:
+ * the ship would leave at several meters per second in one step. 500 m/s² is generous for
+ * the design stiffness and tight enough to catch a clamp somebody removed. See
+ * `MAX_PUSH_DEPTH`.
  */
 const CATAPULT_CEILING = 500;
 
@@ -186,114 +184,113 @@ export function runContactTests(): TestReport {
       met.separation <= CATAPULT_CEILING;
     record(
       nome,
-      `${met.contacts} contatos · ${met.depth.toFixed(2)} m · ${met.separation.toFixed(1)} m/s²`,
-      `> 0 contatos · ${COLLISION_FLOOR}–${CATAPULT_CEILING} m/s² de separação`,
+      `${met.contacts} contacts · ${met.depth.toFixed(2)} m · ${met.separation.toFixed(1)} m/s²`,
+      `> 0 contacts · ${COLLISION_FLOOR}–${CATAPULT_CEILING} m/s² of separation`,
       ok,
-      met.contacts === 0 ? 'nenhum contato encontrado' : `separação de ${met.separation.toFixed(1)} m/s²`,
+      met.contacts === 0 ? 'no contact found' : `separation of ${met.separation.toFixed(1)} m/s²`,
     );
   }
 
-  // -- contato ------------------------------------------------------------------
+  // -- contact ------------------------------------------------------------------
 
-  // A meia-boca de verdade na linha d'água, para a sobreposição ser a pedida em
-  // vez de um chute sobre a boca nominal.
+  // The real half-beam at the waterline, so the overlap is the one asked for instead of a
+  // guess based on the nominal beam.
   const halfBeam = halfWidthAtHeight(0.5, 0.1);
 
-  // Costado a costado, paralelos, com 40 cm de casco dentro do casco. É o encontro
-  // mais comum de um duelo: alguém tentando cruzar a proa do outro e raspando.
+  // Side to side, parallel, with 40 cm of hull inside hull. It is the most common meeting
+  // in a duel: someone trying to cross the other's bow and scraping.
   checkCollision(
-    'costado a costado · os cascos se empurram como madeira, não como névoa',
+    'side to side · the hulls push like wood, not like fog',
     encounter(vessel(0, 0), vessel(2 * halfBeam - 0.4, 0)),
   );
 
-  // A mesma coisa, olhando o que sobrou de momento linear. Com os dois no mesmo
-  // rumo os tensores de massa adicionada estão alinhados, então a terceira lei tem
-  // de fechar até o ponto flutuante — se não fechar, alguém aplicou a força num
-  // corpo e esqueceu do outro, e o par ganharia velocidade do nada.
+  // The same thing, looking at what is left of the linear momentum. With both on the same
+  // heading the added-mass tensors are aligned, so the third law has to close to floating
+  // point — if it does not, somebody applied the force to one body and forgot the other,
+  // and the pair would gain speed out of nothing.
   {
     const met = encounter(vessel(0, 0), vessel(2 * halfBeam - 0.4, 0));
     const ok = met.contacts > 0 && met.residualMomentum < 1;
     record(
-      'costado a costado · a reação é igual e contrária',
-      `${met.residualMomentum.toFixed(3)} kg·m/s de sobra`,
+      'side to side · the reaction is equal and opposite',
+      `${met.residualMomentum.toFixed(3)} kg·m/s left over`,
       '≈ 0',
       ok,
-      `o par ganhou ${met.residualMomentum.toFixed(1)} kg·m/s de momento`,
+      `the pair gained ${met.residualMomentum.toFixed(1)} kg·m/s of momentum`,
     );
   }
 
-  // Proa no costado: o abalroamento clássico. A proa de A entra 60 cm no costado de
-  // B, que está atravessado. A saída mais curta é o bordo de B, e é para lá que a
-  // madeira empurra.
+  // Bow into the side: the classic ramming. A's bow goes 60 cm into B's side, which is lying
+  // athwart. The shortest way out is B's side, and that is where the wood pushes.
   checkCollision(
-    'proa no costado · o casco é expulso pelo bordo do outro',
+    'bow into the side · the hull is expelled sideways by the other',
     encounter(vessel(0, 0), vessel(0, -8 - halfBeam + 0.6, Math.PI / 2)),
   );
 
-  // Proa contra proa, um metro de sobreposição. É o caso que **não existia**: as
-  // sondagens paravam a 1,23 m da roda de proa, então neste arranjo o passo achava
-  // **zero** contatos e as duas chalupas se telescopavam sem nada as segurar. Daí a
-  // contagem de contatos ser metade do que se prova aqui.
+  // Bow to bow, one meter of overlap. It is the case that **did not exist**: the probes
+  // stopped 1.23 m short of the stem, so in this arrangement the step found **zero**
+  // contacts and the two sloops telescoped with nothing holding them. Hence the contact
+  // count being half of what is proved here.
   //
-  // A outra metade é a força, medida em módulo e não no eixo dos centros — ver
-  // `Encounter.push` para o porquê. O que se exige do eixo é só que ele não seja
-  // **negativo**: a madeira pode empurrar de lado, não pode puxar para dentro.
+  // The other half is the force, measured as a magnitude and not on the axis of the
+  // centers — see `Encounter.push` for why. All that is demanded of the axis is that it
+  // not be **negative**: the wood may push sideways, it may not pull inward.
   {
     const met = encounter(vessel(0, 0), vessel(0, -15, Math.PI));
     const ok = met.contacts > 0 && met.push >= COLLISION_FLOOR && met.push <= CATAPULT_CEILING && met.separation > -0.5;
     record(
-      'proa contra proa · as duas se recusam a se atravessar',
-      `${met.contacts} contatos · ${met.depth.toFixed(2)} m · ${met.push.toFixed(1)} m/s² de empurrão`,
-      `> 0 contatos · ${COLLISION_FLOOR}–${CATAPULT_CEILING} m/s², nada de atração`,
+      'bow to bow · the two refuse to go through each other',
+      `${met.contacts} contacts · ${met.depth.toFixed(2)} m · ${met.push.toFixed(1)} m/s² of push`,
+      `> 0 contacts · ${COLLISION_FLOOR}–${CATAPULT_CEILING} m/s², no attraction`,
       ok,
-      met.contacts === 0 ? 'nenhum contato encontrado' : `empurrão de ${met.push.toFixed(1)} m/s²`,
+      met.contacts === 0 ? 'no contact found' : `push of ${met.push.toFixed(1)} m/s²`,
     );
   }
 
-  // E o contrário disso: longe um do outro, nada acontece. Um contato fantasma aqui
-  // seria pior que nenhum contato lá — o navio sairia empurrado no mar aberto.
+  // And the opposite of that: far apart, nothing happens. A phantom contact here would be
+  // worse than no contact there — the ship would be pushed around on the open sea.
   {
     const met = encounter(vessel(0, 0), vessel(0, -40));
     const ok = met.contacts === 0 && Math.abs(met.separation) < 1e-6;
     record(
-      'mar aberto · sem sobreposição não há contato',
-      `${met.contacts} contatos · ${met.separation.toFixed(4)} m/s²`,
-      '0 contatos · 0 m/s²',
+      'open sea · with no overlap there is no contact',
+      `${met.contacts} contacts · ${met.separation.toFixed(4)} m/s²`,
+      '0 contacts · 0 m/s²',
       ok,
-      'contato encontrado entre cascos que não se tocam',
+      'contact found between hulls that do not touch',
     );
   }
 
-  // -- estrago ------------------------------------------------------------------
+  // -- damage -------------------------------------------------------------------
 
-  /** Abalroa um casco limpo na linha d'água, a meia-nau, e diz o que ficou. */
+  /** Rams a clean hull at the waterline, amidships, and says what is left. */
   function ram(speed: number, y = 0.1): ShipDamage {
     const damage = new ShipDamage();
     damage.ram(new THREE.Vector3(halfBeam, y, 0), speed);
     return damage;
   }
 
-  const escada: ReadonlyArray<[number, number]> = [
+  const ladder: ReadonlyArray<[number, number]> = [
     [0.9, 0],
     [1.5, 1],
     [2.5, 2],
     [4, 3],
     [9, 3],
   ];
-  for (const [speed, esperado] of escada) {
-    const medido = ram(speed).breaches.length;
+  for (const [speed, want] of ladder) {
+    const got = ram(speed).breaches.length;
     record(
-      `abalroamento · ${speed.toFixed(1)} m/s abre ${esperado} rombo(s)`,
-      `${medido}`,
-      `${esperado}`,
-      medido === esperado,
-      `abriu ${medido}`,
+      `ramming · ${speed.toFixed(1)} m/s opens ${want} breach(es)`,
+      `${got}`,
+      `${want}`,
+      got === want,
+      `opened ${got}`,
     );
   }
 
-  // Três rombos e não um alargado: `RAM_SPREAD` tem de vencer `MERGE_DISTANCE`,
-  // senão a pancada mais forte do jogo valeria menos que a soma das partes dela —
-  // alargar satura em `MAX_BREACH_SCALE` e três buracos separados não saturam.
+  // Three breaches and not one widened: `RAM_SPREAD` has to beat `MERGE_DISTANCE`, or else
+  // the hardest blow in the game would be worth less than the sum of its parts — widening
+  // saturates at `MAX_BREACH_SCALE` and three separate holes do not saturate.
   {
     const damage = ram(4);
     let closest = Number.POSITIVE_INFINITY;
@@ -305,38 +302,38 @@ export function runContactTests(): TestReport {
     }
     const ok = damage.breaches.length === 3 && closest > 0.5;
     record(
-      'abalroamento · os três rombos ficam separados',
-      `${damage.breaches.length} rombos · ${closest.toFixed(2)} m entre os mais próximos`,
-      '3 rombos · > 0,50 m',
+      'ramming · the three breaches stay apart',
+      `${damage.breaches.length} breaches · ${closest.toFixed(2)} m between the closest`,
+      '3 breaches · > 0.50 m',
       ok,
-      'os rombos da pancada se fundiram num só',
+      'the blow made a single merged breach',
     );
   }
 
-  // Todo rombo de pancada tem de alagar e tem de estar no bordo em que se bateu.
+  // Every breach from a blow has to flood and has to be on the side that was struck.
   {
     const damage = ram(4);
-    const abaixo = damage.breaches.every((breach) => breach.local.y < 1.3);
-    const noBordo = damage.breaches.every((breach) => breach.local.x > 0);
+    const below = damage.breaches.every((breach) => breach.local.y < 1.3);
+    const onSide = damage.breaches.every((breach) => breach.local.x > 0);
     record(
-      'abalroamento · os rombos abrem no bordo da pancada, abaixo do convés',
-      `${abaixo ? 'abaixo' : 'acima'} · ${noBordo ? 'a boreste' : 'no bordo errado'}`,
-      'abaixo · a boreste',
-      abaixo && noBordo,
-      'rombo fora do costado que levou a pancada',
+      'ramming · the breaches open on the struck side, below the deck',
+      `${below ? 'below' : 'above'} · ${onSide ? 'to starboard' : 'on the wrong side'}`,
+      'below · to starboard',
+      below && onSide,
+      'breach outside the side that took the blow',
     );
   }
 
-  // Bater na amurada arranca lasca e nada mais, como no tiro: acima do convés não
-  // há porão para encher.
+  // Hitting the bulwark tears out splinters and nothing else, as with a shot: above the
+  // deck there is no hold to fill.
   {
-    const medido = ram(6, 1.6).breaches.length;
+    const got = ram(6, 1.6).breaches.length;
     record(
-      'abalroamento · pancada acima do convés não abre casco',
-      `${medido} rombos`,
-      '0 rombos',
-      medido === 0,
-      `abriu ${medido} rombo(s) na amurada`,
+      'ramming · a blow above the deck does not open the hull',
+      `${got} breaches`,
+      '0 breaches',
+      got === 0,
+      `opened ${got} breach(es) in the bulwark`,
     );
   }
 

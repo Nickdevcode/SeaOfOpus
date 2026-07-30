@@ -198,7 +198,7 @@ async function test(nome, run) {
   }
 }
 
-await test('a fila pareia dois capitães', async (keep) => {
+await test('the queue pairs two captains', async (keep) => {
   await drainQueue();
 
   const first = open('/queue');
@@ -232,7 +232,7 @@ await test('a fila pareia dois capitães', async (keep) => {
   if (startA.timeOfDay !== startB.timeOfDay) throw new Error('the two sides got different clocks');
 });
 
-await test('a fila não decide quem simula antes de os dois se apresentarem', async (keep) => {
+await test('the queue does not pick who simulates before both have introduced themselves', async (keep) => {
   await drainQueue();
 
   // ⚠️ Both connections open **before** any `hello`, and that is what this case
@@ -274,7 +274,7 @@ await test('a fila não decide quem simula antes de os dois se apresentarem', as
   if (roleB.role !== 'guest') throw new Error(`the second captain got "${roleB.role}"`);
 });
 
-await test('a fila não senta ninguém numa vaga que já não serve', async (keep) => {
+await test('the queue does not seat anyone in a slot that is no longer any good', async (keep) => {
   await drainQueue();
 
   // Ana joins the queue and becomes the slot being held.
@@ -336,7 +336,7 @@ await test('quem desiste da fila devolve a vaga', async (keep) => {
   if (fresh.code === abandoned.code) throw new Error('sent into the room nobody is in');
 });
 
-await test('a sala por código pareia e retransmite quadro', async (keep) => {
+await test('the room by code pairs and relays a frame', async (keep) => {
   const { host, guest } = await pairByCode();
   keep.push(host, guest);
 
@@ -345,7 +345,7 @@ await test('a sala por código pareia e retransmite quadro', async (keep) => {
   if (relayed.bytes !== 6) throw new Error(`frame arrived with ${relayed.bytes} bytes, not 6`);
 });
 
-await test('um código que ninguém abriu é recusado com motivo', async (keep) => {
+await test('a code nobody opened is refused with a reason', async (keep) => {
   // ⚠️ Drawn at random, and **not** a hardcoded `ZZZZ`. This test also runs
   // against the published server, where rooms are global and outlive the run: a
   // fixed code passes the first time and fails every time after, because the
@@ -359,7 +359,7 @@ await test('um código que ninguém abriu é recusado com motivo', async (keep) 
   if (!/no room/i.test(error.reason)) throw new Error(`unhelpful reason: ${error.reason}`);
 });
 
-await test('uma versão diferente do jogo é recusada na porta', async (keep) => {
+await test('a different version of the game is refused at the door', async (keep) => {
   const stale = open('/room/new');
   keep.push(stale);
   await opened(stale);
@@ -368,7 +368,7 @@ await test('uma versão diferente do jogo é recusada na porta', async (keep) =>
   if (!/version/i.test(error.reason)) throw new Error(`unhelpful reason: ${error.reason}`);
 });
 
-await test('um terceiro na porta não derruba o duelo dos dois', async (keep) => {
+await test('a third at the door does not take down the two players’ duel', async (keep) => {
   const { host, guest, code } = await pairByCode();
   keep.push(host, guest);
 
@@ -404,7 +404,7 @@ await test('o resultado do host encerra a sala dos dois lados', async (keep) => 
   }
 });
 
-await test('só o host pode declarar o fim', async (keep) => {
+await test('only the host may declare the end', async (keep) => {
   const { host, guest, roleA } = await pairByCode(95, 30);
   keep.push(host, guest);
 
@@ -416,7 +416,7 @@ await test('só o host pode declarar o fim', async (keep) => {
   }
 });
 
-await test('quem fica sozinho é avisado de que o outro saiu', async (keep) => {
+await test('whoever is left alone is told the other one left', async (keep) => {
   const { host, guest } = await pairByCode();
   keep.push(host);
 
@@ -425,7 +425,7 @@ await test('quem fica sozinho é avisado de que o outro saiu', async (keep) => {
   if (over.reason !== 'left') throw new Error(`ended as "${over.reason}", not "left"`);
 });
 
-await test('quem foi pareado e ficou sozinho antes do começo é avisado', async (keep) => {
+await test('whoever was paired and left alone before the start is told', async (keep) => {
   await drainQueue();
 
   const ana = open('/queue');
