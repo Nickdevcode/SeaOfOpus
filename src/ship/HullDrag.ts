@@ -1,21 +1,20 @@
 /**
- * Resistência do casco na água.
+ * The hull's resistance in the water.
  *
- * Três termos, cada um com um papel:
+ * Three terms, each with a job:
  *
- * - **Avanço** (eixo Z local): uma força só, no centro de carena. É o que define
- *   a velocidade máxima do navio, já que em regime o empuxo da vela iguala este
- *   arrasto.
- * - **Deriva** (eixo X local): distribuída em várias estações ao longo da quilha,
- *   e é aqui que está o truque. Um casco que guina tem, em cada estação, uma
- *   velocidade lateral diferente (ω × r), então a soma dos arrastos laterais
- *   gera **amortecimento de guinada** sozinha. Sem isso seria preciso inventar um
- *   coeficiente de rotação, e o raio de giro deixaria de responder à velocidade.
- * - **Atrito de superfície**: linear, pequeno, e existe para o navio parar em vez
- *   de ficar deslizando eternamente quando o arrasto quadrático já é desprezível.
+ * - **Surge** (local Z axis): a single force, at the center of buoyancy. It is what sets
+ *   the ship's top speed, since at steady state the sail's thrust equals this drag.
+ * - **Sway** (local X axis): distributed over several stations along the keel, and this
+ *   is where the trick is. A hull that yaws has, at each station, a different lateral
+ *   velocity (ω × r), so the sum of the lateral drags generates **yaw damping** on its
+ *   own. Without it we would have to invent a rotation coefficient, and the turning
+ *   radius would stop responding to speed.
+ * - **Skin friction**: linear, small, and it exists so the ship stops instead of gliding
+ *   forever once the quadratic drag is already negligible.
  *
- * Tudo escala pela fração submersa: navio meio afundado arrasta mais, navio
- * saltando fora da vaga arrasta menos.
+ * Everything scales with the submerged fraction: a half-sunk ship drags more, a ship
+ * leaping out of the swell drags less.
  */
 
 import * as THREE from 'three';
@@ -24,88 +23,90 @@ import { HULL_LENGTH, sampleSection, tToZ, type HullSection } from './ShipDimens
 import type { ShipBody } from './ShipBody';
 
 /**
- * Coeficiente de arrasto de avanço, sobre a área da seção mestra (3,7 m²).
+ * Surge drag coefficient, over the midship section's area (3.7 m²).
  *
- * Alto para um casco (um casco fino fica perto de 0,1), e de propósito: ele
- * carrega junto a resistência de formação de ondas, que num deslocamento de 16 m
- * dispara perto da velocidade de casco. É **este** termo que tem de fixar a
- * velocidade máxima, e a 0,38 ele fixa em ~5 m/s (9,7 nós) com a vela cheia —
- * conferido na bancada de física, não estimado.
+ * High for a hull (a fine hull sits near 0.1), and on purpose: it carries the
+ * wave-making resistance along with it, which on a 16 m displacement hull takes off near
+ * hull speed. It is **this** term that has to set the top speed, and at 0.38 it sets it
+ * at ~5 m/s (9.7 knots) with the sail full — checked on the physics bench, not
+ * estimated.
  */
 const SURGE_CD = 0.38;
-/** Área da seção mestra submersa, em m². Medida do próprio casco. */
+/** Submerged midship section area, in m². Measured from the hull itself. */
 const MIDSHIP_AREA = 3.7;
 
-/** Arrasto lateral, sobre o plano de deriva. Casco de lado é uma placa. */
+/** Lateral drag, over the sway plane. A hull side-on is a plate. */
 const SWAY_CD = 1.15;
 
-/** Estações onde o arrasto lateral é aplicado. Ímpar para uma cair na meia-nau. */
+/** Stations where the lateral drag is applied. Odd so one lands amidships. */
 const LATERAL_STATIONS = 9;
 
 /**
- * Atrito viscoso linear, em 1/s sobre a massa.
+ * Linear viscous friction, in 1/s over the mass.
  *
- * ⚠️ Este número engana. Por ser **linear**, ele não é um termo pequeno que só
- * aparece no fim: ele é `0,012 × 36 905 = 443 N·s/m`, e concorre com o quadrático
- * em toda a faixa. A primeira calibragem usou 0,22 e o resultado foi 20 kN de
- * arrasto a 2,5 m/s — 82% de toda a resistência do navio, o que travava a Chalupa
- * em 4,8 nós e fazia o `SURGE_CD` acima virar decoração.
+ * ⚠️ This number is deceptive. Being **linear**, it is not a small term that only shows
+ * up at the end: it is `0.012 × 36,905 = 443 N·s/m`, and it competes with the quadratic
+ * across the whole range. The first calibration used 0.22 and the result was 20 kN of
+ * drag at 2.5 m/s — 82% of the ship's entire resistance, which locked the Sloop at 4.8
+ * knots and turned the `SURGE_CD` above into decoration.
  *
- * O papel dele é só um: dar uma constante de tempo finita (~83 s) para o navio
- * chegar a zero em vez de deslizar para sempre quando o quadrático já não segura
- * nada. Qualquer valor que o faça pesar em velocidade de cruzeiro está errado.
+ * Its job is one thing only: giving a finite time constant (~83 s) for the ship to reach
+ * zero instead of gliding forever once the quadratic no longer holds anything. Any value
+ * that makes it weigh at cruising speed is wrong.
  */
 const SKIN_FRICTION = 0.012;
 
 /**
- * Amortecimento angular residual, em 1/s.
+ * Residual angular damping, in 1/s.
  *
- * Existe para o **balanço** (X e Z), que a carena mal amortece por ser quase
- * circular no bojo. O termo de guinada (Y) é pequeno de propósito: as estações
- * laterais acima já amortecem guinada de verdade, e o valor antigo (0,35) somava
- * outros 15 kN·m a essa conta — metade de toda a resistência à curva vinha de um
- * número inventado, não da água.
+ * It exists for the **roll** (X and Z), which the underwater body barely damps because
+ * it is nearly circular at the bilge. The yaw term (Y) is small on purpose: the lateral
+ * stations above already damp yaw for real, and the old value (0.35) added another
+ * 15 kN·m to that sum — half of all the resistance to turning came from an invented
+ * number, not from the water.
  */
 const ROLL_DAMPING = new THREE.Vector3(0.9, 0.08, 1.4);
 
 /**
- * Fração do momento de Munk teórico que se aplica ao casco.
+ * Fraction of the theoretical Munk moment applied to the hull.
  *
- * **O que é.** Um corpo alongado num fluido carrega mais massa adicionada de
- * lado do que de proa (aqui, 1,9 contra 1,06). Quando ele avança em deriva, a
- * quantidade de movimento do fluido deixa de ser paralela à velocidade, e a
- * diferença vira um binário que **abre ainda mais a deriva**. É o termo
- * `(m₂₂ − m₁₁)·u·v` das equações de Kirchhoff, e está em todo modelo de manobra
- * sério (MMG, Abkowitz) exatamente porque sem ele o navio vira um trilho.
+ * **What it is.** An elongated body in a fluid carries more added mass sideways than
+ * bow-on (here, 1.9 against 1.06). When it advances with sideslip, the fluid's momentum
+ * stops being parallel to the velocity, and the difference becomes a couple that **opens
+ * the sideslip even further**. It is the `(m₂₂ − m₁₁)·u·v` term of Kirchhoff's
+ * equations, and it is in every serious maneuvering model (MMG, Abkowitz) precisely
+ * because without it the ship becomes a rail.
  *
- * Era isso que faltava aqui, e o quanto se vê medindo com ele desligado: a volta
- * de 360° cai de **98 s e 113 m de diâmetro** para **63 s e 70 m**. Sem o Munk o
- * leme abre a curva, o casco resiste e nada empurra a guinada a favor.
+ * That is what was missing here, and how much shows by measuring with it switched off:
+ * the 360° turn drops from **98 s and 113 m of diameter** to **63 s and 70 m**. Without
+ * the Munk moment the rudder opens the turn, the hull resists and nothing pushes the yaw
+ * along.
  *
- * **Por que 0,25 e não o valor teórico.** O 1,0 vem de escoamento potencial, sem
- * separação; num casco real a esteira descolada come boa parte dele. O teto útil
- * aqui é mais duro que a literatura, e sai da bancada: com o navio a 5 m/s e a
- * deriva imposta, mede-se de um lado o Munk mais as estações laterais (os dois
- * abrem a deriva) e do outro o leme no meio (que a fecha, ver `Rudder`).
+ * **Why 0.25 and not the theoretical value.** The 1.0 comes from potential flow, with no
+ * separation; on a real hull the detached wake eats a good part of it. The useful
+ * ceiling here is harsher than the literature's, and it comes from the bench: with the
+ * ship at 5 m/s and the sideslip imposed, you measure on one side the Munk moment plus
+ * the lateral stations (both of which open the sideslip) and on the other the rudder
+ * amidships (which closes it, see `Rudder`).
  *
  * ```
- * deriva    leme      estações   Munk (a 0,25)   fator máximo
- *    5°   −22 689      +2 206        +16 822          0,30
- *   10°   −45 206      +8 755        +33 134          0,27
- *   20°   −89 038     +33 965        +62 271          0,22
+ * sideslip   rudder    stations   Munk (at 0.25)   maximum factor
+ *      5°   −22,689      +2,206         +16,822             0.30
+ *     10°   −45,206      +8,755         +33,134             0.27
+ *     20°   −89,038     +33,965         +62,271             0.22
  * ```
  *
- * O limite **cai** com o ângulo porque o casco cresce mais rápido que o leme, e
- * isso não é defeito: é a perda de estabilidade direcional em deriva grande, que
- * é justamente o que faz um navio "cavar" a curva em vez de sair de lado. A 0,25
- * o navio segura rumo até uns 13° de deriva e entrega curva de 360° em 63 s com
- * 70 m de diâmetro; navegando livre a deriva fica em 0,3°, folga de sobra.
+ * The limit **falls** with the angle because the hull grows faster than the rudder, and
+ * that is not a defect: it is the loss of directional stability at large sideslip, which
+ * is exactly what makes a ship "dig into" the turn instead of sliding out of it. At 0.25
+ * the ship holds its heading up to about 13° of sideslip and delivers a 360° turn in
+ * 63 s with 70 m of diameter; sailing free the sideslip sits at 0.3°, slack to spare.
  *
- * ⚠️ Estes números valem para o leme com o sinal certo. A primeira versão desta
- * tabela foi levantada com `alpha = rudderAngle − inflow`, e nela o leme
- * *somava* à instabilidade em vez de restaurar — o navio andava com 25 a 30° de
- * caranguejo permanente e a volta levava 143 s. Se algum dia mexerem em `Rudder`,
- * remedir isto antes de mexer aqui.
+ * ⚠️ These numbers hold for the rudder with the right sign. The first version of this
+ * table was taken with `alpha = rudderAngle − inflow`, and in it the rudder *added* to
+ * the instability instead of restoring — the ship sailed with 25 to 30° of permanent
+ * crab and the turn took 143 s. If anybody ever touches `Rudder`, remeasure this before
+ * touching here.
  */
 const MUNK_FACTOR = 0.25;
 
@@ -119,11 +120,11 @@ const _local = new THREE.Vector3();
 const _torque = new THREE.Vector3();
 
 export class HullDrag {
-  /** Z local de cada estação de arrasto lateral. */
+  /** Local Z of each lateral drag station. */
   private readonly stationZ: number[] = [];
-  /** Área lateral submersa atribuída a cada estação, em m². */
+  /** Submerged lateral area assigned to each station, in m². */
   private readonly stationArea: number[] = [];
-  /** Profundidade média de aplicação: metade do calado local. */
+  /** Mean depth of application: half the local draft. */
   private readonly stationY: number[] = [];
 
   constructor() {
@@ -136,21 +137,21 @@ export class HullDrag {
       const draft = Math.max(-section.keelY, 0);
       this.stationZ.push(tToZ(t));
       this.stationArea.push(draft * dz);
-      // Metade do calado é o centro de pressão de uma placa retangular; usar a
-      // linha d'água em vez disso daria braço zero e o navio não adernaria ao
-      // derrapar numa curva.
+      // Half the draft is a rectangular plate's center of pressure; using the
+      // waterline instead would give zero lever arm and the ship would not heel when
+      // skidding through a turn.
       this.stationY.push(-draft * 0.5);
     }
   }
 
   /**
-   * @param submersion fração do volume de projeto submersa (de `Buoyancy`).
+   * @param submersion fraction of the design volume submerged (from `Buoyancy`).
    */
   apply(body: ShipBody, submersion: number): void {
     const wetted = Math.min(submersion, 1.4);
     if (wetted <= 0.01) return;
 
-    // --- avanço, no centro de carena -----------------------------------------
+    // --- surge, at the center of buoyancy ------------------------------------
     body.worldDirToLocal(body.velocity, _localVelocity);
     const surge = _localVelocity.z;
     const surgeDrag = -0.5 * WATER_DENSITY * SURGE_CD * MIDSHIP_AREA * wetted * Math.abs(surge) * surge;
@@ -159,11 +160,11 @@ export class HullDrag {
     body.localDirToWorld(_force, _force);
     body.applyForce(_force);
 
-    // --- atrito linear --------------------------------------------------------
+    // --- linear friction ------------------------------------------------------
     _force.copy(body.velocity).multiplyScalar(-SKIN_FRICTION * body.mass * wetted);
     body.applyForce(_force);
 
-    // --- deriva, estação por estação -----------------------------------------
+    // --- sway, station by station --------------------------------------------
     for (let i = 0; i < this.stationZ.length; i++) {
       _local.set(0, this.stationY[i]!, this.stationZ[i]!);
       body.localToWorld(_local, _worldPoint);
@@ -179,10 +180,10 @@ export class HullDrag {
       body.applyForceAtPoint(_force, _worldPoint);
     }
 
-    // --- momento de Munk ------------------------------------------------------
-    // Sinais: `u` é avanço (a proa é -Z, então avançar é ter z negativo) e `v` é
-    // deriva para boreste. Guinar para bombordo é +Y aqui, e o binário de Munk
-    // empurra a proa **para fora** da deriva — daí o sinal negativo.
+    // --- Munk moment ----------------------------------------------------------
+    // Signs: `u` is surge (the bow is -Z, so moving ahead means having negative z) and
+    // `v` is sway to starboard. Yawing to port is +Y here, and the Munk couple pushes
+    // the bow **out of** the sideslip — hence the negative sign.
     const munk =
       -MUNK_FACTOR *
       body.mass *
@@ -195,7 +196,7 @@ export class HullDrag {
     body.localDirToWorld(_torque, _torque);
     body.applyTorque(_torque);
 
-    // --- amortecimento angular residual --------------------------------------
+    // --- residual angular damping --------------------------------------------
     body.worldDirToLocal(body.angularVelocity, _torque);
     _torque.set(
       -_torque.x * ROLL_DAMPING.x * body.inertia.x * wetted,
