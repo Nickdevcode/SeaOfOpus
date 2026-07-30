@@ -1,59 +1,58 @@
 /**
- * Quando os dois cascos se encostam: abalroamento.
+ * When the two hulls touch: ramming.
  *
- * Existe porque a alternativa é pior do que parece. Sem contato, os navios se
- * **atravessam** — e não é só feio: some a única consequência de chegar perto, que
- * é o risco. O duelo inteiro se resolveria a dez metros, onde nenhuma carreta
- * consegue apontar, e o jogador descobriria que colar no inimigo é a estratégia
- * ótima do jogo.
+ * It exists because the alternative is worse than it looks. Without contact, the ships
+ * **go through each other** — and it is not only ugly: the one consequence of getting
+ * close, which is risk, disappears. The whole duel would be settled at ten meters, where
+ * no carriage can point, and the player would discover that sticking to the enemy is the
+ * game's optimal strategy.
  *
- * **Não usa malha, pelo mesmo motivo que `HitDetection` não usa.** O casco é uma
- * função (`ShipDimensions`), então "este ponto está dentro do outro navio" já é uma
- * comparação exata e barata. O teste aqui é o mais simples que resolve: coroas de
- * pontos ao longo do costado de cada navio, testadas contra o volume do outro.
+ * **It does not use a mesh, for the same reason `HitDetection` does not.** The hull is a
+ * function (`ShipDimensions`), so "this point is inside the other ship" is already an
+ * exact and cheap comparison. The test here is the simplest one that solves it: rings of
+ * points along each ship's planking, tested against the other's volume.
  *
- * **Por que mola-amortecedor e não impulso.** Resolver colisão por impulso exige o
- * instante exato do contato e refazer o passo; com dois corpos de 37 t flutuando em
- * água que já os empurra, o ganho é nenhum. Uma penalidade elástica proporcional à
- * penetração, com atrito viscoso, dá o que o jogo precisa: os cascos se recusam a
- * ocupar o mesmo lugar, rangem um contra o outro e se afastam girando. Aplicada
- * **no ponto de contato**, ela gera o torque sozinha — encostar de proa faz o navio
- * pivotar, e é o que se espera.
+ * **Why a spring-damper and not an impulse.** Resolving a collision by impulse requires
+ * the exact instant of contact and redoing the step; with two 37 t bodies floating in
+ * water that is already pushing them, the gain is nothing. An elastic penalty
+ * proportional to the penetration, with viscous friction, gives the game what it needs:
+ * the hulls refuse to occupy the same place, grind against each other and push apart
+ * turning. Applied **at the contact point**, it generates the torque on its own —
+ * touching bow-on makes the ship pivot, and that is what you expect.
  *
- * ## Duas passadas, e por que não uma
+ * ## Two passes, and why not one
  *
- * A força de um contato de penalidade é `k × penetração`, e ela tem de valer **por
- * contato**, não por sondagem: quantas sondagens caem dentro do outro casco é
- * detalhe de amostragem, e a madeira não empurra dez vezes mais forte porque a
- * grade ficou mais fina ali.
+ * A penalty contact's force is `k × penetration`, and it has to apply **per contact**,
+ * not per probe: how many probes fall inside the other hull is a sampling detail, and
+ * the wood does not push ten times harder because the grid got finer there.
  *
- * ⚠️ A versão anterior aplicava a força na hora de encontrá-la e dividia por
- * `SAMPLES_PER_SIDE` — dez, o número de sondagens de **um bordo**, não o número de
- * sondagens que de fato tocaram. Um encontro de esguelha ou de proa põe uma ou duas
- * sondagens dentro do outro casco, e nessas o navio recebia um décimo da força
- * projetada. Era exatamente o caso em que se batia de verdade, e o que se via era
- * uma proa entrando no costado do outro como se ele fosse névoa.
+ * ⚠️ The previous version applied the force the moment it found it and divided by
+ * `SAMPLES_PER_SIDE` — ten, the number of probes on **one side**, not the number of
+ * probes that actually touched. A glancing or bow-on encounter puts one or two probes
+ * inside the other hull, and in those the ship received one tenth of the projected
+ * force. It was exactly the case where you really did hit, and what you saw was a bow
+ * entering the other's planking as if it were mist.
  *
- * Então junta-se tudo primeiro (`gather`) e aplica-se depois (`apply`), dividindo
- * pela contagem real. O resultado é `k × penetração média`, que é o que uma mola de
- * contato deve entregar, e ele deixou de depender de quantos pontos por acidente
- * caíram dentro.
+ * So everything is gathered first (`gather`) and applied afterwards (`apply`), dividing
+ * by the real count. The result is `k × mean penetration`, which is what a contact
+ * spring should deliver, and it stopped depending on how many points happened to fall
+ * inside.
  *
- * A **direção** também é do par, e não da sondagem: ver `chooseExit`, e o
- * cancelamento perfeito que a escolha ponto a ponto produzia num encontro de proa.
+ * The **direction** belongs to the pair too, and not to the probe: see `chooseExit`, and
+ * the perfect cancellation the point-by-point choice produced in a bow-on encounter.
  *
- * O que este arquivo promete está escrito como teste em `tests/contact.ts` — os
- * quatro encontros que existem, mais a reação igual e contrária.
+ * What this file promises is written down as a test in `tests/contact.ts` — the four
+ * encounters that exist, plus the equal and opposite reaction.
  *
- * ## Onde isto roda, e por que antes e não depois
+ * ## Where this runs, and why before and not after
  *
- * `Ship.fixedUpdate` integra no fim dele mesmo, então não há janela entre "somar as
- * forças" e "integrar". A solução é chamar este passo **antes** dos navios: as
- * forças ficam acumuladas em `ShipBody` (que só zera no `integrate`) e entram no
- * passo que está começando. O custo é que a penetração medida é a do passo
- * anterior — 1,6 cm de defasagem a 1 m/s de aproximação, três ordens de grandeza
- * abaixo da precisão que uma força de contato precisa. Trocar isso por uma cirurgia
- * em `Ship` para expor um `integrate` separado seria pagar caro por nada.
+ * `Ship.fixedUpdate` integrates at the end of itself, so there is no window between
+ * "sum the forces" and "integrate". The solution is to call this step **before** the
+ * ships: the forces stay accumulated in `ShipBody` (which only zeroes on `integrate`)
+ * and enter the step that is starting. The cost is that the penetration measured is the
+ * previous step's — 1.6 cm of lag at 1 m/s of approach, three orders of magnitude below
+ * the precision a contact force needs. Trading that for surgery on `Ship` to expose a
+ * separate `integrate` would be paying dearly for nothing.
  */
 
 import * as THREE from 'three';
@@ -68,108 +67,104 @@ import { insideHull } from './HitDetection';
 import type { Ship } from '../ship/Ship';
 
 /**
- * Sondagens por bordo e por altura, distribuídas ao longo do costado.
+ * Probes per side and per height, spread along the planking.
  *
- * O espaçamento sai em 1,5 m num casco de 16 m, bem menor que a boca de 5 m do
- * outro navio: não existe ângulo de encontro em que os dois se cruzem sem que
- * alguma sondagem caia dentro.
+ * The spacing comes out at 1.5 m on a 16 m hull, well under the other ship's 5 m beam:
+ * there is no angle of encounter where the two cross without some probe falling inside.
  */
 const SAMPLES_PER_SIDE = 10;
 
 /**
- * Alturas das coroas de sondagem, em coordenadas locais.
+ * Heights of the probe rings, in local coordinates.
  *
- * ⚠️ **Eram uma só, na linha d'água de projeto**, e uma coroa plana só encontra o
- * outro casco enquanto os dois estiverem mais ou menos no mesmo plano. Dois navios
- * que se encontram estão jogando: um sobe na crista enquanto o outro desce no
- * cavado, e cada um aderna para o seu lado. Nesses instantes — que são a maioria
- * deles num mar de meio metro — a coroa da linha d'água de um passava **por baixo**
- * do bojo do outro ou **por cima** da amurada, e o contato simplesmente não
- * existia: os cascos se cruzavam e voltavam a se repelir na onda seguinte.
+ * ⚠️ **There used to be one, at the design waterline**, and a flat ring only meets the
+ * other hull while the two are roughly in the same plane. Two ships meeting are rolling:
+ * one rides the crest while the other drops into the trough, and each heels its own way.
+ * At those instants — which are most of them in a half-meter sea — one's waterline ring
+ * passed **below** the other's bilge or **above** its bulwark, and the contact simply did
+ * not exist: the hulls crossed and went back to repelling each other on the next wave.
  *
- * Três alturas cobrem o costado inteiro do bojo à amurada: `-0,7` é a barriga do
- * casco (onde o contato acontece quando um está adernado para longe), `0,1` é a
- * linha d'água de projeto (onde acontece com os dois quietos) e `0,9` é o costado
- * seco, logo abaixo do trincaniz (onde acontece quando um aderna *para dentro* do
- * outro). Custa 120 sondagens por passo em vez de 40, e uma sondagem é uma
- * conversão de referencial mais uma comparação de seção.
+ * Three heights cover the whole side from bilge to bulwark: `-0.7` is the hull's belly
+ * (where contact happens when one is heeled away), `0.1` is the design waterline (where
+ * it happens with both of them quiet) and `0.9` is the dry topsides, just under the
+ * covering board (where it happens when one heels *into* the other). It costs 120 probes
+ * per step instead of 40, and one probe is a frame conversion plus a section comparison.
  */
 const PROBE_HEIGHTS = [-0.7, 0.1, 0.9] as const;
 
 /**
- * Rigidez do contato, em newtons por metro de penetração.
+ * Contact stiffness, in newtons per meter of penetration.
  *
- * 6 MN/m. O número sai da energia do encontro, e não do gosto: dois cascos de 37 t
- * (70 t de massa efetiva com a água que arrastam de lado, ~35 t de massa reduzida
- * para o par) fechando a 3 m/s carregam 157 kJ, e uma mola desta rigidez os para
- * com 23 cm de penetração — o casco *deforma* o que a madeira deformaria, e não
- * mais que isso. A metade da velocidade, são 12 cm; a um encontrão de 6 m/s, meio
- * metro, e aí o afastamento é violento como deve ser.
+ * 6 MN/m. The number comes from the encounter's energy, and not from taste: two 37 t
+ * hulls (70 t of effective mass with the water they drag sideways, ~35 t of reduced mass
+ * for the pair) closing at 3 m/s carry 157 kJ, and a spring of this stiffness stops them
+ * at 23 cm of penetration — the hull *deforms* what the wood would deform, and no more
+ * than that. At half the speed it is 12 cm; at a 6 m/s collision, half a meter, and then
+ * the separation is as violent as it should be.
  *
- * **Era 1,4 MN/m**, e com a divisão errada de `apply` (ver o cabeçalho) um contato
- * de proa entregava 140 kN/m efetivos — 2% do que está aqui. Meio metro de proa
- * dentro do costado devolvia 70 kN contra 37 t, ou seja, 1,9 m/s² para desfazer uma
- * aproximação de vários metros por segundo. Não dava.
+ * **It was 1.4 MN/m**, and with `apply`'s wrong division (see the header) a bow contact
+ * delivered an effective 140 kN/m — 2% of what is here. Half a meter of bow inside the
+ * planking gave back 70 kN against 37 t, meaning 1.9 m/s² to undo an approach of several
+ * meters per second. It was not enough.
  *
- * A estabilidade tem folga de sobra: com 35 t de massa reduzida e passo de 1/60 s,
- * `ω·dt` fica em 0,2 contra o limite de 2 do integrador explícito. Daria para subir
- * dez vezes ainda; o que segura o número aqui é o realismo do amassado, não a
- * aritmética.
+ * Stability has slack to spare: with 35 t of reduced mass and a 1/60 s step, `ω·dt` sits
+ * at 0.2 against the explicit integrator's limit of 2. It could go up tenfold still; what
+ * holds the number here is the realism of the crushing, not the arithmetic.
  */
 const STIFFNESS = 6e6;
 
 /**
- * Amortecimento do contato, em N·s/m.
+ * Contact damping, in N·s/m.
  *
- * Sem ele a colisão é perfeitamente elástica e os navios quicam um no outro como
- * bolas de bilhar, indo e voltando várias vezes. Com ele o encontro é o que se
- * espera de madeira contra madeira: um baque, um rangido, e os dois se separam.
+ * Without it the collision is perfectly elastic and the ships bounce off each other like
+ * billiard balls, going back and forth several times. With it the encounter is what you
+ * expect from wood against wood: a thud, a creak, and the two separate.
  *
- * 4,5×10⁵ é metade do amortecimento crítico do par (`2√(k·m)` dá 9,2×10⁵). Meio
- * crítico deixa um único repique curto — que é o que se vê e se ouve num casco
- * batendo em outro — em vez do retorno morto que o amortecimento cheio daria.
+ * 4.5×10⁵ is half the pair's critical damping (`2√(k·m)` gives 9.2×10⁵). Half critical
+ * leaves a single short rebound — which is what you see and hear when one hull strikes
+ * another — instead of the dead return full damping would give.
  */
 const DAMPING = 4.5e5;
 
 /**
- * Atrito tangencial, como fração da força normal.
+ * Tangential friction, as a fraction of the normal force.
  *
- * É o que faz um casco *raspar* o outro em vez de deslizar no gelo, e o que
- * transfere guinada num abalroamento de esguelha.
+ * It is what makes one hull *grind* against the other instead of sliding on ice, and
+ * what transfers yaw in a glancing ram.
  */
 const FRICTION = 0.35;
 
 /**
- * Penetração máxima que ainda vira força de mola, em metros.
+ * Maximum penetration that still becomes spring force, in meters.
  *
- * Não é limite de física, é rede de segurança. Um engasgo do host, uma queda de
- * quadro ou um reposicionamento podem entregar a este passo dois cascos já
- * sobrepostos por dois metros; sem grampo, a mola devolveria 12 MN e a chalupa
- * sairia dali a 3 m/s de uma vez, o que na tela lê como catapulta e não como
- * colisão. Com o grampo, ela é empurrada para fora com convicção e em vários
- * passos, que é como um casco encalhado em outro sai mesmo.
+ * It is not a physics limit, it is a safety net. A host hitch, a dropped frame or a
+ * repositioning can hand this step two hulls already overlapping by two meters; without
+ * the clamp, the spring would give back 12 MN and the sloop would leave there at 3 m/s
+ * all at once, which on screen reads as a catapult and not as a collision. With the
+ * clamp, it is pushed out with conviction and over several steps, which is how a hull
+ * grounded on another really comes off.
  */
 const MAX_PUSH_DEPTH = 1;
 
-// --- resolução ---------------------------------------------------------------
+// --- resolution --------------------------------------------------------------
 
-/** O que o passo de contato apurou, para o áudio, o estrago e o HUD lerem. */
+/** What the contact step found, for the audio, the damage and the HUD to read. */
 export interface ContactReport {
-  /** Pontos em contato neste passo. Zero é "não estão se tocando". */
+  /** Points in contact on this step. Zero is "they are not touching". */
   contacts: number;
-  /** Maior penetração encontrada, em metros. */
+  /** Largest penetration found, in meters. */
   depth: number;
   /**
-   * Maior velocidade de aproximação entre os pontos em contato, em m/s.
+   * Highest closing speed among the points in contact, in m/s.
    *
-   * É ela que separa um roçar de uma pancada — o áudio e a avaria de abalroamento
-   * leem daqui. É a **maior** e não a do contato mais fundo, e a diferença
-   * aparece justamente no instante que interessa: no primeiro passo de uma
-   * pancada a penetração de todos os pontos ainda é milimétrica, e o que já é
-   * enorme é a velocidade com que eles se aproximam.
+   * It is what separates a graze from an impact — the audio and the ramming damage read
+   * from here. It is the **highest** and not the deepest contact's, and the difference
+   * shows up exactly at the instant that matters: on an impact's first step every point's
+   * penetration is still millimetric, and what is already enormous is the speed they are
+   * closing at.
    */
   closingSpeed: number;
-  /** Ponto do mundo do contato mais forte, para o som e o rombo. */
+  /** World point of the strongest contact, for the sound and the breach. */
   readonly point: THREE.Vector3;
 }
 
@@ -178,33 +173,31 @@ export function createContactReport(): ContactReport {
 }
 
 /**
- * Uma sondagem que caiu dentro do outro casco, já medida.
+ * A probe that fell inside the other hull, already measured.
  *
- * Existe porque a força só pode ser calculada depois de se saber **quantos**
- * contatos há — ver o cabeçalho. Guarda o que a segunda passada precisa e nada
- * mais.
+ * It exists because the force can only be computed after knowing **how many** contacts
+ * there are — see the header. It keeps what the second pass needs and nothing more.
  */
 interface Penetration {
-  /** `true` quando a sondagem é do primeiro casco e o volume é do segundo. */
+  /** `true` when the probe belongs to the first hull and the volume to the second. */
   fromA: boolean;
-  /** Ponto do mundo onde a força será aplicada nos dois corpos. */
+  /** World point where the force will be applied to both bodies. */
   readonly point: THREE.Vector3;
-  /** Normal de saída, no mundo. A mesma para todo o par — ver `chooseExit`. */
+  /** Exit normal, in the world. The same for the whole pair — see `chooseExit`. */
   readonly normal: THREE.Vector3;
-  /** Velocidade relativa dos dois pontos materiais que se encontram ali. */
+  /** Relative velocity of the two material points meeting there. */
   readonly relative: THREE.Vector3;
   depth: number;
-  /** Componente da velocidade relativa contra a normal. Negativa é separando. */
+  /** Component of the relative velocity against the normal. Negative is separating. */
   approach: number;
 }
 
 /**
- * O caderno das sondagens penetrantes, montado uma vez.
+ * The notebook of penetrating probes, built once.
  *
- * Duas passadas (cada casco sondando o outro) × dois bordos × sondagens × alturas.
- * Alocado na carga do módulo porque isto roda sessenta vezes por segundo: 120
- * objetos com três vetores cada por passo seriam lixo para o coletor recolher
- * dentro do orçamento do quadro.
+ * Two passes (each hull probing the other) × two sides × probes × heights. Allocated at
+ * module load because this runs sixty times a second: 120 objects with three vectors each
+ * per step would be garbage for the collector to sweep inside the frame's budget.
  */
 const PENETRATIONS: Penetration[] = Array.from(
   { length: 4 * SAMPLES_PER_SIDE * PROBE_HEIGHTS.length },
@@ -234,29 +227,29 @@ const _probeOrigin = new THREE.Vector3();
 const _bearing = new THREE.Vector3();
 const _exitNormal = new THREE.Vector3();
 
-/** A saída escolhida para o par em curso. Ver `chooseExit`. */
+/** The exit chosen for the pair in progress. See `chooseExit`. */
 let _lateralExit = true;
 let _exitSign = 1;
 
 /**
- * Resolve o contato entre dois cascos. Chamar **antes** dos `fixedUpdate` deles —
- * ver a nota no topo do arquivo.
+ * Resolves the contact between two hulls. Call it **before** their `fixedUpdate`s — see
+ * the note at the top of the file.
  */
 export function resolveHullContact(a: Ship, b: Ship, out: ContactReport): ContactReport {
   out.contacts = 0;
   out.depth = 0;
   out.closingSpeed = 0;
 
-  // Descarte por distância: dois cascos de 16 m não se tocam com as origens a mais
-  // de um comprimento inteiro de distância.
+  // Distance rejection: two 16 m hulls do not touch with their origins more than a
+  // whole length apart.
   a.body.getOrigin(_originA);
   b.body.getOrigin(_originB);
   const reach = HALF_LENGTH * 2 + 1;
   if (_originA.distanceToSquared(_originB) > reach * reach) return out;
 
-  // Os dois sentidos entram na **mesma** contagem: é um contato só, visto de dois
-  // lados. Normalizar cada sentido por conta própria daria força dobrada num
-  // encontro em que as duas coroas se alcançam.
+  // Both directions go into the **same** count: it is one contact, seen from two
+  // sides. Normalizing each direction on its own would give double force in an
+  // encounter where the two rings reach each other.
   let count = gather(a, b, true, 0);
   count = gather(b, a, false, count);
   if (count === 0) return out;
@@ -266,10 +259,10 @@ export function resolveHullContact(a: Ship, b: Ship, out: ContactReport): Contac
 }
 
 /**
- * Anota as sondagens de `probe` que caíram dentro do volume de `solid`.
+ * Notes down `probe`'s probes that fell inside `solid`'s volume.
  *
- * @param start onde continuar escrevendo no caderno.
- * @returns o novo fim do caderno.
+ * @param start where to carry on writing in the notebook.
+ * @returns the notebook's new end.
  */
 function gather(probe: Ship, solid: Ship, fromA: boolean, start: number): number {
   let count = start;
@@ -278,23 +271,23 @@ function gather(probe: Ship, solid: Ship, fromA: boolean, start: number): number
   for (const height of PROBE_HEIGHTS) {
     for (const side of [-1, 1]) {
       for (let i = 0; i < SAMPLES_PER_SIDE; i++) {
-        // ⚠️ **De ponta a ponta, e antes eram só os 94% centrais amostrados pelo
-        // meio.** Com dez amostras no meio de cada faixa, a sondagem mais avançada
-        // caía a 1,23 m da roda de proa — e uma proa só encontrava o outro casco
-        // depois de entrar nele **dois metros e meio**, que é o momento em que a
-        // sondagem finalmente alcança uma seção do outro navio mais cheia que a
-        // dela. Era exatamente a queixa de "um barco entra dentro do outro", e ela
-        // não era da força: era de não haver o que medir.
+        // ⚠️ **End to end, and it used to be only the central 94% sampled at the
+        // middle of each band.** With ten samples at the middle of each band, the
+        // foremost probe fell 1.23 m short of the stem — and a bow only found the
+        // other hull after going **two and a half meters** into it, which is the
+        // moment the probe finally reaches a section of the other ship fuller than its
+        // own. It was exactly the "one boat goes inside the other" complaint, and it
+        // was not about the force: it was about there being nothing to measure.
         //
-        // Amostrando as pontas, a sondagem mais avançada fica a 8 cm do talha-mar e
-        // o contato de proa começa com uns 16 cm de sobreposição. Chegar à ponta
-        // exata é seguro por causa do descarte de meia-boca logo abaixo.
+        // Sampling the ends, the foremost probe sits 8 cm from the cutwater and bow
+        // contact starts at about 16 cm of overlap. Reaching the exact tip is safe
+        // because of the half-breadth rejection just below.
         const t = SAMPLES_PER_SIDE > 1 ? i / (SAMPLES_PER_SIDE - 1) : 0.5;
         const z = (t * 2 - 1) * HALF_LENGTH * 0.99;
         const half = halfWidthAtHeight(zToT(z), height);
-        // Aquela altura não tem costado nesta estação: perto das pontas a quilha
-        // sobe, e a coroa de baixo passa por fora do casco. Sondar dali mediria a
-        // penetração de um ponto que não é do navio.
+        // That height has no planking at this station: near the ends the keel rises,
+        // and the lower ring passes outside the hull. Probing from there would measure
+        // the penetration of a point that is not part of the ship.
         if (half <= 1e-3) continue;
 
         _probeLocal.set(side * half, height, z);
@@ -302,8 +295,8 @@ function gather(probe: Ship, solid: Ship, fromA: boolean, start: number): number
         solid.body.worldToLocal(_probeWorld, _solidLocal);
         if (!insideHull(_solidLocal)) continue;
 
-        // Caderno cheio: só num encontro de costado inteiro, e aí as sondagens que
-        // faltam descrevem o mesmo contato que as 120 já anotadas.
+        // Notebook full: only in a whole-side encounter, and there the missing probes
+        // describe the same contact as the 120 already noted.
         if (count >= PENETRATIONS.length) return count;
         if (measure(probe, solid, fromA, PENETRATIONS[count]!)) count++;
       }
@@ -314,42 +307,42 @@ function gather(probe: Ship, solid: Ship, fromA: boolean, start: number): number
 }
 
 /**
- * Escolhe por onde o casco de `solid` vai expulsar o de `probe`, **uma vez para o
- * par**, e não uma vez por sondagem.
+ * Chooses which way `solid`'s hull will expel `probe`'s, **once for the pair**, and not
+ * once per probe.
  *
- * ## Por que a decisão é do par
+ * ## Why the decision belongs to the pair
  *
- * A saída de um contato de penalidade é para a face mais próxima, e a primeira
- * versão a escolhia ponto a ponto: cada sondagem comparava a distância até o
- * costado com a distância até a ponta e ia pela menor. É o certo para um ponto
- * isolado, e é catastrófico para um casco.
+ * A penalty contact's exit is toward the nearest face, and the first version chose it
+ * point by point: each probe compared the distance to the side with the distance to the
+ * end and went by the smaller. It is right for an isolated point, and it is catastrophic
+ * for a hull.
  *
- * ⚠️ **Duas proas de frente cancelavam a força inteira.** A roda de proa é
- * simétrica, então as sondagens de bombordo e de boreste entram no outro casco em
- * espelho: uma fica mais perto do costado de bombordo dele, a outra do de boreste, e
- * as duas empurram em sentidos opostos com o mesmo módulo. Soma zero — medido: oito
- * contatos, 36 cm de penetração e **0,0 m/s² de empurrão**. As duas chalupas se
- * atravessavam com o passo de contato rodando e achando contato.
+ * ⚠️ **Two bows head-on canceled the entire force.** The stem is symmetric, so the port
+ * and starboard probes enter the other hull mirrored: one ends up closer to its port
+ * side, the other to its starboard, and the two push in opposite directions with the
+ * same magnitude. It sums to zero — measured: eight contacts, 36 cm of penetration and
+ * **0.0 m/s² of push**. The two sloops went through each other with the contact step
+ * running and finding contact.
  *
- * A saída não é geometria de ponto, é geometria de par: **o casco empurra na direção
- * de onde o outro vem**. A marcação relativa dos dois centros diz isso, é a mesma
- * para todas as sondagens (então nada se cancela) e muda devagar (então nada
- * oscila). Comparada em coordenadas normalizadas pelas dimensões do casco, ela
- * separa os três encontros que existem:
+ * The exit is not point geometry, it is pair geometry: **the hull pushes away from where
+ * the other one is coming from**. The relative bearing of the two centers says that, it
+ * is the same for every probe (so nothing cancels) and it changes slowly (so nothing
+ * oscillates). Compared in coordinates normalized by the hull's dimensions, it separates
+ * the three encounters that exist:
  *
- * | o outro está | a saída é | e é o certo porque |
+ * | the other one is | the exit is | and it is right because |
  * |---|---|---|
- * | pelo través | pelo costado | é o bordo que está sendo amassado |
- * | pela proa ou pela popa | pela ponta | é o talha-mar ou o painel de popa |
- * | pela alheta, misturado | pelo costado | é o que a amurada do través resolve |
+ * | abeam | through the side | it is the side being crushed |
+ * | ahead or astern | through the end | it is the cutwater or the transom |
+ * | on the quarter, mixed | through the side | it is what the beam's bulwark resolves |
  *
- * O sinal também vem da marcação, e não do ponto: uma sondagem que passou do meio
- * do outro casco tem de sair pelo lado por onde **entrou**, e não pelo mais próximo
- * dela agora.
+ * The sign comes from the bearing too, and not from the point: a probe that has passed
+ * the middle of the other hull has to leave by the side it **entered** through, and not
+ * by the one nearest it now.
  *
- * Nenhuma das duas saídas é vertical, de propósito: incluir a componente vertical do
- * bojo transformaria um contato de costado em empurrão para cima, e o que se veria é
- * um navio escalando o outro.
+ * Neither exit is vertical, on purpose: including the bilge's vertical component would
+ * turn a side contact into an upward push, and what you would see is one ship climbing
+ * the other.
  */
 function chooseExit(probe: Ship, solid: Ship): void {
   solid.body.getOrigin(_solidOrigin);
@@ -357,8 +350,8 @@ function chooseExit(probe: Ship, solid: Ship): void {
   _bearing.subVectors(_probeOrigin, _solidOrigin);
   solid.body.worldDirToLocal(_bearing, _bearing);
 
-  // Normalizado pelas dimensões: 3 m de través num casco de 5 m de boca é muito mais
-  // "pelo lado" do que 3 m de proa num casco de 16 m de comprimento.
+  // Normalized by the dimensions: 3 m abeam on a hull with a 5 m beam is far more "off
+  // to the side" than 3 m ahead on a hull 16 m long.
   _lateralExit = Math.abs(_bearing.x) / HULL_BEAM >= Math.abs(_bearing.z) / HULL_LENGTH;
   _exitSign = (_lateralExit ? _bearing.x : _bearing.z) >= 0 ? 1 : -1;
 
@@ -367,15 +360,16 @@ function chooseExit(probe: Ship, solid: Ship): void {
 }
 
 /**
- * Mede a sondagem já posta em `_probeWorld` / `_solidLocal`, na saída que
- * `chooseExit` decidiu para este par.
+ * Measures the probe already placed in `_probeWorld` / `_solidLocal`, along the exit
+ * `chooseExit` decided for this pair.
  *
- * A profundidade é o quanto falta andar naquela direção para sair do casco:
- * `meia boca − s·x` pelo costado, `meia eslora − s·z` pela ponta. Escrito com o
- * sinal em vez de módulo, ele continua certo para a sondagem que já passou do meio
- * do outro casco — ali a saída é longa, e é longa mesmo.
+ * The depth is how far you still have to travel in that direction to leave the hull:
+ * `half breadth − s·x` through the side, `half length − s·z` through the end. Written
+ * with the sign instead of the absolute value, it stays correct for a probe that has
+ * already passed the middle of the other hull — there the exit is long, and it really is
+ * long.
  *
- * @returns `false` quando a conta não devolve penetração (borda numérica).
+ * @returns `false` when the arithmetic yields no penetration (a numerical edge case).
  */
 function measure(probe: Ship, solid: Ship, fromA: boolean, into: Penetration): boolean {
   const depth = _lateralExit
@@ -398,10 +392,10 @@ function measure(probe: Ship, solid: Ship, fromA: boolean, into: Penetration): b
   return true;
 }
 
-/** Aplica as sondagens anotadas, divididas pela contagem real. Ver o cabeçalho. */
+/** Applies the noted probes, divided by the real count. See the header. */
 function apply(a: Ship, b: Ship, count: number, out: ContactReport): void {
-  // O contato mais forte manda no relatório. `-Infinity` garante que o primeiro
-  // sempre escreva o ponto, mesmo num rangido em que ninguém se aproxima.
+  // The strongest contact rules the report. `-Infinity` guarantees the first one always
+  // writes the point, even in a creak where nobody is closing.
   let hardest = Number.NEGATIVE_INFINITY;
 
   for (let i = 0; i < count; i++) {
@@ -409,9 +403,9 @@ function apply(a: Ship, b: Ship, count: number, out: ContactReport): void {
     const probe = contact.fromA ? a : b;
     const solid = contact.fromA ? b : a;
 
-    // Mola na penetração, mais amortecedor na aproximação. O amortecedor só age
-    // enquanto os dois se apertam: segurá-los quando já estão se separando seria
-    // madeira que cola, e o contato viraria imã.
+    // A spring on the penetration, plus a damper on the approach. The damper only acts
+    // while the two are pressing together: holding them once they are already separating
+    // would be wood that sticks, and the contact would become a magnet.
     let magnitude = STIFFNESS * Math.min(contact.depth, MAX_PUSH_DEPTH);
     if (contact.approach > 0) magnitude += DAMPING * contact.approach;
     magnitude /= count;
@@ -419,7 +413,7 @@ function apply(a: Ship, b: Ship, count: number, out: ContactReport): void {
 
     _force.copy(contact.normal).multiplyScalar(magnitude);
 
-    // Atrito de Coulomb: opõe-se ao escorregamento tangencial, limitado pela normal.
+    // Coulomb friction: it opposes the tangential slip, limited by the normal.
     _tangent
       .copy(contact.relative)
       .addScaledVector(contact.normal, -contact.relative.dot(contact.normal));
@@ -432,7 +426,7 @@ function apply(a: Ship, b: Ship, count: number, out: ContactReport): void {
     }
 
     probe.body.applyForceAtPoint(_force, contact.point);
-    // Terceira lei: o sólido leva a recíproca, no mesmo ponto.
+    // The third law: the solid takes the reciprocal, at the same point.
     solid.body.applyForceAtPoint(_force.negate(), contact.point);
 
     out.contacts++;
