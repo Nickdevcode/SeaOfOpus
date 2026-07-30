@@ -206,18 +206,18 @@ function quarterdeckCenterY(t: number): number {
 export interface LanternSpot {
   position: THREE.Vector3;
   /**
-   * `true` para a lanterna que fica acesa o dia inteiro.
+   * `true` for the lantern that stays lit all day.
    *
-   * Só a do porão. Lá embaixo não há hora do dia: a única luz que entra é a que
-   * desce pelo vão da escotilha, e ela não chega às quinas onde os rombos
-   * abrem. Sem esta lanterna, tapar um buraco ao meio-dia era um trabalho feito
-   * no escuro — o jogador via um retângulo preto e um esguicho branco dentro.
+   * Only the hold's. Down there is no time of day: the only light that gets in is what
+   * comes down the hatchway, and it does not reach the corners where the breaches open.
+   * Without this lantern, patching a hole at noon was work done in the dark — the player
+   * saw a black rectangle with a white jet inside it.
    */
   alwaysOn: boolean;
 }
 
 export interface StaticPartsResult {
-  /** Onde pendurar as luzes pontuais das lanternas, em coordenadas do navio. */
+  /** Where to hang the lanterns' point lights, in the ship's coordinates. */
   lanterns: LanternSpot[];
 }
 
@@ -239,7 +239,7 @@ export function buildStaticParts(b: PartBuilders): StaticPartsResult {
   return { lanterns: buildLanterns(b) };
 }
 
-/** Mastro: um tronco cônico do porão ao topo, com as cintas de ferro. */
+/** The mast: a tapered trunk from the hold to the top, with its iron bands. */
 function buildMast(b: PartBuilders): void {
   b.spar.addLathe(
     { x: 0, y: MAST_BASE_Y, z: MAST_Z },
@@ -248,7 +248,7 @@ function buildMast(b: PartBuilders): void {
     { radialSegments: 14, heightSegments: 10, capTop: true, uvScale: 0.9 },
   );
 
-  // Cintas: reforçam as emendas do mastro e quebram o cilindro liso.
+  // Bands: they reinforce the mast's joints and break up the smooth cylinder.
   for (const y of [1.55, 4.2, 6.8, YARD_Y + 0.35, 11.1]) {
     b.iron.addLathe({ x: 0, y: y - 0.05, z: MAST_Z }, 0.1, () => mastRadius(y) + 0.025, {
       radialSegments: 14,
@@ -258,7 +258,7 @@ function buildMast(b: PartBuilders): void {
   }
 }
 
-/** Verga e retranca, os dois paus horizontais que esticam a vela. */
+/** Yard and boom, the two horizontal spars that stretch the sail. */
 function buildYards(b: PartBuilders): void {
   const spar = (y: number, half: number, thickness: number): void => {
     const start = b.spar.vertexCount;
@@ -268,7 +268,8 @@ function buildYards(b: PartBuilders): void {
       (h) => thickness * (1 - 0.55 * Math.abs(h * 2 - 1)),
       { radialSegments: 10, heightSegments: 12, capBottom: true, capTop: true, uvScale: 1.4 },
     );
-    // Torneada em pé e deitada depois: o torno só sabe girar em torno de +Y.
+    // Turned upright and laid down afterward: the lathe only knows how to spin around
+    // +Y.
     b.spar.transformFrom(
       start,
       new THREE.Matrix4().makeRotationZ(Math.PI * 0.5).setPosition(half, y, MAST_Z),
@@ -278,7 +279,7 @@ function buildYards(b: PartBuilders): void {
   spar(YARD_Y, YARD_HALF, 0.115);
   spar(BOOM_Y, BOOM_HALF, 0.095);
 
-  // Ferragens onde a verga abraça o mastro.
+  // Ironwork where the yard hugs the mast.
   for (const y of [YARD_Y, BOOM_Y]) {
     b.iron.addLathe({ x: 0, y: y - 0.11, z: MAST_Z }, 0.22, () => mastRadius(y) + 0.045, {
       radialSegments: 12,
@@ -287,7 +288,7 @@ function buildYards(b: PartBuilders): void {
     });
   }
 
-  // Ostagas: os cabos que seguram as pontas da verga no topo do mastro.
+  // Lifts: the lines that hold the yard's ends up at the masthead.
   const mastHead = new THREE.Vector3(0, 11.3, MAST_Z);
   for (const side of [1, -1]) {
     b.rope.addTube(mastHead, new THREE.Vector3(side * YARD_HALF * 0.92, YARD_Y, MAST_Z), 0.022);
@@ -295,32 +296,32 @@ function buildYards(b: PartBuilders): void {
 }
 
 /**
- * Cesto da gávea: um anel de tábuas em volta do mastro, com parede e escoras.
+ * The crow's nest: a ring of planks around the mast, with a wall and braces.
  *
- * **Tudo aqui tem duas faces, e é essa a diferença que importa.** A versão
- * anterior era feita de superfícies de espessura zero — piso, parede, aro —, e
- * superfície de espessura zero com material `FrontSide` simplesmente não existe
- * para quem olha do outro lado. Do convés, olhando para cima, a gávea inteira
- * desaparecia: não havia fundo, não havia parede, e o que sobrava eram as seis
- * escoras diagonais boiando em volta do mastro. É o mesmo defeito que o convés
- * teve (ver `DECK_THICKNESS`) e a mesma cura: dar espessura à peça, com face de
- * cima e face de baixo saindo da mesma varredura.
+ * **Everything here has two faces, and that is the difference that matters.** The
+ * previous version was made of zero-thickness surfaces — floor, wall, rim —, and a
+ * zero-thickness surface with a `FrontSide` material simply does not exist for whoever
+ * looks at it from the other side. From the deck, looking up, the whole nest disappeared:
+ * there was no bottom, there was no wall, and what was left were the six diagonal braces
+ * floating around the mast. It is the same defect the deck had (see `DECK_THICKNESS`) and
+ * the same cure: give the piece thickness, with a top face and a bottom face coming out
+ * of the same sweep.
  */
 function buildCrowsNest(b: PartBuilders): void {
-  // 1,05 m de raio, e não os 0,92 de antes. A diferença é o que separa um cesto
-  // decorativo de um cesto em que se cabe: descontados os 13 cm de mastro no
-  // meio e os 30 cm de raio do jogador, 0,92 deixava um anel de treze
-  // centímetros para ficar de pé — estreito a ponto de o empurrão do mastro e o
-  // limite da parede brigarem e o jogador vibrar entre os dois.
+  // 1.05 m of radius, and not the 0.92 of before. The difference is what separates a
+  // decorative nest from one you fit inside: with the 13 cm of mast in the middle and the
+  // player's 30 cm radius taken out, 0.92 left a thirteen-centimeter ring to stand on —
+  // narrow enough that the mast's push and the wall's limit fought each other and the
+  // player vibrated between the two.
   const radius = 1.05;
   const holeRadius = mastRadius(CROW_NEST_Y) + 0.03;
-  /** Espessura do estrado. A mesma do convés, pelo mesmo motivo. */
+  /** Thickness of the platform. The same as the deck's, for the same reason. */
   const floorThickness = 0.09;
   const wallHeight = 0.52;
   const wallThickness = 0.05;
   const segments = 24;
 
-  /** O anel do piso numa altura, virado para cima ou para baixo. */
+  /** The floor's ring at a height, facing up or down. */
   const floorFace = (y: number, up: boolean): void => {
     b.deck.addSurface(
       segments,
@@ -337,12 +338,12 @@ function buildCrowsNest(b: PartBuilders): void {
   };
 
   /**
-   * Uma casca cilíndrica entre duas alturas.
+   * A cylindrical shell between two heights.
    *
-   * `outward` escolhe para que lado ela olha, e é o parâmetro que faz a mesma
-   * função servir à borda de fora do cesto e ao furo do mastro no meio dele.
-   * A ordem dos laços imita a de `addLathe` — anel de baixo, anel de cima, com
-   * o índice correndo pelo ângulo —, então `flip = true` é o lado de fora.
+   * `outward` chooses which way it faces, and it is the parameter that makes the same
+   * function serve the nest's outer edge and the mast's hole in the middle of it. The
+   * loops' order mimics `addLathe`'s — bottom ring, top ring, with the index running
+   * through the angle —, so `flip = true` is the outside.
    */
   const skin = (
     builder: GeometryBuilder,
@@ -375,14 +376,15 @@ function buildCrowsNest(b: PartBuilders): void {
   skin(b.deck, () => radius, floorBottom, CROW_NEST_Y, true);
   skin(b.deck, () => holeRadius, floorBottom, CROW_NEST_Y, false);
 
-  // Parede do cesto, ligeiramente aberta para fora, **com um portaló**.
+  // The nest's wall, flaring slightly outward, **with a gangway**.
   //
-  // O vão fica no setor por onde a escada do mastro chega. Sem ele o cesto era
-  // um balde fechado de 52 cm de parede: dava para subir a escada inteira e não
-  // dava para entrar, porque meio metro é mais alto do que o passo automático do
-  // controlador. Navio de verdade tem exatamente esse recorte, pelo mesmo motivo.
+  // The gap sits in the sector the mast ladder arrives through. Without it the nest was a
+  // closed bucket with 52 cm of wall: you could climb the whole ladder and could not get
+  // in, because half a meter is higher than the controller's automatic step. A real ship
+  // has exactly this cutout, for exactly this reason.
   //
-  // A abertura vai de 60° a 120° no plano local; a escada está em +Z, que é 90°.
+  // The opening runs from 60° to 120° in the local plane; the ladder is at +Z, which is
+  // 90°.
   const gapFrom = Math.PI / 3;
   const gapTo = (Math.PI * 2) / 3;
   for (let i = 0; i < segments; i++) {
@@ -391,8 +393,8 @@ function buildCrowsNest(b: PartBuilders): void {
     const middle = (a0 + a1) * 0.5;
     if (middle > gapFrom && middle < gapTo) continue;
 
-    // A parede tem lado de dentro e lado de fora, e o topo fecha os dois. Sem o
-    // lado de dentro, quem está **no** cesto olha através da própria parede.
+    // The wall has an inner side and an outer side, and the top closes both. Without the
+    // inner side, whoever is **in** the nest looks through their own wall.
     const wallAt = (angle: number, h: number, offset: number): Vertex => {
       const r = radius + h * 0.08 + offset;
       return vertex(
@@ -416,7 +418,7 @@ function buildCrowsNest(b: PartBuilders): void {
       wallAt(a0, 1, -wallThickness),
       wallAt(a1, 1, -wallThickness),
     );
-    // Capa: a fita de topo que costura as duas faces.
+    // Cap: the top strip that stitches the two faces together.
     b.deck.addQuad(
       wallAt(a0, 1, -wallThickness),
       wallAt(a0, 1, 0),
@@ -425,8 +427,8 @@ function buildCrowsNest(b: PartBuilders): void {
     );
   }
 
-  // Cinta de ferro no topo da parede, seguindo o mesmo recorte. Vai por fora e
-  // por dentro, como a própria parede, senão ela some do mesmo jeito.
+  // An iron band at the top of the wall, following the same cutout. It goes outside and
+  // inside, like the wall itself, or else it disappears the same way.
   for (let i = 0; i < segments; i++) {
     const a0 = (i / segments) * Math.PI * 2;
     const a1 = ((i + 1) / segments) * Math.PI * 2;
@@ -447,7 +449,7 @@ function buildCrowsNest(b: PartBuilders): void {
     b.iron.addQuad(ringAt(a1, 0, -0.03), ringAt(a0, 0, -0.03), ringAt(a0, 1, -0.03), ringAt(a1, 1, -0.03));
   }
 
-  // Escoras diagonais: sem elas o cesto parece colado no mastro.
+  // Diagonal braces: without them the nest looks glued to the mast.
   for (let i = 0; i < 6; i++) {
     const angle = (i / 6) * Math.PI * 2;
     b.spar.addTube(
@@ -465,35 +467,35 @@ function buildCrowsNest(b: PartBuilders): void {
 }
 
 /**
- * Enxárcias, estais, ostagas e adriças.
+ * Shrouds, stays, lifts and halyards.
  *
- * As enxárcias não são decoração: são o par de escadas de corda pelas quais se
- * sobe até a gávea, e por isso os enfrechates precisam existir de verdade e ficar
- * no espaçamento de um passo.
+ * The shrouds are not decoration: they are the pair of rope ladders you climb to the
+ * crow's nest, and that is why the ratlines have to really exist and sit a step apart.
  */
 function buildRigging(b: PartBuilders): void {
   const anchorY = 8.55;
 
   for (const side of [1, -1]) {
-    // **Atrás da vela**, e é isso que os três números decidem.
+    // **Behind the sail**, and that is what the three numbers decide.
     //
-    // Os pés estavam em −1,35 a +0,85 do mastro, ou seja, dois deles à vante
-    // dele. Como a lona embarriga justamente para vante, na meia altura os
-    // cabos passavam **na frente** do pano e a vela aparecia rasgada por três
-    // cordas de cada bordo — o efeito de "cordame bugado" que se via de longe.
-    // Com os pés a ré, a enxárcia fica sempre por trás da barriga: em y = 5 m
-    // ela cai em z = −1,49 contra os −1,69 da lona, e nunca a cruza.
+    // The feet used to be at −1.35 to +0.85 from the mast, that is, two of them forward
+    // of it. Since the canvas bellies forward, at mid-height the lines passed **in front
+    // of** the cloth and the sail showed up torn by three ropes on each side — the
+    // "buggy rigging" effect you saw from a distance. With the feet aft, the shroud is
+    // always behind the belly: at y = 5 m it falls at z = −1.49 against the canvas's
+    // −1.69, and never crosses it.
     //
-    // O limite de quanto se pode recuar é o canhão, em z = 0,8: com o pé mais a
-    // ré em −0,2 sobram 80 cm entre o cabo e o setor que a boca do cano varre.
+    // The limit on how far aft you can go is the cannon, at z = 0.8: with the aftmost
+    // foot at −0.2 there are 80 cm left between the line and the sector the barrel's
+    // muzzle sweeps.
     const offsets = [-0.5, 0.25, 1.0];
     const feet = offsets.map((dz) => {
       const z = MAST_Z + dz;
-      // O pé morre na **mesa das enxárcias**, que é a face de dentro da amurada
-      // logo abaixo da capa. Estava cravado em y = 2,0 — meio metro acima do
-      // convés e um palmo abaixo do topo da amurada, ou seja, no ar, com o cabo
-      // terminando no vazio entre o costado e o nada. Lido da tosadura real, o
-      // pé acompanha a amurada subindo para a proa, como num navio.
+      // The foot dies on the **channel**, which is the bulwark's inner face just below
+      // the cap. It used to be pinned at y = 2.0 — half a meter above the deck and a hand
+      // below the bulwark's top, that is, in the air, with the line ending in the void
+      // between the side and nothing. Read off the real sheer, the foot follows the
+      // bulwark rising toward the bow, like on a ship.
       const y = sheerAt(z) - 0.16;
       return new THREE.Vector3(side * (halfWidthAtHeight(zToT(z), y) - 0.07), y, z);
     });
@@ -505,8 +507,8 @@ function buildRigging(b: PartBuilders): void {
       b.rope.addTube(top, feet[i]!, 0.032, 0.038, 6);
     }
 
-    // Enfrechates entre a enxárcia de vante e a de ré. Param antes do topo:
-    // lá em cima os cabos já convergiram e o degrau não teria largura.
+    // Ratlines between the forward shroud and the after one. They stop short of the top:
+    // up there the lines have already converged and the rung would have no width.
     const rungs = 10;
     for (let i = 0; i < rungs; i++) {
       const k = 0.04 + (i / (rungs - 1)) * 0.8;
@@ -520,25 +522,25 @@ function buildRigging(b: PartBuilders): void {
     }
   }
 
-  // Estai de proa: segura o mastro contra o tombo para ré, morrendo no gurupés.
+  // Forestay: it holds the mast against falling aft, dying on the bowsprit.
   const head = new THREE.Vector3(0, 11.0, MAST_Z);
   b.rope.addTube(head, new THREE.Vector3(0, 3.05, tToZ(0.975) - 2.6), 0.034, 0.03, 6);
 
-  // Brandais de popa: **dois**, um por bordo, presos à borda do tombadilho.
+  // Backstays: **two**, one per side, made fast to the quarterdeck's edge.
   //
-  // Um cabo só na linha de centro era mais simples e estava errado por dois
-  // motivos. O náutico: um brandal no eixo não segura o mastro contra a guinada,
-  // que é justamente o esforço que as enxárcias não cobrem — por isso navio
-  // nenhum usa um. E o de jogo: o pé dele caía em (0, 2.62, 7.65), que é ao
-  // mesmo tempo a altura do cubo do timão e o ponto exato onde o timoneiro
-  // fica. Ao assumir o leme, o cabo saía do rosto do jogador e riscava a tela de
-  // alto a baixo, passando pelo meio da roda. Abertos para os bordos os dois
-  // cabos fazem o trabalho de verdade e ainda emolduram a vista em vez de cortá-la.
+  // A single line on the centerline was simpler and was wrong for two reasons. The
+  // nautical one: a backstay on the axis does not hold the mast against yaw, which is
+  // precisely the load the shrouds do not cover — which is why no ship uses one. And the
+  // game one: its foot landed at (0, 2.62, 7.65), which is at once the height of the
+  // helm's hub and the exact spot the helmsman stands on. On taking the wheel, the line
+  // came out of the player's face and streaked across the screen top to bottom, passing
+  // through the middle of the wheel. Splayed out to the sides the two lines do the real
+  // work and frame the view instead of cutting it.
   //
-  // São também os cabos mais finos do cordame — 4 cm contra os 7 cm das
-  // enxárcias — porque são os únicos que o jogador vê a dois metros do olho. Na
-  // bitola das enxárcias eles liam como duas barras atravessadas na tela; a
-  // espessura aqui é escolhida pela distância de onde se olha, não pelo esforço.
+  // They are also the thinnest lines in the rigging — 4 cm against the shrouds' 7 cm —
+  // because they are the only ones the player sees two meters from the eye. At the
+  // shrouds' gauge they read as two bars laid across the screen; the thickness here is
+  // chosen by the distance you look from, not by the load.
   for (const side of [1, -1]) {
     const z = HALF_LENGTH - 0.55;
     const y = sheerAt(z) - 0.14;
@@ -551,9 +553,9 @@ function buildRigging(b: PartBuilders): void {
     );
   }
 
-  // Adriças da verga, descendo até as malaguetas da amurada. O ponto de baixo
-  // sai da **mesma** função que desenha as malaguetas: antes era um X fixo de
-  // 2,0 m e o cabo morria 30 cm ao lado do cunho, no ar.
+  // The yard's halyards, coming down to the bulwark's belaying cleats. The lower point
+  // comes out of the **same** function that draws the cleats: it used to be a fixed X of
+  // 2.0 m and the line died 30 cm beside the cleat, in the air.
   for (const side of [1, -1]) {
     const cleat = cleatPoint(side as 1 | -1, CLEAT_Z[0]!);
     b.rope.addTube(
@@ -566,14 +568,14 @@ function buildRigging(b: PartBuilders): void {
   }
 }
 
-/** Altura do topo da amurada num Z local — a linha de tosadura. */
+/** Height of the bulwark's top at a local Z — the sheer line. */
 function sheerAt(z: number): number {
   return sampleSection(zToT(z), sheerScratch).sheerY;
 }
 
 const sheerScratch: HullSection = { halfBeam: 0, keelY: 0, sheerY: 0, fullness: 1 };
 
-/** Gurupés: o pau que avança sobre a proa e ancora o estai. */
+/** The bowsprit: the spar that reaches out over the bow and anchors the forestay. */
 function buildBowsprit(b: PartBuilders): void {
   const root = new THREE.Vector3(0, 2.35, tToZ(0.975));
   const tip = new THREE.Vector3(0, 3.15, tToZ(0.975) - 3.1);
@@ -582,37 +584,37 @@ function buildBowsprit(b: PartBuilders): void {
 }
 
 /**
- * A escada do porão — um **lance inclinado**, não uma escada de mão.
+ * The hold's stairs — an **inclined flight**, not a ladder.
  *
- * É a diferença que muda a sensação do navio inteiro. Escada de mão obriga a
- * parar, apertar uma tecla, entrar num modo em que só se sobe e descer; lance
- * inclinado é chão, e chão se anda. O jogador vai andando para o buraco e desce.
- * É o que a Chalupa do Sea of Thieves tem, e é por isso que descer ao porão lá
- * não interrompe o que se estava fazendo.
+ * It is the difference that changes how the whole ship feels. A ladder forces you to
+ * stop, press a key, enter a mode where all you do is climb and descend; an inclined
+ * flight is floor, and floor is walked. The player walks into the hole and goes down. It
+ * is what Sea of Thieves' sloop has, and it is why going down into the hold there does
+ * not interrupt whatever you were doing.
  *
- * A forma dos degraus sai de `stairSurfaceY`, a mesma função que o
- * `PlayerController` usa como chão. Não há como o pé pisar onde a tábua não está.
+ * The steps' shape comes out of `stairSurfaceY`, the same function `PlayerController`
+ * uses as floor. There is no way for a foot to land where the board is not.
  */
 function buildStaircase(b: PartBuilders): void {
   const run = STAIR_TOP_Z - STAIR_BOTTOM_Z;
   const tread = run / STAIR_STEPS;
   const rise = (DECK_Y - HOLD_FLOOR_Y) / STAIR_STEPS;
-  // A tábua é um dedo mais estreita que o vão: o degrau precisa ocupá-lo inteiro
-  // para não sobrar chão faltando, mas encostar no fio da braçola põe as duas
-  // faces na mesma profundidade e elas piscam uma contra a outra.
+  // The board is a finger narrower than the opening: the step has to fill it entirely so
+  // no floor is left missing, but touching the coaming's edge puts both faces at the same
+  // depth and they flicker against each other.
   const half = STAIR_HALF_WIDTH - 0.015;
 
   for (let i = 0; i < STAIR_STEPS; i++) {
     const top = DECK_Y - rise * (i + 1);
     const centerZ = STAIR_TOP_Z - tread * (i + 0.5);
 
-    // Piso do degrau: uma tábua grossa, ligeiramente saliente sobre o espelho.
+    // The step's tread: a thick board, slightly proud of the riser.
     b.deck.addBox(
       { x: 0, y: top - 0.025, z: centerZ - 0.015 },
       { x: half * 2, y: 0.05, z: tread + 0.03 },
       1.6,
     );
-    // Espelho: fecha o vão sob o degrau, senão o porão aparece por baixo dele.
+    // The riser: it closes the gap under the step, or else the hold shows through it.
     b.interior.addBox(
       { x: 0, y: top - rise * 0.5 - 0.02, z: centerZ - tread * 0.5 + 0.02 },
       { x: half * 2, y: rise, z: 0.04 },
@@ -620,10 +622,9 @@ function buildStaircase(b: PartBuilders): void {
     );
   }
 
-  // Longarinas: as duas vigas em que os degraus se encaixam. Ficam **fora** do
-  // vão, embutidas na espessura da braçola, para não roubarem largura de
-  // passagem — a escada ocupa o alçapão inteiro justamente para não sobrar
-  // buraco pelos lados.
+  // Stringers: the two beams the steps are let into. They sit **outside** the opening,
+  // buried in the coaming's thickness, so they do not steal passage width — the stairs
+  // fill the whole hatchway precisely so no hole is left along the sides.
   for (const side of [1, -1]) {
     const x = side * (STAIR_HALF_WIDTH + 0.05);
     b.interior.addTube(
@@ -638,45 +639,44 @@ function buildStaircase(b: PartBuilders): void {
 }
 
 /**
- * A escada do mastro, do convés à gávea.
+ * The mast ladder, from the deck to the crow's nest.
  *
- * Aqui a escada de mão é a peça certa, e pelo motivo oposto ao do porão: são
- * nove metros na vertical, encostados num tronco. Não existe lance inclinado que
- * caiba nisso, e nenhum navio tentou — sobe-se de mão, agarrando degrau a degrau.
+ * Here the ladder is the right piece, and for the opposite reason to the hold's: it is
+ * nine meters straight up, against a trunk. There is no inclined flight that fits that,
+ * and no ship ever tried — you go up hand over hand, grabbing rung by rung.
  *
- * Fica a ré do mastro para não brigar com a vela nem com as enxárcias, que
- * convergem para o topo pela frente. É a única forma de chegar ao cesto, e sem
- * ela a gávea era um cenário: existia na tela e não existia no jogo.
+ * It sits abaft the mast so it does not fight the sail or the shrouds, which converge on
+ * the top from forward. It is the only way to reach the nest, and without it the crow's
+ * nest was scenery: it existed on screen and did not exist in the game.
  */
 export const MAST_LADDER = {
-  /** Z local dos montantes, um palmo à ré do mastro. */
+  /** Local Z of the stiles, a hand abaft the mast. */
   z: MAST_Z + 0.34,
-  /** Meia largura entre os montantes. */
+  /** Half the width between the stiles. */
   halfWidth: 0.24,
   bottomY: DECK_Y,
   /**
-   * Espaçamento de fato entre os enfrechates, em metros.
+   * The actual spacing between the rungs, in meters.
    *
-   * **Não são 30 cm.** O arredondamento é do *número de vãos*, não do
-   * espaçamento: 9,10 m de escada dão 30 vãos e sobram 30,33 cm entre barras.
-   * A diferença parece irrelevante e não é — o clipe de escalada
-   * (`anim_climb.py`) sobe exatamente dois enfrechates por ciclo, e é isso que
-   * faz a mão do personagem cair em cima da barra que está desenhada aqui.
-   * Mexer nesta escada sem regerar o clipe descasa os dois.
+   * **It is not 30 cm.** The rounding is of the *number of gaps*, not of the spacing:
+   * 9.10 m of ladder give 30 gaps and leave 30.33 cm between bars. The difference looks
+   * irrelevant and is not — the climbing clip (`anim_climb.py`) goes up exactly two rungs
+   * per cycle, and that is what makes the character's hand land on the bar that is drawn
+   * here. Touching this ladder without regenerating the clip pulls the two apart.
    */
   rungSpacing: (CROW_NEST_Y + 0.15 - DECK_Y)
     / Math.round((CROW_NEST_Y + 0.15 - DECK_Y) / 0.3),
-  /** Termina acima do piso do cesto: sobe-se até poder pisar dentro. */
+  /** It ends above the nest's floor: you climb until you can step inside. */
   topY: CROW_NEST_Y + 0.15,
 } as const;
 
-/** A plataforma da gávea, para quem precisa saber onde se pode ficar de pé. */
+/** The crow's nest platform, for whoever has to know where you can stand. */
 export const CROW_NEST = {
   y: CROW_NEST_Y,
   z: MAST_Z,
-  /** Raio útil do piso, já descontada a parede. */
+  /** Usable radius of the floor, with the wall already taken out. */
   radius: 0.98,
-  /** Raio do mastro nesta altura — o que se contorna lá em cima. */
+  /** The mast's radius at this height — what you walk around up there. */
   mastRadius: mastRadius(CROW_NEST_Y),
 } as const;
 
@@ -705,7 +705,7 @@ function buildMastLadder(b: PartBuilders): void {
       6,
       2,
     );
-    // Braçadeira ligando a escada ao mastro a cada três degraus.
+    // A bracket tying the ladder to the mast every three rungs.
     if (i % 3 === 0) {
       b.iron.addTube(
         new THREE.Vector3(0, y, MAST_Z + mastRadius(y)),
@@ -719,54 +719,54 @@ function buildMastLadder(b: PartBuilders): void {
 }
 
 /**
- * As escadas de embarque: uma por bordo, na popa, ao lado do timão.
+ * The boarding ladders: one per side, aft, beside the helm.
  *
- * É a peça que devolve o jogador ao navio depois de ele cair no mar, e ela só
- * serve para isso — descer é pular pelo portaló, o vão na amurada que
- * `HullGeometry.buildGangways` abre logo acima daqui. Todas as medidas saem de
- * `BoardingLadder`, que é a fonte única: a mesma folha que a malha lê é a que o
- * `PlayerController` usa para saber onde a mão agarra.
+ * It is the piece that gives the player the ship back after they fall into the sea, and
+ * it only serves that — going down is jumping through the gangway, the gap in the bulwark
+ * `HullGeometry.buildGangways` opens right above here. Every measurement comes out of
+ * `BoardingLadder`, which is the single source: the same sheet the mesh reads is the one
+ * `PlayerController` uses to know where the hand grabs.
  *
- * Duas coisas nesta função não são como na escada do mastro, e as duas vêm do
- * fato de a escada estar pendurada num casco curvo em vez de num tronco reto:
+ * Two things in this function are not like the mast ladder, and both come from the fact
+ * that this ladder hangs on a curved hull instead of on a straight trunk:
  *
- * 1. **Os montantes são tornos deitados, não `addTube`.** `addTube` não fecha as
- *    pontas, e aqui as duas aparecem: a de cima morre no fio da soleira do
- *    portaló e a de baixo fica debaixo d'água, exatamente onde o nadador chega.
- *    Um tubo aberto vira um buraco por onde se vê o interior da peça.
- * 2. **As ferragens saem de `hullSurfacePoint`/`hullSurfaceNormal`**, e não de um
- *    recuo horizontal da meia boca — é o mesmo motivo de `buildWales` e da nota
- *    de `deckEdgeHalfWidth`: no bojo o costado corre inclinado, e "13 cm para
- *    dentro na horizontal" e "13 cm ao longo da normal" são pontos diferentes.
- *    Com a conta horizontal o pé da braçadeira nasceria fora da madeira.
+ * 1. **The stiles are laid-down lathes, not `addTube`.** `addTube` does not close the
+ *    ends, and here both show: the upper one dies on the edge of the gangway's sill and
+ *    the lower one is underwater, exactly where the swimmer arrives. An open tube becomes
+ *    a hole you see the inside of the piece through.
+ * 2. **The ironwork comes out of `hullSurfacePoint`/`hullSurfaceNormal`**, and not out of
+ *    a horizontal setback from the half-beam — it is the same reason as `buildWales` and
+ *    the note in `deckEdgeHalfWidth`: at the bilge the side runs at an angle, and "13 cm
+ *    inboard horizontally" and "13 cm along the normal" are different points. With the
+ *    horizontal arithmetic the bracket's foot would be born outside the wood.
  */
 function buildBoardingLadders(b: PartBuilders): void {
   for (const spec of BOARDING_LADDERS) buildBoardingLadder(b, spec);
 }
 
 /**
- * Quanto o montante desce abaixo da última barra.
+ * How far the stile runs below the last rung.
  *
- * Não é folga de desenho: é o que impede a barra mais baixa — a que o nadador
- * agarra às cegas, com a onda passando por cima — de ficar na própria ponta do
- * montante, onde uma mão que erra dez centímetros não encontra nada.
+ * It is not drafting slack: it is what keeps the lowest rung — the one the swimmer grabs
+ * blind, with the wave washing over — from sitting on the stile's very tip, where a hand
+ * that misses by ten centimeters finds nothing.
  */
 const BOARDING_STILE_FOOT = 0.14;
 
-/** Alturas das braçadeiras que prendem a escada ao costado. Escolhidas pelo que
- *  elas **não** podem tocar: o cintado de baixo ocupa de 0,925 a 1,115, e a
- *  soleira do portaló de 1,69 a 1,74. */
+/** Heights of the brackets that fasten the ladder to the side. Chosen by what they
+ *  **cannot** touch: the lower wale runs from 0.925 to 1.115, and the gangway's sill from
+ *  1.69 to 1.74. */
 const BOARDING_BRACKET_HEIGHTS: readonly number[] = [0.65, 1.55];
 
 function buildBoardingLadder(b: PartBuilders, spec: BoardingLadderSpec): void {
   const { side, z, halfWidth, topY, bottomY, rungSpacing, rungCount, tilt } = spec;
   const stileZ = [z - halfWidth, z + halfWidth];
 
-  // Montantes. O torno gira em +Y, então a peça nasce em pé e um `transformFrom`
-  // a deita no ângulo da escada — o mesmo caminho da verga em `buildYards`.
-  // O topo para no fio de cima da última barra, e não no piso: rente ao piso a
-  // tampa do montante disputaria profundidade com a soleira, e o que se veria
-  // seria um disco de madeira piscando no chão do portaló.
+  // Stiles. The lathe spins around +Y, so the piece is born upright and a
+  // `transformFrom` lays it over at the ladder's angle — the same path as the yard in
+  // `buildYards`. The top stops at the upper edge of the last rung, and not at the floor:
+  // flush with the floor the stile's cap would fight the sill for depth, and what you
+  // would see would be a wooden disc flickering on the gangway's deck.
   const footY = bottomY - BOARDING_STILE_FOOT;
   const headY = topY + BOARDING_RUNG_RADIUS;
   const length = (headY - footY) / Math.cos(tilt);
@@ -782,16 +782,16 @@ function buildBoardingLadder(b: PartBuilders, spec: BoardingLadderSpec): void {
     b.spar.transformFrom(
       start,
       new THREE.Matrix4()
-        // O tombo é para fora do navio nos dois bordos, e `side` é o que troca o
-        // sinal: sem ele a escada de bombordo se enfiaria no casco ao subir.
+        // The tilt is outboard on both sides, and `side` is what flips the sign:
+        // without it the port ladder would drive into the hull as it climbed.
         .makeRotationZ(-side * tilt)
         .setPosition(side * boardingLadderX(spec, footY), footY, z0),
     );
   }
 
-  // Barras. Ficam num plano de X constante para cada altura, então cada uma é um
-  // bastão horizontal correndo de um montante ao outro; as pontas morrem no eixo
-  // dos montantes, enterradas na madeira deles.
+  // Rungs. They sit on a plane of constant X for each height, so each one is a
+  // horizontal bar running from one stile to the other; the ends die on the stiles' axis,
+  // buried in their wood.
   for (let i = 0; i <= rungCount; i++) {
     const y = bottomY + rungSpacing * i;
     const x = side * boardingLadderX(spec, y);
@@ -805,9 +805,9 @@ function buildBoardingLadder(b: PartBuilders, spec: BoardingLadderSpec): void {
     );
   }
 
-  // Braçadeiras: o ferro que amarra cada montante ao costado. O pé entra 3 cm
-  // pela normal adentro, de propósito — a ponta do tubo é aberta, e enterrada no
-  // chapeamento ela some em vez de virar um furo na peça.
+  // Brackets: the iron that lashes each stile to the side. The foot goes 3 cm in along
+  // the normal on purpose — the tube's end is open, and buried in the planking it
+  // disappears instead of turning into a hole in the piece.
   const section: HullSection = { halfBeam: 0, keelY: 0, sheerY: 0, fullness: 1 };
   const anchor = new THREE.Vector3();
   const normal = new THREE.Vector3();
@@ -830,19 +830,19 @@ function buildBoardingLadder(b: PartBuilders, spec: BoardingLadderSpec): void {
 }
 
 /**
- * O posto do leme: o cavalete que segura a roda e a bitácula à frente dela.
+ * The helm station: the frame that carries the wheel, and the binnacle in front of it.
  *
- * **A roda precisa se apoiar em alguma coisa, e antes ela não se apoiava.** Os
- * dois montantes ficam a 95 cm do eixo e o aro tem 62 cm de raio: entre a
- * madeira e a peça sobravam 33 cm de ar, atravessados por um mancal fino que,
- * de frente — que é de onde o timoneiro olha —, desaparece atrás do próprio
- * cubo. O que se via era uma roda de leme pairando sobre o tombadilho.
+ * **The wheel has to rest on something, and before it did not.** The two posts sit 95 cm
+ * from the axle and the rim has a 62 cm radius: between the wood and the piece there were
+ * 33 cm of air, crossed by a thin bearing that, seen head-on — which is where the
+ * helmsman looks from —, disappears behind the hub itself. What you saw was a ship's
+ * wheel hovering over the quarterdeck.
  *
- * O que resolve isso não é engrossar o mancal: é a coluna central. Num navio o
- * eixo do leme sai de um **tambor** — o cilindro em que o cabo do leme enrola —
- * e esse tambor é sustentado por uma peça que nasce no convés. Com ela no lugar,
- * a roda passa a estar montada em vez de flutuando, e o cavalete inteiro (duas
- * colunas, travessa embaixo e tambor no meio) lê como uma peça só.
+ * What fixes that is not a thicker bearing: it is the central column. On a ship the
+ * wheel's axle comes out of a **drum** — the cylinder the tiller rope winds onto — and
+ * that drum is carried by a piece rising from the deck. With it in place, the wheel is
+ * mounted instead of floating, and the whole frame (two columns, a crossbar below and a
+ * drum in the middle) reads as a single piece.
  */
 function buildHelmFrame(b: PartBuilders): void {
   const z = tToZ(STATIONS.helm);
@@ -850,8 +850,8 @@ function buildHelmFrame(b: PartBuilders): void {
   const postTop = WHEEL_Y + 0.26;
 
   for (const side of [1, -1]) {
-    // Coluna com pé alargado: a base é o que dá assentamento à vista, e é o que
-    // um poste realmente tem para não sair rachando o convés no primeiro mar.
+    // A column with a widened foot: the base is what makes it look seated, and it is
+    // what a post really has so it does not split the deck open in the first heavy sea.
     b.spar.addBox(
       { x: side * WHEEL_POST_X, y: (deckY + postTop) * 0.5, z },
       { x: 0.17, y: postTop - deckY, z: 0.21 },
@@ -862,18 +862,18 @@ function buildHelmFrame(b: PartBuilders): void {
       { x: 0.3, y: 0.14, z: 0.34 },
       1.4,
     );
-    // Nada de chapa de latão no topo do poste: os dois postes ficam na periferia
-    // do quadro de quem governa, e duas placas amarelas ali roubam o olho da
-    // única peça de latão que precisa ser vista — o punho da marca, em
-    // `createWheel`. Metal a bordo é caro e é usado onde faz falta.
+    // No brass plate on top of the post: the two posts sit at the edge of the frame of
+    // whoever is steering, and two yellow plates there steal the eye from the one piece
+    // of brass that has to be seen — the marked handle, in `createWheel`. Metal aboard is
+    // expensive and is used where it is needed.
     //
-    // Mancal ligando o montante ao eixo. **De ferro, e curto.**
+    // The bearing joining the post to the axle. **Iron, and short.**
     //
-    // Em latão eram duas barras amarelas de 76 cm atravessando a roda inteira na
-    // altura do cubo, e de dentro do posto elas cortavam a peça ao meio — dois
-    // riscos de metal onde deveria haver madeira e ar. Mancal é peça de esforço,
-    // não de ornamento: ferro é o material honesto, e ele some no meio da roda
-    // em vez de disputar com ela.
+    // In brass it was two 76 cm yellow bars crossing the whole wheel at the hub's height,
+    // and from inside the post they cut the piece in half — two metal strokes where there
+    // should be wood and air. A bearing is a working piece, not an ornament: iron is the
+    // honest material, and it disappears into the middle of the wheel instead of
+    // competing with it.
     b.iron.addTube(
       new THREE.Vector3(side * (WHEEL_POST_X - 0.06), WHEEL_Y, z),
       new THREE.Vector3(side * 0.3, WHEEL_Y, z),
@@ -884,15 +884,15 @@ function buildHelmFrame(b: PartBuilders): void {
     );
   }
 
-  // Travessa entre as colunas, na altura do peito: fecha o cavalete e é onde o
-  // tambor se apoia.
+  // The crossbar between the columns, at chest height: it closes the frame and it is
+  // what the drum rests on.
   b.spar.addBox(
     { x: 0, y: WHEEL_Y - 0.52, z },
     { x: WHEEL_POST_X * 2 + 0.17, y: 0.14, z: 0.16 },
     1.4,
   );
 
-  // Coluna central e tambor do leme, sob o eixo da roda.
+  // The central column and the tiller drum, under the wheel's axle.
   b.spar.addBox({ x: 0, y: (deckY + WHEEL_Y - 0.3) * 0.5, z }, { x: 0.26, y: WHEEL_Y - 0.3 - deckY, z: 0.26 }, 1.6);
   const drumStart = b.spar.vertexCount;
   b.spar.addLathe({ x: 0, y: 0, z: 0 }, 0.44, (h) => 0.19 + 0.03 * Math.sin(h * Math.PI), {
@@ -902,13 +902,13 @@ function buildHelmFrame(b: PartBuilders): void {
     capTop: true,
     uvScale: 2,
   });
-  // O torno gira em +Y e o tambor é deitado no eixo do leme, que corre de bordo
-  // a bordo.
+  // The lathe spins around +Y and the drum is laid on the tiller's axis, which runs
+  // athwartships.
   b.spar.transformFrom(
     drumStart,
     new THREE.Matrix4().makeRotationZ(Math.PI * 0.5).setPosition(0.22, WHEEL_Y, z),
   );
-  // Cabo do leme saindo do tambor para baixo, por onde a força realmente passa.
+  // The tiller rope coming down off the drum, which is where the force actually goes.
   for (const side of [1, -1]) {
     b.rope.addTube(
       new THREE.Vector3(side * 0.16, WHEEL_Y - 0.2, z + 0.02),
@@ -923,30 +923,29 @@ function buildHelmFrame(b: PartBuilders): void {
 }
 
 /**
- * Bitácula: a caixa da agulha, logo à frente do timoneiro.
+ * The binnacle: the compass's box, right in front of the helmsman.
  *
- * A versão anterior era uma caixa de madeira com uma **chapa de latão chapada**
- * fazendo as vezes de tampo — 50 × 42 cm de amarelo liso a um metro do olho de
- * quem governa, sem forma nem função aparente. Em primeira pessoa ela lia como
- * um retângulo de tinta grudado no convés, e era a primeira coisa que puxava o
- * olhar no posto inteiro.
+ * The previous version was a wooden box with a **flat brass plate** standing in for a
+ * lid — 50 × 42 cm of plain yellow a meter from the eye of whoever is steering, with no
+ * apparent shape or function. In first person it read as a rectangle of paint glued to
+ * the deck, and it was the first thing that pulled the eye in the whole station.
  *
- * Uma bitácula de verdade não é uma caixa com tampa: é um armário baixo com um
- * **tambuchо de vidro** por onde se lê a agulha, telhadinho de duas águas para a
- * chuva não entrar e cantoneiras de latão nas quinas. O latão continua lá — é o
- * metal que não desmagnetiza a agulha, e por isso ele existe nesta peça —, mas
- * como filete e cantoneira, que é a quantidade certa de brilho para dizer
- * "instrumento" sem virar mancha.
+ * A real binnacle is not a box with a lid: it is a low cabinet with a **glass hood** you
+ * read the compass through, a little gable roof to keep the rain out and brass corner
+ * pieces on the edges. The brass is still there — it is the metal that does not
+ * demagnetize the compass, and that is why it exists on this piece —, but as beading and
+ * corner pieces, which is the right amount of shine to say "instrument" without turning
+ * into a smear.
  */
 function buildBinnacle(b: PartBuilders, z: number, deckY: number): void {
   const bodyHeight = 0.74;
   const bodyTop = deckY + bodyHeight;
 
   b.spar.addBox({ x: 0, y: deckY + bodyHeight * 0.5, z }, { x: 0.44, y: bodyHeight, z: 0.36 }, 1.6);
-  // Cantoneiras nas quatro quinas — de ferro, que é o que protege quina de
-  // armário a bordo. Em latão eram quatro barras amarelas de 74 cm emoldurando
-  // a peça inteira, e a bitácula lia como um cofre dourado no meio do
-  // tombadilho. O latão fica reservado ao topo, onde ele tem função.
+  // Corner pieces on the four edges — iron, which is what protects a cabinet's edge
+  // aboard. In brass it was four 74 cm yellow bars framing the whole piece, and the
+  // binnacle read as a gilded safe in the middle of the quarterdeck. The brass is saved
+  // for the top, where it has a function.
   for (const sx of [1, -1]) {
     for (const sz of [1, -1]) {
       b.iron.addBox(
@@ -956,24 +955,24 @@ function buildBinnacle(b: PartBuilders, z: number, deckY: number): void {
       );
     }
   }
-  // Filete na cintura, que é onde a porta do armário abre.
+  // Beading at the waist, which is where the cabinet's door opens.
   b.iron.addBox({ x: 0, y: deckY + 0.3, z }, { x: 0.46, y: 0.025, z: 0.38 }, 3);
 
-  // Tambucho da agulha: o armário fecha com uma cinta de latão, a janelinha por
-  // onde se lê o rumo abre **para a popa** — que é o lado de onde o timoneiro
-  // olha — e um chapéu de madeira cobre tudo.
+  // The compass hood: the cabinet closes with a brass band, the little window you read
+  // the heading through opens **aft** — which is the side the helmsman looks from — and a
+  // wooden hat covers it all.
   b.brass.addBox({ x: 0, y: bodyTop + 0.02, z }, { x: 0.4, y: 0.045, z: 0.33 }, 3);
   b.spar.addBox({ x: 0, y: bodyTop + 0.16, z }, { x: 0.34, y: 0.24, z: 0.28 }, 2);
   b.glass.addBox({ x: 0, y: bodyTop + 0.17, z: z + 0.145 }, { x: 0.19, y: 0.15, z: 0.02 }, 2);
   b.brass.addBox({ x: 0, y: bodyTop + 0.17, z: z + 0.15 }, { x: 0.23, y: 0.19, z: 0.012 }, 3);
 
-  // Chapéu: um cone de oito lados, e não duas águas de quads soltos.
+  // The hat: an eight-sided cone, and not a gable of loose quads.
   //
-  // A versão de duas águas era feita de quatro quadriláteros avulsos, e faltava
-  // o essencial: as duas empenas laterais. O que aparecia no tombadilho era uma
-  // aba de madeira inclinada saindo do nada, sem lado nem embaixo. Um sólido de
-  // revolução fecha sozinho, tem normal certa em toda volta e ainda lê como
-  // peça torneada, que é o que uma bitácula tem em cima.
+  // The gable version was made of four unattached quadrilaterals, and it was missing the
+  // essential part: the two side ends. What showed up on the quarterdeck was a slanted
+  // wooden flap coming out of nothing, with no side and no underside. A solid of
+  // revolution closes on its own, has the right normal all the way around and reads as a
+  // turned piece, which is what a binnacle has on top.
   b.spar.addLathe({ x: 0, y: bodyTop + 0.28, z }, 0.13, (h) => 0.25 * (1 - h * 0.92) + 0.01, {
     radialSegments: 8,
     heightSegments: 3,
@@ -984,26 +983,26 @@ function buildBinnacle(b: PartBuilders, z: number, deckY: number): void {
 }
 
 /**
- * Medidas do toldo de popa, num lugar só porque três consumidores as leem: a
- * malha, os obstáculos que o jogador contorna e quem for pendurar algo nele.
+ * The stern canopy's measurements, in one place because three consumers read them: the
+ * mesh, the obstacles the player walks around, and whoever hangs something off it.
  */
 const CANOPY = {
   aftZ: HALF_LENGTH - 0.75,
   foreZ: tToZ(QUARTERDECK_T) + 0.2,
   postTop: 4.02,
   ridgeY: 4.45,
-  /** Meia largura útil do toldo numa estação, recuada da amurada. */
+  /** The canopy's usable half-width at a station, set in from the bulwark. */
   halfAt: (z: number): number => deckHalfWidth(zToT(z)) - 0.34,
 } as const;
 
 /**
- * As quatro colunas do toldo, para o controlador do jogador saber contorná-las.
+ * The canopy's four columns, so the player's controller knows to walk around them.
  *
- * Sem isto o marujo atravessava madeira de 13 cm no meio do próprio posto — e
- * atravessar uma peça do navio é o tipo de coisa que só precisa acontecer uma
- * vez para o convés inteiro deixar de parecer sólido. O raio é o da coluna mais
- * um dedo, e não mais: entre ela e a amurada sobram 34 cm, e engordar o
- * obstáculo fecharia essa passagem.
+ * Without this the sailor walked through 13 cm of wood in the middle of his own station —
+ * and walking through a piece of the ship is the kind of thing that only has to happen
+ * once for the whole deck to stop feeling solid. The radius is the column's plus a
+ * finger, and no more: between it and the bulwark there are 34 cm, and fattening the
+ * obstacle would close that passage.
  */
 export const CANOPY_BLOCKERS: readonly { x: number; z: number; radius: number }[] = [1, -1]
   .flatMap((side) =>
@@ -1015,23 +1014,21 @@ export const CANOPY_BLOCKERS: readonly { x: number; z: number; radius: number }[
   );
 
 /**
- * O toldo do tombadilho: quatro colunas e um telhado de duas águas sobre o
- * posto do leme.
+ * The quarterdeck's canopy: four columns and a gabled roof over the helm station.
  *
- * É a peça que mais aproxima a silhueta da Chalupa do Sea of Thieves, e não por
- * capricho de referência: uma popa descoberta lê como balsa. O toldo dá à popa
- * a massa que o olho procura para chamar aquilo de navio, emoldura o timoneiro
- * (que passa a estar **dentro** de alguma coisa, e não em pé numa tábua alta) e
- * fecha a silhueta contra o horizonte, que é como o inimigo enxerga este navio
- * a duzentos metros.
+ * It is the piece that brings the silhouette closest to Sea of Thieves' sloop, and not
+ * out of a whim for the reference: an uncovered stern reads as a raft. The canopy gives
+ * the stern the mass the eye looks for before calling that thing a ship, frames the
+ * helmsman (who is now **inside** something, and not standing on a high board) and closes
+ * the silhouette against the horizon, which is how the enemy sees this ship at two
+ * hundred meters.
  *
- * **Todas as alturas aqui saem do olho do jogador, não de proporção.** O convés
- * do tombadilho está a 1,82 m da linha d'água, o olho a 3,48 m, e um pulo leva a
- * cabeça a 4,03 m. Um teto pendurado na altura "bonita" de dois metros de
- * pé-direito cortaria a cabeça do jogador toda vez que ele saltasse, e nada
- * denuncia mais rápido um cenário do que atravessar o próprio navio. A cumeeira
- * fica em 4,45 m: 42 cm acima do pulo, folga suficiente para o balanço do mar
- * não fechar a diferença.
+ * **Every height here comes out of the player's eye, not out of proportion.** The
+ * quarterdeck is 1.82 m above the waterline, the eye is at 3.48 m, and a jump takes the
+ * head to 4.03 m. A roof hung at the "pretty" height of two meters of headroom would cut
+ * the player's head off every time they jumped, and nothing gives scenery away faster
+ * than walking through your own ship. The ridge sits at 4.45 m: 42 cm above the jump,
+ * enough clearance that the sea's roll does not close the gap.
  */
 function buildSternCanopy(b: PartBuilders): void {
   const { aftZ, foreZ, postTop, ridgeY, halfAt } = CANOPY;
@@ -1045,8 +1042,8 @@ function buildSternCanopy(b: PartBuilders): void {
         { x: 0.13, y: postTop - deckY, z: 0.13 },
         1.4,
       );
-      // Mão-francesa: a diagonal que impede o pórtico de balançar. Sem ela o
-      // toldo lê como quatro palitos com uma tampa em cima.
+      // A knee brace: the diagonal that keeps the frame from swaying. Without it the
+      // canopy reads as four toothpicks with a lid on top.
       b.spar.addTube(
         new THREE.Vector3(x, postTop - 0.5, z),
         new THREE.Vector3(x - side * 0.42, postTop - 0.06, z),
@@ -1057,7 +1054,7 @@ function buildSternCanopy(b: PartBuilders): void {
       );
     }
 
-    // Viga longitudinal ligando as duas colunas do bordo.
+    // The longitudinal beam joining that side's two columns.
     const x = side * halfAt((aftZ + foreZ) * 0.5);
     b.spar.addBox(
       { x, y: postTop + 0.06, z: (aftZ + foreZ) * 0.5 },
@@ -1066,17 +1063,17 @@ function buildSternCanopy(b: PartBuilders): void {
     );
   }
 
-  // Cumeeira, na linha de centro.
+  // The ridge, on the centerline.
   b.spar.addBox(
     { x: 0, y: ridgeY, z: (aftZ + foreZ) * 0.5 },
     { x: 0.12, y: 0.13, z: aftZ - foreZ + 0.34 },
     1.3,
   );
 
-  // As duas águas do telhado. Cada uma é uma placa **com espessura**, torneada
-  // reta e inclinada depois: `transformFrom` é o que evita montar um prisma
-  // vértice a vértice e ainda garante que as seis faces existam — telhado de
-  // espessura zero é o mesmo defeito da gávea, visto por baixo.
+  // The roof's two slopes. Each is a slab **with thickness**, turned out straight and
+  // tilted afterward: `transformFrom` is what avoids assembling a prism vertex by vertex
+  // and still guarantees all six faces exist — a zero-thickness roof is the crow's nest's
+  // defect all over again, seen from below.
   const eavesHalf = halfAt((aftZ + foreZ) * 0.5) + 0.28;
   const rise = ridgeY - postTop - 0.06;
   const slope = Math.hypot(eavesHalf, rise);
@@ -1097,21 +1094,20 @@ function buildSternCanopy(b: PartBuilders): void {
   }
 }
 
-/** Raio máximo de um barril de convés, na barriga. */
+/** Maximum radius of a deck barrel, at its belly. */
 const BARREL_RADIUS = 0.37;
-/** Altura de um barril. */
+/** Height of a barrel. */
 const BARREL_HEIGHT = 0.86;
 
 /**
- * Onde os barris ficam, em (bordo, z).
+ * Where the barrels sit, as (side, z).
  *
- * O X **não** é escolhido: sai da meia largura real do convés naquele Z, menos
- * o raio do barril. As posições antigas eram números fixos (±1,87, −1,70) e é
- * assim que barril entra na parede: em z = −2,6 o convés tem 2,26 m de meia
- * largura, então um barril de 37 cm de raio centrado em 1,70 sobra 0,19 m para
- * dentro do costado — que é exatamente o que se via, meio barril enterrado na
- * amurada. Deixando a conta com a curva do casco, eles encostam na madeira em
- * qualquer estação e nunca a atravessam.
+ * The X is **not** chosen: it comes out of the deck's real half-width at that Z, minus
+ * the barrel's radius. The old positions were fixed numbers (±1.87, −1.70) and that is
+ * how a barrel gets into the wall: at z = −2.6 the deck has 2.26 m of half-width, so a
+ * 37 cm-radius barrel centered at 1.70 sticks 0.19 m into the side — which is exactly
+ * what you saw, half a barrel buried in the bulwark. Leaving the arithmetic to the hull's
+ * curve, they touch the wood at any station and never go through it.
  */
 const BARREL_PLACES: readonly (readonly [1 | -1, number])[] = [
   [1, -0.6],
@@ -1119,12 +1115,12 @@ const BARREL_PLACES: readonly (readonly [1 | -1, number])[] = [
   [-1, -2.6],
 ];
 
-/** Barris de convés — os de bala de canhão e o de mantimento. */
+/** Deck barrels — the shot barrels and the provisions one. */
 function buildBarrels(b: PartBuilders): void {
   for (const [side, z] of BARREL_PLACES) {
     const x = barrelX(side, z);
     const y = DECK_Y + deckCamber(x, deckHalfWidth(zToT(z)));
-    // Aduelas: a barriga no meio é o que distingue um barril de um tambor.
+    // Staves: the belly in the middle is what tells a barrel from a drum.
     const bulge = (h: number): number =>
       BARREL_RADIUS - 0.07 + 0.07 * Math.sin(h * Math.PI);
     b.spar.addLathe({ x, y, z }, BARREL_HEIGHT, bulge, {
@@ -1144,20 +1140,20 @@ function buildBarrels(b: PartBuilders): void {
 }
 
 /**
- * X de um barril: encostado na amurada daquele bordo, sem entrar nela.
+ * A barrel's X: up against that side's bulwark, without going into it.
  *
- * A folga de 6 cm existe porque a amurada tomba para dentro conforme sobe (o
- * recolhimento em `ShipDimensions`), e o barril tem 86 cm de altura — o topo
- * dele encontra um costado mais estreito que o pé.
+ * The 6 cm of clearance exists because the bulwark falls inboard as it rises (the tumble
+ * home in `ShipDimensions`), and the barrel is 86 cm tall — its top meets a narrower side
+ * than its foot does.
  */
 function barrelX(side: 1 | -1, z: number): number {
   const t = zToT(z);
-  // Mede na altura do topo do barril, que é onde o costado é mais estreito.
+  // Measure at the barrel's top, which is where the side is narrowest.
   const half = halfWidthAtHeight(t, DECK_Y + BARREL_HEIGHT) - HULL_THICKNESS;
   return side * Math.max(half - BARREL_RADIUS - 0.06, 0.5);
 }
 
-/** Onde os barris estão, para o controlador saber contorná-los. */
+/** Where the barrels are, so the controller knows to walk around them. */
 export const BARREL_BLOCKERS: readonly { x: number; z: number; radius: number }[] =
   BARREL_PLACES.map(([side, z]) => ({
     x: barrelX(side, z),
@@ -1166,24 +1162,25 @@ export const BARREL_BLOCKERS: readonly { x: number; z: number; radius: number }[
   }));
 
 /**
- * Bomba de porão: onde se tira a água que entrou pelos rombos.
+ * The bilge pump: where the water that came in through the breaches is got out.
  *
- * Fica a boreste, entre a escotilha e o mastro — perto o bastante da escada para
- * quem desce achar sem procurar, e fora do vão da escotilha, que é por onde a luz
- * do convés desce. A altura da alavanca é a que a mão alcança de pé no porão.
+ * It sits to starboard, between the hatch and the mast — close enough to the stairs that
+ * whoever comes down finds it without looking, and clear of the hatchway, which is where
+ * the deck's light comes down. The brake's height is what the hand reaches standing in
+ * the hold.
  */
 export const BILGE_PUMP = new THREE.Vector3(1.05, HOLD_FLOOR_Y, 1.15);
-/** Altura do cabo da alavanca, o ponto de foco da interação. */
+/** Height of the brake's handle, the interaction's focus point. */
 export const BILGE_PUMP_HANDLE_Y = HOLD_FLOOR_Y + 1.02;
 
 function buildBilgePump(b: PartBuilders): void {
   const { x, z } = BILGE_PUMP;
   const floor = HOLD_FLOOR_Y;
 
-  // Caixa do poço, assentada no piso: é ela que veda a boca do tubo de sucção.
+  // The well's box, seated on the floor: it is what seals the suction pipe's mouth.
   b.spar.addBox({ x, y: floor + 0.14, z }, { x: 0.52, y: 0.28, z: 0.46 }, 2.2);
 
-  // Corpo: um tronco quadrado, com as cintas de ferro que apertam as aduelas.
+  // Body: a square trunk, with the iron bands that clamp the staves.
   const trunkHeight = 0.96;
   b.spar.addBox(
     { x, y: floor + 0.28 + trunkHeight * 0.5, z },
@@ -1194,7 +1191,7 @@ function buildBilgePump(b: PartBuilders): void {
     b.iron.addBox({ x, y: floor + 0.28 + trunkHeight * h, z }, { x: 0.27, y: 0.05, z: 0.27 }, 4);
   }
 
-  // Cabeça de ferro e o munhão em que a alavanca bascula.
+  // The iron head and the trunnion the brake pivots on.
   const headY = floor + 0.28 + trunkHeight;
   b.iron.addBox({ x, y: headY + 0.05, z }, { x: 0.3, y: 0.12, z: 0.26 }, 4);
   b.iron.addTube(
@@ -1205,9 +1202,9 @@ function buildBilgePump(b: PartBuilders): void {
     8,
   );
 
-  // Alavanca: sai do munhão para dentro do navio e cai um pouco, na posição de
-  // repouso. Quem bombeia empurra para baixo, e é esse curso que a animação
-  // percorreria — por ora ela fica parada onde a mão a encontra.
+  // The brake: it comes off the trunnion inboard and drops a little, at rest. Whoever
+  // pumps pushes it down, and that is the stroke the animation would travel — for now it
+  // stays still where the hand finds it.
   b.iron.addTube(
     new THREE.Vector3(x, headY + 0.05, z + 0.1),
     new THREE.Vector3(x - 0.52, BILGE_PUMP_HANDLE_Y - 0.06, z + 0.1),
@@ -1222,9 +1219,9 @@ function buildBilgePump(b: PartBuilders): void {
     { radialSegments: 10, heightSegments: 1, capBottom: true, capTop: true, uvScale: 3 },
   );
 
-  // Bica de latão: despeja a água na direção do costado, por onde ela sai pelos
-  // embornais. É a única peça brilhante aqui embaixo, e serve de marcador visual
-  // no escuro do porão.
+  // Brass spout: it pours the water toward the side, where it goes out through the
+  // scuppers. It is the only shiny piece down here, and it serves as a visual marker in
+  // the dark of the hold.
   b.brass.addTube(
     new THREE.Vector3(x, floor + 0.5, z),
     new THREE.Vector3(x + 0.34, floor + 0.36, z),
@@ -1234,19 +1231,19 @@ function buildBilgePump(b: PartBuilders): void {
   );
 }
 
-/** Onde ficam as malaguetas, em Z local. */
+/** Where the belaying cleats are, in local Z. */
 const CLEAT_Z: readonly number[] = [MAST_Z + 1.6, MAST_Z - 1.2];
 
 /**
- * Posição de um cunho: colado na face de dentro da amurada, um palmo abaixo da
- * capa. Existe como função porque as adriças precisam morrer exatamente aqui.
+ * A cleat's position: against the bulwark's inner face, a hand below the cap. It exists
+ * as a function because the halyards have to die exactly here.
  */
 function cleatPoint(side: 1 | -1, z: number): THREE.Vector3 {
   const y = sheerAt(z) - 0.22;
   return new THREE.Vector3(side * (halfWidthAtHeight(zToT(z), y) - 0.11), y, z);
 }
 
-/** Malaguetas: os cunhos onde os cabos morrem, junto à amurada. */
+/** Belaying cleats: where the lines die, against the bulwark. */
 function buildCleats(b: PartBuilders): void {
   for (const side of [1, -1]) {
     for (const z of CLEAT_Z) {
@@ -1257,43 +1254,43 @@ function buildCleats(b: PartBuilders): void {
 }
 
 /**
- * Lanternas de popa e de mastro.
+ * Stern and mast lanterns.
  *
- * São o que dá escala e leitura ao navio depois do pôr do sol: a chama tem cor
- * acima de 1 de propósito, então o bloom do compositor a transforma num halo, e
- * o `ShipBuilder` pendura uma luz pontual em cada posição devolvida aqui.
+ * They are what gives the ship scale and legibility after sundown: the flame's color is
+ * above 1 on purpose, so the compositor's bloom turns it into a halo, and `ShipBuilder`
+ * hangs a point light at each position returned here.
  */
 function buildLanterns(b: PartBuilders): LanternSpot[] {
-  // Farol de popa: pousado **em cima do coroamento**, a peça mais alta da popa.
+  // The stern lantern: set **on top of the taffrail**, the highest piece of the stern.
   //
-  // É onde ela estaria num navio, e é onde ela finalmente tem no que se apoiar:
-  // a versão anterior pendurava a gaiola em y = 2,78 no eixo central, com um
-  // toco de ferro de 28 cm descendo para o nada — a capa da amurada de popa está
-  // em 2,58, e sobravam 6 cm de ar entre o pé do suporte e a madeira. Agora o
-  // pedestal nasce na própria capa e a chama fica logo acima dela, exatamente na
-  // silhueta que se vê da popa de uma Chalupa contra o poente.
+  // It is where it would be on a ship, and it is where it finally has something to rest
+  // on: the previous version hung the cage at y = 2.78 on the centerline, with a 28 cm
+  // stub of iron running down into nothing — the stern bulwark's cap is at 2.58, and
+  // there were 6 cm of air between the bracket's foot and the wood. Now the pedestal
+  // rises out of the cap itself and the flame sits just above it, exactly in the
+  // silhouette you see of a sloop's stern against the sunset.
   const sternSection = halfWidthAtHeight(0.004, 3.4);
   const sternTop = 2.58;
   const sternZ = HALF_LENGTH - 0.16;
 
-  // Farol de proa: **pendurado no gurupés**, que é a única estrutura que existe
-  // lá na frente.
+  // The bow lantern: **hung from the bowsprit**, which is the only structure that exists
+  // up there.
   //
-  // A primeira tentativa punha a gaiola sobre a roda de proa, em z = −8,02 — e
-  // a roda de proa acaba em −8,0. A lanterha ficava fora do casco, boiando no
-  // ar à frente do navio, presa em nada. Aqui ela pende de um gancho no pau, que
-  // é onde um navio de verdade a leva: à frente de tudo, iluminando a água que a
-  // proa vai cortar, e sem tapar a vista de ninguém a bordo.
+  // The first attempt put the cage over the stem, at z = −8.02 — and the stem ends at
+  // −8.0. The lantern sat outside the hull, floating in the air ahead of the ship,
+  // fastened to nothing. Here it hangs from a hook on the spar, which is where a real
+  // ship carries it: ahead of everything, lighting the water the bow is about to cut, and
+  // blocking nobody's view aboard.
   //
-  // O Y sai da própria reta do gurupés naquele Z, e não de um número escolhido:
-  // o pau sobe 80 cm ao longo de 3,1 m, e é essa conta que garante que o gancho
-  // encoste na madeira mesmo se o gurupés mudar de inclinação.
+  // The Y comes out of the bowsprit's own line at that Z, and not out of a chosen number:
+  // the spar rises 80 cm over 3.1 m, and it is that arithmetic that guarantees the hook
+  // touches the wood even if the bowsprit changes its angle.
   const bowZ = tToZ(0.975) - 0.95;
   const bowspritY = 2.35 + (0.95 / 3.1) * 0.8;
   const bowY = bowspritY - 0.52;
 
-  // Lanterna de porão: pendurada num vau, a meia-nau, entre o pé da escada e a
-  // bomba. É a única que não apaga — ver `LanternSpot.alwaysOn`.
+  // The hold lantern: hung from a beam, amidships, between the foot of the stairs and
+  // the pump. It is the only one that never goes out — see `LanternSpot.alwaysOn`.
   const holdY = ceilingY(zToT(0.6), 0) - 0.34;
   const holdZ = 0.6;
 
@@ -1303,9 +1300,9 @@ function buildLanterns(b: PartBuilders): LanternSpot[] {
     new THREE.Vector3(0.55, holdY, holdZ),
   ];
 
-  // --- os apoios, antes das gaiolas ---
+  // --- the mounts, before the cages ---
 
-  // Pedestal do farol de popa: um coto torneado sobre o coroamento.
+  // The stern lantern's pedestal: a turned stub on the taffrail.
   b.spar.addLathe({ x: 0, y: sternTop - 0.04, z: sternZ }, 0.34, (h) => 0.1 - 0.03 * h, {
     radialSegments: 12,
     heightSegments: 3,
@@ -1319,8 +1316,8 @@ function buildLanterns(b: PartBuilders): LanternSpot[] {
     0.026,
     8,
   );
-  // Duas escoras abrindo para os bordos, que é o que impede o pedestal de ler
-  // como um poste espetado no meio do painel.
+  // Two braces splaying out to the sides, which is what keeps the pedestal from reading
+  // as a post stuck into the middle of the transom.
   for (const side of [1, -1]) {
     b.spar.addTube(
       new THREE.Vector3(side * Math.min(sternSection * 0.55, 0.62), sternTop - 0.02, sternZ - 0.08),
@@ -1332,8 +1329,8 @@ function buildLanterns(b: PartBuilders): LanternSpot[] {
     );
   }
 
-  // Gancho do farol de proa: uma alça de ferro em volta do gurupés e a haste
-  // que desce dela até a argola da gaiola.
+  // The bow lantern's hook: an iron strap around the bowsprit and the rod running down
+  // from it to the cage's ring.
   b.iron.addTorusZ({ x: 0, y: bowspritY, z: bowZ }, 0.12, 0.018, 12, 6, 3);
   b.iron.addTube(
     new THREE.Vector3(0, bowspritY - 0.1, bowZ),
@@ -1343,7 +1340,7 @@ function buildLanterns(b: PartBuilders): LanternSpot[] {
     6,
   );
 
-  // Gancho da lanterna do porão, saindo do teto.
+  // The hold lantern's hook, coming out of the ceiling.
   b.iron.addTube(
     new THREE.Vector3(0.55, ceilingY(zToT(holdZ), 0.55), holdZ),
     new THREE.Vector3(0.55, spots[2]!.y + 0.44, holdZ),
@@ -1354,7 +1351,7 @@ function buildLanterns(b: PartBuilders): LanternSpot[] {
 
   for (const spot of spots) {
     const half = 0.13;
-    // Quatro montantes, uma base e um chapéu: a gaiola clássica.
+    // Four uprights, a base and a hat: the classic cage.
     for (const sx of [1, -1]) {
       for (const sz of [1, -1]) {
         b.iron.addBox(
@@ -1379,7 +1376,7 @@ function buildLanterns(b: PartBuilders): LanternSpot[] {
     );
 
     b.glass.addBox({ x: spot.x, y: spot.y, z: spot.z }, { x: 0.24, y: 0.31, z: 0.24 }, 2);
-    // Chama: uma gota, não uma esfera — a ponta afinada é o que a lê como fogo.
+    // The flame: a teardrop, not a sphere — the tapered tip is what reads it as fire.
     b.flame.addLathe(
       { x: spot.x, y: spot.y - 0.11, z: spot.z },
       0.17,
@@ -1388,20 +1385,20 @@ function buildLanterns(b: PartBuilders): LanternSpot[] {
     );
   }
 
-  // A do porão é a última da lista, e é a única que não obedece ao relógio.
+  // The hold's is the last on the list, and it is the only one that ignores the clock.
   return spots.map((position, index) => ({ position, alwaysOn: index === 2 }));
 }
 
 // ---------------------------------------------------------------------------
-// Peças móveis
+// Moving parts
 // ---------------------------------------------------------------------------
 
 /**
- * O timão.
+ * The helm.
  *
- * Gira no próprio eixo Z porque a roda fica em pé, virada para a popa. Quem a
- * gira é `Rudder`, e o ângulo visível é o ângulo do leme multiplicado pelo número
- * de voltas de batente a batente — na Chalupa, pouco mais de uma volta inteira.
+ * It turns on its own Z axis because the wheel stands upright, facing aft. What turns it
+ * is `Rudder`, and the visible angle is the rudder's angle times the number of turns from
+ * stop to stop — on a sloop, a little over one full turn.
  */
 export function createWheel(materials: ShipMaterials): THREE.Group {
   const b = createPartBuilders();
@@ -1410,7 +1407,8 @@ export function createWheel(materials: ShipMaterials): THREE.Group {
   b.spar.addTorusZ({ x: 0, y: 0, z: 0 }, WHEEL_RADIUS, 0.055, 30, 8, 1.5);
 
   for (let i = 0; i < spokes; i++) {
-    // O punho zero nasce **no topo**, e é dele que sai a marca do leme a meio.
+    // Handle zero is born **at the top**, and it is where the amidships mark comes
+    // from.
     const angle = (i / spokes) * Math.PI * 2 + Math.PI * 0.5;
     const marked = i === 0;
     const direction = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
@@ -1423,24 +1421,25 @@ export function createWheel(materials: ShipMaterials): THREE.Group {
       2,
     );
 
-    // Punho na ponta de cada raio: é por eles que se puxa a roda.
+    // A handle at the end of each spoke: they are what you pull the wheel by.
     //
-    // **Um deles é de latão, e ele é a única leitura de "leme a meio" que existe
-    // a bordo.** Sem essa marca não há como saber, olhando a roda, se ela está
-    // no centro ou uma volta fora dele: os oito punhos são iguais, a roda dá
-    // pouco mais de uma volta de batente a batente, e o navio responde devagar
-    // demais para o desvio aparecer antes de já ter guinado. O jogador ficava
-    // com o método do tentativa e erro — virar, esperar, corrigir —, que é
-    // exatamente o que a marca do Sea of Thieves elimina.
+    // **One of them is brass, and it is the only reading of "rudder amidships" that
+    // exists aboard.** Without that mark there is no way to know, looking at the wheel,
+    // whether it is centered or one turn off: the eight handles are identical, the wheel
+    // gives a little over one turn from stop to stop, and the ship answers too slowly for
+    // the offset to show before it has already swung. The player was left with trial and
+    // error — turn, wait, correct —, which is exactly what Sea of Thieves' mark does away
+    // with.
     //
-    // A conta que faz isso valer está em `syncModel`: a roda gira
-    // `-wheelAngle`, então o punho que nasce em 90° só volta ao topo quando
-    // `wheelAngle` é zero, e zero é o leme no meio. Punho em pé, navio reto.
-    // A marca é a **cor**, e só ela. A primeira versão dava ao punho marcado um
-    // diâmetro maior e uma cabeça arredondada na ponta, e a soma das três coisas
-    // produziu um cogumelo de latão de 13 cm parado no meio da tela de quem
-    // governa. Um punho igual aos outros, em outro material, já se lê de
-    // relance — que é tudo o que uma marca de leme a meio precisa fazer.
+    // The arithmetic that makes it work is in `syncModel`: the wheel turns `-wheelAngle`,
+    // so the handle born at 90° only comes back to the top when `wheelAngle` is zero, and
+    // zero is the rudder amidships. Handle upright, ship straight.
+    //
+    // The mark is the **color**, and only that. The first version gave the marked handle
+    // a larger diameter and a rounded head at the tip, and the three things together
+    // produced a 13 cm brass mushroom parked in the middle of the screen of whoever is
+    // steering. A handle like all the others, in another material, already reads at a
+    // glance — which is all a rudder-amidships mark has to do.
     const handle = marked ? b.brass : b.spar;
     handle.addTube(
       direction.clone().multiplyScalar(WHEEL_RADIUS + 0.03),
@@ -1461,7 +1460,7 @@ export function createWheel(materials: ShipMaterials): THREE.Group {
   return group;
 }
 
-/** Cabrestante, que recolhe a âncora. Gira em torno de +Y. */
+/** The capstan, which weighs the anchor. It turns around +Y. */
 export function createCapstan(materials: ShipMaterials): THREE.Group {
   const b = createPartBuilders();
   const height = 1.02;
@@ -1473,7 +1472,7 @@ export function createCapstan(materials: ShipMaterials): THREE.Group {
     { radialSegments: 16, heightSegments: 8, capTop: true, uvScale: 1.6 },
   );
 
-  // Malaguetas verticais: as saliências onde o cabo agarra.
+  // Vertical whelps: the ribs the cable bites on.
   for (let i = 0; i < 6; i++) {
     const angle = (i / 6) * Math.PI * 2;
     b.spar.addBox(
@@ -1489,7 +1488,7 @@ export function createCapstan(materials: ShipMaterials): THREE.Group {
     uvScale: 2.5,
   });
 
-  // Varas de empurrar, encaixadas no topo.
+  // Push bars, shipped into the top.
   for (let i = 0; i < 4; i++) {
     const angle = (i / 4) * Math.PI * 2 + Math.PI * 0.25;
     b.spar.addTube(
@@ -1514,33 +1513,32 @@ export function createCapstan(materials: ShipMaterials): THREE.Group {
 }
 
 export interface CannonAssembly {
-  /** Raiz: posição no convés e a orientação fixa do bordo. */
+  /** The root: position on the deck and the side's fixed orientation. */
   root: THREE.Group;
-  /** Gira em Y — a travessia, dentro do batente da carreta. */
+  /** Turns in Y — the traverse, within the carriage's stop. */
   traverse: THREE.Group;
-  /** Gira em X — a elevação do cano. */
+  /** Turns in X — the barrel's elevation. */
   elevation: THREE.Group;
-  /** Boca do cano: de onde a bala nasce e por onde sai a fumaça. */
+  /** The muzzle: where the ball is born and where the smoke comes out. */
   muzzle: THREE.Object3D;
 }
 
-/** Comprimento do cano, da culatra à boca. */
+/** Length of the barrel, from breech to muzzle. */
 export const BARREL_LENGTH = 1.9;
-/** Quanto do cano fica atrás dos munhões, que são o eixo de elevação. */
+/** How much of the barrel sits behind the trunnions, which are the elevation axis. */
 export const BREECH_OFFSET = 0.55;
-/** Altura do eixo do cano acima do convés — o bastante para passar da amurada. */
+/** Height of the barrel's axis above the deck — enough to clear the bulwark. */
 export const BARREL_AXIS_Y = 1.12;
-/** Raio da alma. É também o raio da bala que `Cannonball` dispara. */
+/** Radius of the bore. It is also the radius of the ball `Cannonball` fires. */
 export const BORE_RADIUS = 0.052;
 
 /**
- * Perfil do cano, da culatra (h = 0) à boca (h = 1).
+ * The barrel's profile, from breech (h = 0) to muzzle (h = 1).
  *
- * Os degraus não são enfeite: canhão de ferro fundido é mais grosso onde a
- * pressão é maior, e as duas cinturas de reforço marcam onde a espessura muda.
- * Codificá-las no perfil sai mais barato que modelar anéis à parte — e o mesmo
- * vale para a boca, que mergulha para dentro nos últimos 4% e por isso lê como
- * furo em vez de tampa.
+ * The steps are not decoration: a cast-iron gun is thicker where the pressure is higher,
+ * and the two reinforcing rings mark where the thickness changes. Encoding them in the
+ * profile is cheaper than modeling separate rings — and the same goes for the muzzle,
+ * which dives inward over the last 4% and therefore reads as a hole instead of a cap.
  */
 function barrelProfile(h: number): number {
   if (h > 0.96) {
@@ -1556,28 +1554,28 @@ function barrelProfile(h: number): number {
 }
 
 export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAssembly {
-  // ---- Carreta: acompanha a travessia, mas não a elevação ----
+  // ---- Carriage: it follows the traverse, but not the elevation ----
   const carriage = createPartBuilders();
   const wheelRadius = 0.16;
 
   carriage.spar.addBox({ x: 0, y: 0.44, z: 0 }, { x: 0.72, y: 0.18, z: 1.2 }, 1.2);
-  // Cunha de pontaria, sob a culatra.
+  // The quoin, under the breech.
   carriage.spar.addBox({ x: 0, y: 0.64, z: 0.42 }, { x: 0.3, y: 0.24, z: 0.34 }, 2);
 
   for (const sx of [1, -1]) {
-    // **A ilharga é escalonada, e não um bloco.**
+    // **The bracket is stepped, and not a block.**
     //
-    // O reparo naval tem esse perfil por necessidade: a peça é alta à frente,
-    // onde sustenta os munhões, e vai baixando para a culatra, onde precisa
-    // sobrar espaço para a cunha e para a mão de quem aponta. Modelada como uma
-    // caixa única de 72 cm de altura, a carreta virava um caixote preto de onde
-    // saía um cano — a leitura que a captura do convés dava, e a que menos
-    // parece artilharia. Três degraus custam duas caixas a mais por bordo e
-    // devolvem a silhueta que se reconhece de longe.
+    // A naval carriage has this profile out of necessity: the piece is tall forward,
+    // where it carries the trunnions, and steps down toward the breech, where there has
+    // to be room for the quoin and for the hand of whoever is laying the gun. Modeled as
+    // a single 72 cm-tall box, the carriage turned into a black crate with a barrel
+    // coming out of it — the reading the deck's screenshot gave, and the one that looks
+    // least like artillery. Three steps cost two extra boxes per side and give back the
+    // silhouette you recognize from a distance.
     carriage.spar.addBox({ x: sx * 0.26, y: 0.8, z: -0.26 }, { x: 0.11, y: 0.72, z: 0.5 }, 1.2);
     carriage.spar.addBox({ x: sx * 0.26, y: 0.68, z: 0.1 }, { x: 0.11, y: 0.48, z: 0.28 }, 1.2);
     carriage.spar.addBox({ x: sx * 0.26, y: 0.6, z: 0.38 }, { x: 0.11, y: 0.32, z: 0.32 }, 1.2);
-    // Cinta de ferro na ilharga, onde a madeira é aparafusada ao eixo.
+    // An iron strap on the bracket, where the wood is bolted to the axletree.
     carriage.iron.addBox({ x: sx * 0.265, y: 0.56, z: -0.36 }, { x: 0.125, y: 0.07, z: 0.28 }, 3);
     for (const sz of [1, -1]) {
       const start = carriage.iron.vertexCount;
@@ -1588,7 +1586,7 @@ export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAsse
         capTop: true,
         uvScale: 2,
       });
-      // O torno gira em +Y; a roda precisa do eixo em X.
+      // The lathe spins around +Y; the truck needs its axis in X.
       carriage.iron.transformFrom(
         start,
         new THREE.Matrix4()
@@ -1598,18 +1596,18 @@ export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAsse
     }
   }
 
-  // ---- Cano: gira em elevação em torno dos munhões ----
+  // ---- Barrel: it turns in elevation around the trunnions ----
   const barrel = createPartBuilders();
 
-  // Cano e botão da culatra saem do torno em pé; um transform só deita os dois,
-  // e capturar o contador antes é o que evita depender de quantos vértices cada
-  // peça gerou.
-  // O UV é em metros, então `uvScale` decide de que tamanho o defeito de
-  // fundição aparece na peça. Em 1,4 o ladrilho cobria 71 cm de cano e a
-  // camada grossa do mapa de metal virava mancha de 9 cm: no zoom de mira, a
-  // meio metro do olho, o cano lia como pedra-pomes em vez de ferro fundido.
-  // Em 3 o ladrilho cai para 33 cm e o mesmo defeito fica na casa dos 4 cm,
-  // que é a escala real da areia de fundição.
+  // The barrel and the cascabel come off the lathe upright; a single transform lays them
+  // both down, and capturing the counter beforehand is what avoids depending on how many
+  // vertices each piece generated.
+  //
+  // The UV is in meters, so `uvScale` decides how big the casting flaw shows up on the
+  // piece. At 1.4 the tile covered 71 cm of barrel and the metal map's coarse layer
+  // became a 9 cm blotch: at aiming zoom, half a meter from the eye, the barrel read as
+  // pumice instead of cast iron. At 3 the tile drops to 33 cm and the same flaw lands
+  // around 4 cm, which is the real scale of foundry sand.
   const barrelStart = barrel.iron.vertexCount;
   barrel.iron.addLathe({ x: 0, y: 0, z: 0 }, BARREL_LENGTH, barrelProfile, {
     radialSegments: 18,
@@ -1629,7 +1627,8 @@ export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAsse
     new THREE.Matrix4().makeRotationX(-Math.PI * 0.5).setPosition(0, 0, BREECH_OFFSET),
   );
 
-  // Munhões: já nascem no eixo X, então ficam de fora da rotação acima.
+  // Trunnions: they are already born on the X axis, so they stay out of the rotation
+  // above.
   for (const sx of [1, -1]) {
     barrel.iron.addTube(
       new THREE.Vector3(sx * 0.1, 0, 0),
@@ -1640,14 +1639,14 @@ export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAsse
       3,
     );
   }
-  // Ouvido: o furo de escorva, por onde a mecha acende a carga.
+  // The vent: the priming hole the match lights the charge through.
   //
-  // A bucha é de latão de propósito (o bronze resiste melhor à erosão do fogo
-  // que o ferro fundido), mas ela é a única peça amarela do cano e fica a menos
-  // de um metro do olho no modo canhão — a versão anterior, de 6 cm de diâmetro
-  // e 4,4 cm de saliência sobre um cano de raio 12,6 cm, lia como uma lasca
-  // verde cravada na peça. Bucha de ouvido real mal passa dos 4 cm e é quase
-  // rasante; com 12 lados ela também para de facetar nessa distância.
+  // The bushing is brass on purpose (bronze resists the fire's erosion better than cast
+  // iron), but it is the barrel's only yellow piece and it sits less than a meter from the
+  // eye in cannon mode — the previous version, 6 cm across and standing 4.4 cm proud of a
+  // barrel of 12.6 cm radius, read as a green chip driven into the piece. A real vent
+  // bushing barely passes 4 cm and is nearly flush; with 12 sides it also stops faceting
+  // at that distance.
   barrel.brass.addTube(
     new THREE.Vector3(0, 0.1, 0.34),
     new THREE.Vector3(0, 0.142, 0.34),
@@ -1657,7 +1656,7 @@ export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAsse
     3,
   );
 
-  // ---- Montagem ----
+  // ---- Assembly ----
   const root = new THREE.Group();
   const traverse = new THREE.Group();
   const elevation = new THREE.Group();
@@ -1667,8 +1666,8 @@ export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAsse
   const x = side * (halfWidth - 0.5);
   root.name = side > 0 ? 'cannon-starboard' : 'cannon-port';
   root.position.set(x, DECK_Y + deckCamber(x, halfWidth) - 0.02, tToZ(STATIONS.cannon));
-  // O -Z local aponta para o bordo correspondente: é a pose de repouso da peça,
-  // e é o que faz a travessia em Y e a elevação em X significarem o esperado.
+  // The local -Z points to the matching side: it is the piece's rest pose, and it is what
+  // makes the traverse in Y and the elevation in X mean what you expect.
   root.rotation.y = side > 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
 
   traverse.name = 'traverse';
@@ -1687,12 +1686,13 @@ export function createCannon(materials: ShipMaterials, side: 1 | -1): CannonAsse
 }
 
 /**
- * Leme: uma pá com perfil de fólio, atrás do cadaste. Gira em Y na própria madre.
+ * The rudder: a blade with a foil section, abaft the sternpost. It turns in Y on its own
+ * stock.
  *
- * A pá é mais larga embaixo porque é lá que a água corre mais limpa, longe da
- * esteira do casco — e é essa área submersa que `Rudder` converte em torque.
- * A espessura vai a zero nas duas bordas, então os dois lados se encontram
- * sozinhos e não sobra costura para fechar.
+ * The blade is wider at the bottom because that is where the water runs cleanest, away
+ * from the hull's wake — and it is that submerged area `Rudder` converts into torque. The
+ * thickness goes to zero at both edges, so the two sides meet on their own and no seam is
+ * left to close.
  */
 export function createRudder(materials: ShipMaterials): THREE.Group {
   const b = createPartBuilders();
@@ -1705,18 +1705,18 @@ export function createRudder(materials: ShipMaterials): THREE.Group {
   const face = (s: number, w: number, side: number): Vertex => {
     const y = bottomY + (topY - bottomY) * s;
     const chord = topChord * s + bottomChord * (1 - s);
-    // O caimento leva o pé da pá para vante, debaixo da popa.
+    // The rake carries the blade's foot forward, under the stern.
     const z = leadingEdge - rake * (1 - s) + w * chord;
     const thickness = maxThickness * Math.sin(Math.pow(w, 0.6) * Math.PI);
     return vertex(side * thickness, y, z, z * 0.7, y * 0.7);
   };
 
-  // Um bordo de cada vez, como no casco: boreste precisa da orientação virada.
+  // One side at a time, like on the hull: starboard needs the orientation flipped.
   for (const side of [1, -1]) {
     b.hull.addSurface(heightSegments, chordSegments, (s, w) => face(s, w, side), side > 0);
   }
 
-  // Tampas de fundo e de topo, costurando os dois bordos.
+  // Bottom and top caps, stitching the two sides together.
   for (const s of [0, 1]) {
     const starboard: Vertex[] = [];
     const port: Vertex[] = [];
@@ -1728,8 +1728,9 @@ export function createRudder(materials: ShipMaterials): THREE.Group {
     b.hull.addStrip(starboard, port, s === 1);
   }
 
-  // Machos e fêmeas: as ferragens que prendem o leme ao cadaste. São três porque
-  // a pá agora é alta, e duas deixariam o bordo de ataque visivelmente solto.
+  // Pintles and gudgeons: the ironwork that hangs the rudder on the sternpost. There are
+  // three because the blade is tall now, and two would leave the leading edge visibly
+  // loose.
   for (const s of [0.12, 0.5, 0.88]) {
     const y = bottomY + (topY - bottomY) * s;
     const z = leadingEdge - rake * (1 - s) + 0.02;
@@ -1751,16 +1752,16 @@ export function createRudder(materials: ShipMaterials): THREE.Group {
 }
 
 /**
- * Âncora, pendurada no bordo de boreste da proa.
+ * The anchor, hung on the starboard bow.
  *
- * Fica em grupo próprio porque `Anchor` a desce e a sobe — e porque, com ela no
- * fundo, é ela que fica parada enquanto o navio gira em volta.
+ * It lives in its own group because `Anchor` lowers and raises it — and because, with it
+ * on the bottom, it is the thing that stays put while the ship swings around it.
  */
 export function createAnchor(materials: ShipMaterials): THREE.Group {
   const b = createPartBuilders();
 
-  // Haste, cepo e arganéu. A peça é construída no plano XY — braços abertos em
-  // X — e o **grupo** é que a vira para o plano do costado. Ver a pose abaixo.
+  // Shank, stock and ring. The piece is built in the XY plane — arms splayed in X — and
+  // it is the **group** that turns it into the side's plane. See the pose below.
   b.iron.addTube(new THREE.Vector3(0, 0.95, 0), new THREE.Vector3(0, -0.5, 0), 0.055, 0.07, 10, 2);
   b.iron.addTube(
     new THREE.Vector3(-0.52, 0.78, 0),
@@ -1781,29 +1782,30 @@ export function createAnchor(materials: ShipMaterials): THREE.Group {
       8,
       2,
     );
-    // Unha: a pá que morde o fundo.
+    // Fluke: the blade that bites the bottom.
     b.iron.addBox({ x: side * 0.57, y: -0.08, z: 0 }, { x: 0.26, y: 0.22, z: 0.055 }, 3);
   }
 
   const group = new THREE.Group();
   group.name = 'anchor';
   group.position.copy(ANCHOR_STOWED);
-  // Um quarto de volta em Y: sem isso os braços apontam para dentro e para fora
-  // do navio, e o de dentro atravessa o costado — a âncora nascia com metade
-  // dela enfiada na proa. Virada, os braços correm ao longo do casco e a peça
-  // fica deitada contra o costado, que é como uma âncora viaja.
+  // A quarter turn in Y: without it the arms point inboard and outboard, and the inboard
+  // one goes through the side — the anchor was born with half of it driven into the bow.
+  // Turned, the arms run along the hull and the piece lies flat against the side, which is
+  // how an anchor travels.
   group.rotation.set(0, Math.PI * 0.5, -0.1);
   emitMeshes(b, materials, group);
   return group;
 }
 
 /**
- * Onde a âncora fica quando está a bordo — pendurada no turco, do lado de fora
- * do costado de boreste da proa.
+ * Where the anchor sits when it is aboard — hung from the cathead, outboard of the
+ * starboard bow.
  *
- * O X é medido do casco na altura em que ela pende, mais a folga da própria
- * peça: com a haste no eixo do grupo, a metade de dentro da âncora ocupa 12 cm,
- * e é essa distância que a mantém rente ao costado sem penetrá-lo.
+ * The X is measured off the hull at the height it hangs at, plus the piece's own
+ * clearance: with the shank on the group's axis, the anchor's inboard half takes up
+ * 12 cm, and it is that distance that keeps it close against the side without going into
+ * it.
  */
 export const ANCHOR_STOWED = new THREE.Vector3(
   halfWidthAtHeight(0.9, 1.7) + 0.14,
@@ -1812,12 +1814,12 @@ export const ANCHOR_STOWED = new THREE.Vector3(
 );
 
 /**
- * Turco: a viga que avança da amurada e segura a âncora fora do costado.
+ * The cathead: the beam that reaches out from the bulwark and holds the anchor clear of
+ * the side.
  *
- * Existe por necessidade estrutural do modelo, não por enfeite: a âncora
- * pendurava do nada, e um ferro de 250 kg pendurado no ar a um palmo do casco é
- * exatamente o tipo de coisa que o olho registra como errada antes de saber por
- * quê.
+ * It exists out of the model's structural necessity, not as decoration: the anchor hung
+ * from nothing, and 250 kg of iron hanging in the air a hand from the hull is exactly the
+ * kind of thing the eye registers as wrong before knowing why.
  */
 function buildCathead(b: PartBuilders): void {
   const z = ANCHOR_STOWED.z;
@@ -1830,7 +1832,7 @@ function buildCathead(b: PartBuilders): void {
     { x: ANCHOR_STOWED.x - inboard + 0.3, y: 0.19, z: 0.22 },
     2,
   );
-  // Escora diagonal, do costado à ponta do turco.
+  // A diagonal brace, from the side to the cathead's tip.
   b.spar.addTube(
     new THREE.Vector3(inboard, railY - 0.62, z),
     new THREE.Vector3(ANCHOR_STOWED.x, railY - 0.06, z),
@@ -1839,7 +1841,7 @@ function buildCathead(b: PartBuilders): void {
     6,
     2,
   );
-  // Gato de suspensão na ponta, de onde a âncora pende.
+  // The lifting hook at the tip, which the anchor hangs from.
   b.iron.addTube(
     new THREE.Vector3(ANCHOR_STOWED.x, railY - 0.06, z),
     new THREE.Vector3(ANCHOR_STOWED.x, ANCHOR_STOWED.y + 0.95, z),
@@ -1850,36 +1852,37 @@ function buildCathead(b: PartBuilders): void {
 }
 
 /**
- * Bandeira do tope: a flâmula que corre no topo do mastro.
+ * The masthead ensign: the pennant that flies at the top of the mast.
  *
- * Vale a geometria por um motivo de jogo, não de enfeite. A duzentos metros a
- * Chalupa é uma silhueta escura com um retângulo claro no meio, e as duas do
- * duelo são idênticas — a bandeira é a segunda coisa que se distingue depois da
- * cor do pano, e é a que se vê contra o céu mesmo quando a vela está de perfil.
+ * The geometry is worth it for a gameplay reason, not for decoration. At two hundred
+ * meters the sloop is a dark silhouette with a pale rectangle in the middle, and the
+ * duel's two are identical — the ensign is the second thing you tell apart after the
+ * canvas's color, and it is the one you see against the sky even when the sail is
+ * edge-on.
  *
- * Usa o material da vela (e portanto o tingido de cada navio, ver `tintSail`),
- * então a bandeira do inimigo nasce carmim junto com o pano dele, de graça.
+ * It uses the sail's material (and therefore each ship's tint, see `tintSail`), so the
+ * enemy's ensign is born crimson along with their canvas, for free.
  */
 export const ENSIGN_FRAME = {
   columns: 10,
   rows: 4,
-  /** Comprimento do pano, da adriça à ponta. */
+  /** Length of the cloth, from the halyard to the tip. */
   length: 1.9,
-  /** Altura junto à haste. */
+  /** Height at the staff. */
   height: 0.62,
-  /** Quanto a ponta afina — galhardete, não retângulo. */
+  /** How much the tip tapers — a pennant, not a rectangle. */
   taper: 0.32,
-  /** Altura do meio do pano. */
+  /** Height of the cloth's middle. */
   y: MAST_TOP_Y - 0.35,
   z: MAST_Z + 0.06,
 } as const;
 
-/** Índice do nó `(i, j)` na grade da bandeira. `EnsignSim` usa o mesmo cálculo. */
+/** Index of node `(i, j)` in the ensign's grid. `EnsignSim` uses the same arithmetic. */
 export function ensignVertexIndex(i: number, j: number): number {
   return j * (ENSIGN_FRAME.columns + 1) + i;
 }
 
-/** Posição de repouso do nó `(i, j)`: o pano estendido reto para a popa. */
+/** Rest position of node `(i, j)`: the cloth stretched straight aft. */
 export function ensignRestPoint(i: number, j: number, target: THREE.Vector3): THREE.Vector3 {
   const { columns, rows, length, height, taper, y, z } = ENSIGN_FRAME;
   const u = i / columns;
@@ -1897,10 +1900,10 @@ export function createEnsign(): THREE.BufferGeometry {
   for (let j = 0; j <= rows; j++) {
     for (let i = 0; i <= columns; i++) {
       const index = ensignVertexIndex(i, j);
-      // Nasce reta e sem ondulação nenhuma. A onda **é** a simulação agora
-      // (`EnsignSim`): a versão anterior assava um seno na geometria e a
-      // bandeira ficava com exatamente a mesma prega para sempre, em qualquer
-      // vento, apontando para a popa mesmo com o vento vindo de lá.
+      // It is born straight and with no ripple at all. The ripple **is** the simulation
+      // now (`EnsignSim`): the previous version baked a sine into the geometry and the
+      // ensign kept exactly the same fold forever, in any wind, pointing aft even with
+      // the wind coming from there.
       ensignRestPoint(i, j, point);
       positions[index * 3] = point.x;
       positions[index * 3 + 1] = point.y;
@@ -1927,28 +1930,28 @@ export function createEnsign(): THREE.BufferGeometry {
 }
 
 // ---------------------------------------------------------------------------
-// Vela
+// Sail
 // ---------------------------------------------------------------------------
 
-/** Índice do vértice `(i, j)` na grade da vela. `SailSim` usa o mesmo cálculo. */
+/** Index of vertex `(i, j)` in the sail's grid. `SailSim` uses the same arithmetic. */
 export function sailVertexIndex(i: number, j: number): number {
   return j * (SAIL_FRAME.columns + 1) + i;
 }
 
 /**
- * Folga mínima entre a lona e o mastro, em Z, para uma dada altura e distância
- * do eixo.
+ * Minimum clearance between the canvas and the mast, in Z, for a given height and
+ * distance from the axis.
  *
- * **É isto que fazia a vela parecer estar do lado errado.** O pano nasce no plano
- * do mastro, e a barriga vale zero nas quatro bordas — que são exatamente as
- * relingas presas à verga e à retranca. O resultado é que a metade superior e a
- * inferior do pano, no meio do vão, nasciam *dentro* do tronco: o mastro cortava
- * a lona ao meio e o que se via era meia vela de cada lado do pau, como se ela
- * estivesse enfiada ao contrário.
+ * **This is what made the sail look like it was on the wrong side.** The cloth is born in
+ * the mast's plane, and the belly is zero along the four edges — which are exactly the
+ * boltropes made fast to the yard and the boom. The result is that the cloth's upper and
+ * lower halves, mid-span, were born *inside* the trunk: the mast cut the canvas in half
+ * and what you saw was half a sail on each side of the spar, as if it had been shipped
+ * backwards.
  *
- * A conta é a de sempre para tangenciar um cilindro: a que distância em Z é
- * preciso estar, a uma distância `x` do eixo, para ficar fora de um raio `r`.
- * Fora do raio devolve zero, e aí a barriga do vento manda sozinha.
+ * The arithmetic is the usual one for clearing a cylinder: how far away in Z you have to
+ * be, at a distance `x` from the axis, to stay outside a radius `r`. Outside the radius it
+ * returns zero, and from there the wind's belly rules on its own.
  */
 export function mastClearance(x: number, y: number): number {
   const radius = mastRadius(y) + 0.07;
@@ -1956,12 +1959,12 @@ export function mastClearance(x: number, y: number): number {
   return distance >= radius ? 0 : Math.sqrt(radius * radius - distance * distance);
 }
 
-/** Posição de repouso do nó `(i, j)`, já com a barriga inicial. */
+/** Rest position of node `(i, j)`, with the initial belly already in it. */
 export function sailRestPoint(i: number, j: number, target: THREE.Vector3): THREE.Vector3 {
   const { columns, rows, halfWidth, topY, bottomY, z } = SAIL_FRAME;
   const u = i / columns;
   const v = j / rows;
-  // Barriga: máxima no centro, zero nas bordas presas à verga e à retranca.
+  // Belly: maximum at the center, zero at the edges made fast to the yard and boom.
   const belly = Math.sin(u * Math.PI) * Math.sin(v * Math.PI) * 0.85;
   const x = (u * 2 - 1) * halfWidth;
   const y = topY + (bottomY - topY) * v - belly * 0.12;
@@ -1969,18 +1972,17 @@ export function sailRestPoint(i: number, j: number, target: THREE.Vector3): THRE
 }
 
 /**
- * Grade da vela, pronta para `SailSim` mexer.
+ * The sail's grid, ready for `SailSim` to move.
  *
- * Esta é a única peça do navio que **não** passa pelo `GeometryBuilder`: ele dá
- * quatro vértices próprios a cada quad, o que é exatamente o que se quer num
- * casco (quinas duras de graça) e exatamente o que não se quer num pano. Aqui os
- * vértices são compartilhados numa grade indexada `(columns+1) × (rows+1)`, por
- * dois motivos: o sombreamento sai suave em vez de facetado quad a quad, e o
- * simulador tem uma partícula por vértice em vez de quatro cópias do mesmo nó
- * para manter em sincronia.
+ * This is the only piece of the ship that does **not** go through `GeometryBuilder`: it
+ * gives every quad four vertices of its own, which is exactly what you want on a hull
+ * (hard edges for free) and exactly what you do not want on cloth. Here the vertices are
+ * shared in an indexed `(columns+1) × (rows+1)` grid, for two reasons: the shading comes
+ * out smooth instead of faceted quad by quad, and the simulator has one particle per
+ * vertex instead of four copies of the same node to keep in sync.
  *
- * Já nasce com a barriga que o vento dá, então o navio parece certo mesmo antes
- * da física entrar.
+ * It is born with the belly the wind gives it, so the ship looks right even before the
+ * physics comes in.
  */
 export function createSailGeometry(): THREE.BufferGeometry {
   const { columns, rows } = SAIL_FRAME;
@@ -2003,9 +2005,9 @@ export function createSailGeometry(): THREE.BufferGeometry {
     }
   }
 
-  // Ordem escolhida para a normal sair apontando para a proa, o mesmo lado para
-  // onde a barriga infla. (O pano é `DoubleSide` de qualquer forma, mas a normal
-  // certa é o que faz o sol atravessá-lo pelo lado certo.)
+  // The order is chosen so the normal comes out pointing forward, the same side the
+  // belly inflates toward. (The cloth is `DoubleSide` anyway, but the right normal is what
+  // makes the sun pass through it from the right side.)
   let cursor = 0;
   for (let j = 0; j < rows; j++) {
     for (let i = 0; i < columns; i++) {
