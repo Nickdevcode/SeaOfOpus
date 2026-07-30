@@ -1,36 +1,35 @@
 /**
- * Ciclo dia/noite completo: órbita do sol e da lua, cor e intensidade da luz,
- * ambiente, névoa e nuvens.
+ * The full day/night cycle: the sun's and moon's orbits, the light's color and
+ * intensity, ambient, fog and clouds.
  *
- * A cor da luz direcional não é uma rampa pintada à mão — ela sai da mesma
- * física do céu. Quanto mais baixo o sol, mais atmosfera a luz atravessa
- * ("massa de ar"), e o azul é espalhado para fora primeiro. É por isso que o
- * poente fica laranja sozinho, sem ninguém escolher a cor.
+ * The directional light's color is not a hand-painted ramp — it comes out of the sky's
+ * own physics. The lower the sun, the more atmosphere the light crosses ("air mass"),
+ * and the blue is scattered out first. That is why the sunset goes orange on its own,
+ * with nobody choosing the color.
  */
 
 import * as THREE from 'three';
 import { clamp, clamp01, smoothstep, TAU } from '../core/MathUtils';
 
 /**
- * Coeficientes de Rayleigh integrados na espessura da atmosfera.
- * São os mesmos do shader (`atmosphere.ts`), multiplicados pela altura de
- * escala de 8 km — mantê-los em sincronia é o que faz a luz da cena casar com
- * a cor do céu renderizado.
+ * Rayleigh coefficients integrated over the atmosphere's thickness.
+ * They are the shader's own (`atmosphere.ts`), multiplied by the 8 km scale height —
+ * keeping them in sync is what makes the scene's light match the rendered sky's color.
  */
 const RAYLEIGH_OPTICAL_DEPTH = new THREE.Vector3(0.044, 0.104, 0.179);
 
-/** Inclinação do plano orbital: impede o sol de cruzar o zênite exato. */
+/** Tilt of the orbital plane: it keeps the sun from crossing the exact zenith. */
 const ORBIT_TILT = 0.38;
 
-// Paleta fixa do ciclo. São constantes de módulo, e não literais dentro dos
-// métodos, porque `update` roda a 60 Hz: alocar meia dúzia de Color por quadro
-// dá algumas centenas de objetos por segundo só para o GC recolher depois.
+// The cycle's fixed palette. They are module constants, and not literals inside the
+// methods, because `update` runs at 60 Hz: allocating half a dozen Colors per frame
+// gives a few hundred objects a second just for the GC to sweep up afterwards.
 const AMBIENT_SKY_DAY = new THREE.Color(0.55, 0.72, 0.95);
-// Mais claro e mais azul que os (0,05 · 0,08 · 0,16) de antes. O céu noturno
-// real não é preto: é azul-marinho, e é dele que vem quase tudo que se enxerga
-// num convés à noite.
+// Lighter and bluer than the previous (0.05 · 0.08 · 0.16). The real night sky is not
+// black: it is navy blue, and it is where almost everything you can see on a deck at
+// night comes from.
 const AMBIENT_SKY_NIGHT = new THREE.Color(0.11, 0.16, 0.3);
-/** Cor do clarão do relâmpago aplicada à luz ambiente. */
+/** Color of the lightning flash applied to the ambient light. */
 const LIGHTNING_TINT = new THREE.Color(0.85, 0.9, 1);
 const AMBIENT_TWILIGHT = new THREE.Color(0.95, 0.55, 0.35);
 const HORIZON_DAY = new THREE.Color(0.62, 0.74, 0.88);
@@ -41,11 +40,11 @@ const NIGHT_CLOUD_LIT = new THREE.Color(0.1, 0.12, 0.18);
 const NIGHT_CLOUD_SHADOW = new THREE.Color(0.02, 0.026, 0.045);
 
 export class DayNightCycle {
-  /** 0 = meia-noite, 0.25 = amanhecer, 0.5 = meio-dia, 0.75 = entardecer. */
+  /** 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset. */
   timeOfDay: number;
-  /** Duração de um dia completo, em segundos reais. */
+  /** Length of a full day, in real seconds. */
   dayLengthSeconds: number;
-  /** Congela o relógio (usado pelo menu, que fica num poente fixo). */
+  /** Freezes the clock (used by the menu, which sits at a fixed sunset). */
   paused = false;
 
   readonly sunDirection = new THREE.Vector3(0, 1, 0);
@@ -56,36 +55,37 @@ export class DayNightCycle {
   readonly ambientLight: THREE.HemisphereLight;
 
   /**
-   * Multiplicador da luz hemisférica.
+   * Multiplier on the hemisphere light.
    *
-   * Quando existe um mapa de ambiente na cena, o céu já entra no difuso de todo
-   * material pelo IBL — manter a hemisférica na intensidade cheia contaria a
-   * mesma luz duas vezes e lavaria as sombras. Ela não some porque continua
-   * sendo o piso de iluminação no preset Baixo, onde o IBL é desligado.
+   * When there is an environment map in the scene, the sky already enters every
+   * material's diffuse through the IBL — keeping the hemisphere light at full intensity
+   * would count the same light twice and wash the shadows out. It does not disappear
+   * because it is still the lighting floor on the Low preset, where the IBL is switched
+   * off.
    */
   ambientScale = 1;
 
   /**
-   * Quanto o céu está encoberto, 0..1. Quem escreve é o `Weather`.
+   * How overcast the sky is, 0..1. What writes it is `Weather`.
    *
-   * Não é decoração: nuvem bloqueia sol. Sem este fator a tempestade tinha um
-   * céu de chumbo com **sombras nítidas de meio-dia** projetadas no convés, que
-   * é a contradição visual mais fácil de notar num jogo de barco. Aqui ele corta
-   * a direcional (as sombras somem e a luz vira difusa) e derruba a intensidade
-   * que alimenta a LUT atmosférica, o que escurece o domo e, por tabela, o
-   * reflexo do mar — que lê a mesma textura.
+   * It is not decoration: cloud blocks sun. Without this factor the storm had a leaden
+   * sky with **sharp noon shadows** cast on the deck, which is the easiest visual
+   * contradiction to notice in a boat game. Here it cuts the directional light (the
+   * shadows disappear and the light goes diffuse) and drops the intensity feeding the
+   * atmospheric LUT, which darkens the dome and, by extension, the sea's reflection —
+   * which reads the same texture.
    */
   overcast = 0;
 
-  /** 0 no dia pleno, 1 na noite fechada. Usado por estrelas e lanternas. */
+  /** 0 in full day, 1 in deep night. Used by the stars and the lanterns. */
   nightFactor = 0;
-  /** Cor da névoa, casada com o horizonte do céu. */
+  /** The fog's color, matched to the sky's horizon. */
   readonly fogColor = new THREE.Color();
-  /** Intensidade do sol passada à LUT atmosférica. */
+  /** The sun's intensity passed to the atmospheric LUT. */
   sunIntensity = 22;
 
   private readonly scattered = new THREE.Color();
-  /** Clarão do relâmpago neste quadro, 0..1. */
+  /** The lightning flash on this frame, 0..1. */
   private flash = 0;
 
   constructor(dayLengthMinutes = 12, startTimeOfDay = 0.34) {
@@ -96,7 +96,7 @@ export class DayNightCycle {
     this.sunLight.castShadow = true;
     this.configureShadow(this.sunLight);
 
-    // A lua não projeta sombra: o ganho visual não paga um segundo shadow map.
+    // The moon casts no shadow: the visual gain does not pay for a second shadow map.
     this.moonLight = new THREE.DirectionalLight(0xb9cbe8, 0.12);
     this.moonLight.castShadow = false;
 
@@ -105,8 +105,8 @@ export class DayNightCycle {
 
   private configureShadow(light: THREE.DirectionalLight): void {
     const camera = light.shadow.camera;
-    // O frustum cobre o navio e um pouco de mar em volta; ele segue o jogador
-    // em `update`, então não precisa ser grande.
+    // The frustum covers the ship and a little sea around it; it follows the player in
+    // `update`, so it does not have to be large.
     camera.left = -34;
     camera.right = 34;
     camera.top = 34;
@@ -133,7 +133,7 @@ export class DayNightCycle {
       this.timeOfDay = (this.timeOfDay + dt / this.dayLengthSeconds) % 1;
     }
 
-    // Ângulo orbital: em timeOfDay 0.25 o sol está no horizonte leste.
+    // Orbital angle: at timeOfDay 0.25 the sun is on the eastern horizon.
     const angle = (this.timeOfDay - 0.25) * TAU;
     const cosT = Math.cos(ORBIT_TILT);
     const sinT = Math.sin(ORBIT_TILT);
@@ -142,7 +142,7 @@ export class DayNightCycle {
       .set(Math.cos(angle), Math.sin(angle) * cosT, Math.sin(angle) * sinT)
       .normalize();
 
-    // A lua fica oposta ao sol, com um deslocamento que evita eclipse perfeito.
+    // The moon sits opposite the sun, with an offset that avoids a perfect eclipse.
     const moonAngle = angle + Math.PI + 0.22;
     this.moonDirection
       .set(Math.cos(moonAngle), Math.sin(moonAngle) * cosT, Math.sin(moonAngle) * sinT * -1)
@@ -150,7 +150,7 @@ export class DayNightCycle {
 
     const elevation = this.sunDirection.y;
 
-    // Transição dia→noite centrada no horizonte, com a largura do crepúsculo.
+    // The day→night transition centered on the horizon, with the twilight's width.
     this.nightFactor = 1 - smoothstep(-0.14, 0.1, elevation);
 
     this.updateSunLight(elevation);
@@ -162,11 +162,12 @@ export class DayNightCycle {
   }
 
   /**
-   * Cor e intensidade da luz solar a partir da massa de ar atravessada.
+   * The sunlight's color and intensity from the air mass crossed.
    *
-   * `airMass ≈ 1/sin(elevação)`: no zênite a luz cruza uma atmosfera; rasante,
-   * cruza dezenas. O `+0.06` no denominador evita a singularidade e aproxima a
-   * curvatura da Terra, que é o que impede a luz de ficar preta no horizonte.
+   * `airMass ≈ 1/sin(elevation)`: at the zenith the light crosses one atmosphere; near
+   * grazing, it crosses dozens. The `+0.06` in the denominator avoids the singularity and
+   * approximates the Earth's curvature, which is what keeps the light from going black at
+   * the horizon.
    */
   private updateSunLight(elevation: number): void {
     const airMass = 1 / Math.max(elevation + 0.06, 0.06);
@@ -177,35 +178,35 @@ export class DayNightCycle {
 
     this.sunLight.color.setRGB(r, g, b);
 
-    // A intensidade cai antes de o disco sumir: o sol já não ilumina muito
-    // quando raspa o horizonte.
-    // O encoberto corta a direcional quase inteira: com o céu fechado o que
-    // sobra é luz difusa, e é por isso que num temporal nada projeta sombra.
+    // The intensity falls before the disc disappears: the sun does not light much any
+    // more once it is grazing the horizon.
+    // The overcast cuts almost the whole directional light: with the sky closed what is
+    // left is diffuse light, and that is why nothing casts a shadow in a storm.
     const strength = smoothstep(-0.08, 0.28, elevation) * (1 - this.overcast * 0.88);
     this.sunLight.intensity = 3.4 * strength;
     this.sunLight.visible = this.sunLight.intensity > 0.01;
 
-    // A luz aponta da direção do sol para a origem; a posição é reposicionada
-    // em `follow` para acompanhar o jogador.
+    // The light points from the sun's direction toward the origin; the position is moved
+    // in `follow` to follow the player.
     this.sunLight.position.copy(this.sunDirection).multiplyScalar(120);
   }
 
   /**
-   * Luz da lua.
+   * The moon's light.
    *
-   * **0,95, e não os 0,22 de antes.** A noite estava impossível de jogar: com
-   * um quinto de candela de lua e a hemisférica caindo para 0,11, o convés
-   * inteiro ficava abaixo do limiar em que um monitor comum consegue mostrar
-   * diferença de tom, e o jogador não enxergava a própria amurada.
+   * **0.95, and not the previous 0.22.** The night was impossible to play: with a fifth
+   * of a candle of moon and the hemisphere light dropping to 0.11, the whole deck fell
+   * below the threshold at which an ordinary monitor can show a difference in tone, and
+   * the player could not see their own bulwark.
    *
-   * A tentação é resolver isso subindo o ambiente, e é o caminho errado: luz
-   * ambiente ilumina tudo por igual e apaga o relevo, então a noite fica clara e
-   * **chapada**. A lua é direcional — ela dá aresta, sombra e brilho no metal.
-   * Subindo a lua a noite fica legível continuando a parecer noite, que é o que
-   * o Sea of Thieves faz e é por isso que a noite lá é bonita em vez de cega.
+   * The temptation is to fix that by raising the ambient, and it is the wrong road:
+   * ambient light lights everything equally and erases relief, so the night comes out
+   * bright and **flat**. The moon is directional — it gives edges, shadow and highlights
+   * on metal. Raising the moon makes the night legible while it goes on looking like
+   * night, which is what Sea of Thieves does and why the night there is beautiful instead
+   * of blind.
    *
-   * Ainda são 3,5 vezes menos que o sol de meio-dia, então ninguém confunde as
-   * duas.
+   * It is still 3.5 times less than the noon sun, so nobody confuses the two.
    */
   private updateMoonLight(): void {
     const elevation = this.moonDirection.y;
@@ -216,41 +217,41 @@ export class DayNightCycle {
   }
 
   /**
-   * Clarão do relâmpago, 0..1.
+   * The lightning flash, 0..1.
    *
-   * Entra na luz ambiente e não numa fonte nova: um raio a quilômetros de
-   * distância acende o **ar**, e o que chega ao navio vem do céu inteiro, de
-   * todas as direções ao mesmo tempo. Uma direcional daria sombras nítidas
-   * apontando para um ponto do horizonte, que é o oposto do que se vê.
+   * It goes into the ambient light and not into a new source: a bolt kilometers away
+   * lights up the **air**, and what reaches the ship comes from the whole sky, from every
+   * direction at once. A directional light would give sharp shadows pointing at one spot
+   * on the horizon, which is the opposite of what you see.
    */
   setLightningFlash(flash: number): void {
     this.flash = flash;
   }
 
   /**
-   * Luz ambiente hemisférica: céu por cima, reflexo do mar por baixo.
-   * É o que impede as sombras de virarem buracos pretos.
+   * Hemispherical ambient light: sky above, the sea's reflection below.
+   * It is what keeps the shadows from becoming black holes.
    */
   private updateAmbient(elevation: number): void {
     const day = smoothstep(-0.12, 0.22, elevation);
 
-    // Céu: azul claro de dia, azul-marinho profundo à noite.
+    // Sky: light blue by day, deep navy at night.
     this.ambientLight.color.copy(AMBIENT_SKY_DAY).lerp(AMBIENT_SKY_NIGHT, 1 - day);
 
-    // Chão: a cor que o mar devolve para baixo do navio.
+    // Ground: the color the sea returns to the underside of the ship.
     this.ambientLight.groundColor.setRGB(0.06, 0.19, 0.24).multiplyScalar(0.35 + day * 0.65);
 
-    // No crepúsculo o ambiente ganha um empurrão quente do céu alaranjado.
+    // At twilight the ambient gets a warm push from the orange sky.
     const twilight = smoothstep(0.22, 0.0, Math.abs(elevation)) * 0.5;
     this.ambientLight.color.lerp(AMBIENT_TWILIGHT, twilight * 0.45);
 
-    // O piso noturno subiu de 0,28 para 0,46: o suficiente para as sombras
-    // pararem de fechar em preto sem chapar o relevo, que é trabalho da lua.
-    // Ver `updateMoonLight` para o porquê de o grosso do ganho ir para lá.
+    // The night floor went up from 0.28 to 0.46: enough for the shadows to stop closing
+    // to black without flattening the relief, which is the moon's job. See
+    // `updateMoonLight` for why the bulk of the gain went there.
     let intensity = (0.46 + day * 0.62) * this.ambientScale;
 
-    // O relâmpago multiplica o ambiente por até cinco. É brutal de propósito: um
-    // clarão que não cega por um instante não é um clarão.
+    // The lightning multiplies the ambient by up to five. It is brutal on purpose: a
+    // flash that does not blind for an instant is not a flash.
     if (this.flash > 0) {
       intensity *= 1 + this.flash * 4;
       this.ambientLight.color.lerp(LIGHTNING_TINT, this.flash * 0.8);
@@ -260,16 +261,16 @@ export class DayNightCycle {
   }
 
   /**
-   * Cor da névoa aproximando o céu junto ao horizonte.
+   * The fog's color, approximating the sky near the horizon.
    *
-   * Não lemos a LUT da GPU de propósito: `readPixels` força sincronização e
-   * come vários milissegundos por frame. Esta aproximação usa os mesmos
-   * coeficientes de Rayleigh, então converge visualmente com o céu renderizado.
+   * We deliberately do not read the LUT off the GPU: `readPixels` forces a sync and eats
+   * several milliseconds per frame. This approximation uses the same Rayleigh
+   * coefficients, so it converges visually with the rendered sky.
    */
   private updateFog(elevation: number): void {
     const airMass = 1 / Math.max(elevation + 0.06, 0.06);
 
-    // O que foi espalhado para fora do feixe direto é o que colore o horizonte.
+    // What was scattered out of the direct beam is what colors the horizon.
     this.scattered.setRGB(
       (1 - Math.exp(-RAYLEIGH_OPTICAL_DEPTH.x * airMass * 0.55)) * 0.55,
       (1 - Math.exp(-RAYLEIGH_OPTICAL_DEPTH.y * airMass * 0.55)) * 0.62,
@@ -283,21 +284,21 @@ export class DayNightCycle {
       .lerp(HORIZON_DAY, day)
       .lerp(this.scattered, clamp(0.35 + (1 - day) * 0.25, 0, 0.7));
 
-    // Empurrão quente no crepúsculo, quando o horizonte pega fogo.
+    // A warm push at twilight, when the horizon catches fire.
     const twilight = smoothstep(0.2, -0.02, Math.abs(elevation - 0.02));
     this.fogColor.lerp(HORIZON_TWILIGHT, twilight * 0.5);
   }
 
-  /** Cor de topo e de base das nuvens para o shader do céu. */
+  /** Top and bottom colors of the clouds for the sky shader. */
   getCloudColors(): { sun: THREE.Color; shadow: THREE.Color } {
     const sun = this.sunLight.color.clone().multiplyScalar(0.9 + this.sunLight.intensity * 0.12);
     const shadow = this.fogColor.clone().lerp(CLOUD_SHADOW_TINT, 0.5);
 
     if (this.nightFactor > 0.5) {
-      // Nuvem à noite é escura, não cinza-clara: a única luz que recebe é a da
-      // lua, ordens de grandeza abaixo do sol. Quem a torna visível é a
-      // silhueta contra as estrelas, não o próprio brilho — desenhá-la clara
-      // demais apaga o céu estrelado atrás dela.
+      // A cloud at night is dark, not light gray: the only light it receives is the
+      // moon's, orders of magnitude below the sun. What makes it visible is its
+      // silhouette against the stars, not its own brightness — drawing it too light
+      // erases the starry sky behind it.
       const t = (this.nightFactor - 0.5) * 2;
       sun.lerp(NIGHT_CLOUD_LIT, t);
       shadow.lerp(NIGHT_CLOUD_SHADOW, t);
@@ -306,8 +307,8 @@ export class DayNightCycle {
   }
 
   /**
-   * Reposiciona as luzes em torno do alvo para que o shadow map, que é
-   * pequeno, sempre cubra o navio do jogador.
+   * Moves the lights around the target so the shadow map, which is small, always covers
+   * the player's ship.
    */
   follow(target: THREE.Vector3): void {
     this.sunLight.position.copy(this.sunDirection).multiplyScalar(120).add(target);
@@ -319,7 +320,7 @@ export class DayNightCycle {
     this.moonLight.target.updateMatrixWorld();
   }
 
-  /** Rótulo do horário para o HUD, no formato 24 h. */
+  /** Time label for the HUD, in 24 h format. */
   getClockLabel(): string {
     const totalMinutes = this.timeOfDay * 24 * 60;
     const hours = Math.floor(totalMinutes / 60) % 24;
