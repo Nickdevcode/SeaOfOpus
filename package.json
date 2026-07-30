@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "3D naval combat game for the browser, sloop against sloop, inspired by Sea of Thieves",
+  "license": "MIT",
   "workspaces": [
     "server"
   ],

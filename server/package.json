@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Room server for the 1v1 duel: pairs two captains and relays what they exchange",
+  "license": "MIT",
   "scripts": {
     "dev": "wrangler dev",
     "check": "tsc --noEmit",
