@@ -1,23 +1,22 @@
 /**
- * Teste de balística — o alcance simulado contra o alcance analítico.
+ * Ballistics test — the simulated range against the analytic range.
  *
- * O projeto não tem executor de testes instalado (seriam dependências novas para
- * um único arquivo), então este módulo é **rodável no navegador**: o servidor de
- * desenvolvimento serve `/tests/ballistics.ts` como qualquer outro módulo, e
- * quem quiser rodar abre o console e faz
+ * The project has no test runner installed (that would be new dependencies for a single
+ * file), so this module is **runnable in the browser**: the dev server serves
+ * `/tests/ballistics.ts` like any other module, and whoever wants to run it opens the
+ * console and does
  *
  * ```js
  * const t = await import('/tests/ballistics.ts');
  * console.table(t.runBallisticsTests().cases);
  * ```
  *
- * **O que se prova aqui.** A trajetória com arrasto não tem forma fechada — não
- * existe "resposta certa" para comparar. O que existe é o caso limite: com
- * arrasto zero a integração *tem* que reproduzir a parábola de livro, e é isso
- * que os dois primeiros casos verificam, ida (ângulo → alcance) e volta (alcance
- * → ângulo). Provado o integrador no vácuo, os dois últimos casos verificam que
- * o solucionador e o projétil que voa de verdade concordam entre si, que é a
- * propriedade da qual a mira da IA depende.
+ * **What gets proved here.** The trajectory with drag has no closed form — there is no
+ * "right answer" to compare against. What there is is the limiting case: with zero drag
+ * the integration *has* to reproduce the textbook parabola, and that is what the first
+ * two cases check, forward (angle → range) and back (range → angle). With the integrator
+ * proved in vacuum, the last two cases check that the solver and the projectile that
+ * actually flies agree with each other, which is the property the AI's aim depends on.
  */
 
 import * as THREE from 'three';
@@ -40,17 +39,17 @@ export interface TestReport {
   cases: TestCase[];
 }
 
-/** Alcance de uma parábola de vácuo: `R = v²·sen(2θ)/g`. */
+/** Range of a vacuum parabola: `R = v²·sin(2θ)/g`. */
 function vacuumRange(speed: number, elevation: number): number {
   return (speed * speed * Math.sin(2 * elevation)) / GRAVITY;
 }
 
 /**
- * Integra um tiro no plano vertical até ele voltar à altura de partida e devolve
- * o alcance, interpolando dentro do passo em que cruzou.
+ * Integrates a shot in the vertical plane until it comes back to its starting height and
+ * returns the range, interpolating inside the step where it crossed.
  *
- * `dt` é parâmetro porque um dos casos precisa rodar com o passo do projétil de
- * verdade (1/60 dividido em 4 sub-passos), e não com o do solucionador.
+ * `dt` is a parameter because one of the cases has to run with the real projectile's step
+ * (1/60 split into 4 substeps), and not with the solver's.
  */
 function integrateRange(speed: number, elevation: number, dragK: number, dt: number): number {
   const position = new THREE.Vector3(0, 0, 0);
@@ -86,57 +85,56 @@ export function runBallisticsTests(): TestReport {
 
   const dragK = dragFactor(BALL_MASS, BALL_RADIUS);
 
-  // --- 1. vácuo a 45°: o alcance tem que ser v²/g -----------------------------
-  // O viés é conhecido e tem sinal: o Euler semi-implícito erra a altura em
-  // `−g·t·dt/2`, o que aqui vale ~0,56 m ao fim de 13,7 s de voo e vira um
-  // alcance ~0,6 m curto. Tolerar 3 m em 920 é 0,33% — folga suficiente para o
-  // teste não ser frágil, e apertada o bastante para pegar um sinal trocado ou
-  // uma gravidade errada.
+  // --- 1. vacuum at 45°: the range has to be v²/g -----------------------------
+  // The bias is known and has a sign: semi-implicit Euler gets the height wrong by
+  // `−g·t·dt/2`, which here is worth ~0.56 m at the end of 13.7 s of flight and becomes a
+  // range ~0.6 m short. Tolerating 3 m in 920 is 0.33% — enough room for the test not to
+  // be brittle, and tight enough to catch a flipped sign or a wrong gravity.
   const elevation45 = 45 * DEG;
   check(
-    'vácuo · 45° · alcance',
+    'vacuum · 45° · range',
     integrateRange(MUZZLE_SPEED, elevation45, 0, 1 / 120),
     vacuumRange(MUZZLE_SPEED, elevation45),
     3,
     'm',
   );
 
-  // --- 2. o inverso: dado o alcance, o solucionador acha o ângulo -------------
-  // A 30° porque o teto do solucionador é 44,1°: pedir o ângulo de alcance
-  // máximo seria pedir justamente o que ele se recusa a devolver, de propósito.
+  // --- 2. the inverse: given the range, the solver finds the angle ------------
+  // At 30° because the solver's ceiling is 44.1°: asking for the maximum-range angle would
+  // be asking for precisely what it refuses to return, on purpose.
   const elevation30 = 30 * DEG;
   const range30 = vacuumRange(MUZZLE_SPEED, elevation30);
   const solvedVacuum = solveElevation(range30, 0, MUZZLE_SPEED, 0);
   check(
-    'vácuo · alcance → ângulo',
+    'vacuum · range → angle',
     (solvedVacuum?.elevation ?? NaN) * RAD,
     30,
     0.15,
     '°',
   );
 
-  // --- 3. com arrasto, solucionador × projétil de verdade ---------------------
-  // O solucionador integra a 120 Hz num plano; o projétil integra a 240 Hz
-  // (60 Hz ÷ 4 sub-passos) em três dimensões. Se os dois discordassem, a IA
-  // erraria por metros e o jogador nunca saberia por quê.
+  // --- 3. with drag, solver × the real projectile ----------------------------
+  // The solver integrates at 120 Hz in a plane; the projectile integrates at 240 Hz
+  // (60 Hz ÷ 4 substeps) in three dimensions. If the two disagreed, the AI would miss by
+  // meters and the player would never know why.
   const combatRange = 120;
   const solved = solveElevation(combatRange, 0, MUZZLE_SPEED, dragK);
   const flown = solved
     ? integrateRange(MUZZLE_SPEED, solved.elevation, dragK, 1 / 240)
     : NaN;
-  check('arrasto · solver × projétil', flown, combatRange, 0.5, 'm');
+  check('drag · solver × projectile', flown, combatRange, 0.5, 'm');
 
-  // --- 4. o arrasto tem que custar caro --------------------------------------
-  // Não é uma correção de segunda ordem: a 95 m/s a bala perde mais da metade do
-  // alcance de vácuo. Se este caso passar a bater no valor de vácuo, é porque o
-  // `dragFactor` foi zerado em algum lugar.
+  // --- 4. the drag has to cost dearly ----------------------------------------
+  // It is not a second-order correction: at 95 m/s the ball loses more than half the
+  // vacuum range. If this case starts matching the vacuum value, it is because
+  // `dragFactor` got zeroed somewhere.
   const vacuumBest = vacuumRange(MUZZLE_SPEED, 45 * DEG);
   const dragBest = maxRange(MUZZLE_SPEED, dragK);
   cases.push({
-    nome: 'arrasto · alcance máximo < vácuo',
+    nome: 'drag · maximum range < vacuum',
     medido: `${dragBest.toFixed(1)} m`,
     esperado: `< ${(vacuumBest * 0.75).toFixed(1)} m`,
-    erro: `${((1 - dragBest / vacuumBest) * 100).toFixed(1)}% de perda`,
+    erro: `${((1 - dragBest / vacuumBest) * 100).toFixed(1)}% lost`,
     passou: dragBest < vacuumBest * 0.75 && dragBest > 100,
   });
 

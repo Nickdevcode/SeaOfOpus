@@ -56,14 +56,14 @@ export interface TestReport {
   cases: TestCase[];
 }
 
-/** Área de um rombo recém-aberto, lida do próprio modelo em vez de copiada. */
+/** Area of a freshly opened breach, read from the model itself instead of copied. */
 function baseArea(): number {
   const damage = new ShipDamage();
   const breach = hit(damage, 0);
   return breach?.area ?? 0;
 }
 
-/** Abre (ou alarga) um rombo na linha d'água, na estação `z`. */
+/** Opens (or widens) a breach at the waterline, at station `z`. */
 function hit(damage: ShipDamage, z: number) {
   return damage.registerHit({
     fraction: 0,
@@ -74,14 +74,15 @@ function hit(damage: ShipDamage, z: number) {
   });
 }
 
-/** Área total de entrada de água do casco, em m². */
+/** The hull's total water-entry area, in m². */
 function openArea(damage: ShipDamage): number {
   let total = 0;
   for (const breach of damage.breaches) total += breach.area;
   return total;
 }
 
-/** Gaussiana padrão, para simular a dispersão de quem mira um ponto e erra. */
+/** A standard Gaussian, to simulate the scatter of someone aiming at a point and
+ *  missing. */
 function gaussian(random: () => number): number {
   let u = 0;
   let v = 0;
@@ -116,126 +117,125 @@ export function runDamageTests(): TestReport {
     });
   }
 
-  // --- 1. a fusão cabe no vão do rombo ----------------------------------------
-  // O vão que uma bala abre é um círculo da área base. Fundir tiros muito além
-  // desse diâmetro é dizer que madeira sã entre dois furos não existe — e é o que
-  // transformava precisão em punição. O teto de dois diâmetros é generoso de
-  // propósito: cobre a madeira trincada em volta sem virar de novo o raio de 90 cm
-  // que este teste veio impedir de voltar.
-  const vao = 2 * Math.sqrt(AREA / Math.PI);
+  // --- 1. the merge fits inside the breach's opening --------------------------
+  // The opening a ball makes is a circle of the base area. Merging shots far beyond that
+  // diameter is saying that sound wood between two holes does not exist — and it is what
+  // turned precision into punishment. The ceiling of two diameters is generous on purpose:
+  // it covers the cracked wood around without becoming again the 90 cm radius this test
+  // came to keep from coming back.
+  const bore = 2 * Math.sqrt(AREA / Math.PI);
   cases.push({
-    nome: 'fusão · cabe em dois vãos de rombo',
-    medido: `${MERGE_DISTANCE.toFixed(3)} m (vão ${vao.toFixed(3)} m)`,
-    esperado: `≤ ${(vao * 2).toFixed(3)} m`,
-    erro: MERGE_DISTANCE <= vao * 2 ? '—' : `${(MERGE_DISTANCE / vao).toFixed(1)} vãos`,
-    passou: MERGE_DISTANCE <= vao * 2,
+    nome: 'merge · fits inside two breach bores',
+    medido: `${MERGE_DISTANCE.toFixed(3)} m (bore ${bore.toFixed(3)} m)`,
+    esperado: `≤ ${(bore * 2).toFixed(3)} m`,
+    erro: MERGE_DISTANCE <= bore * 2 ? '—' : `${(MERGE_DISTANCE / bore).toFixed(1)} bores`,
+    passou: MERGE_DISTANCE <= bore * 2,
   });
 
-  // E ela precisa de fato fundir o que está perto e separar o que está longe,
-  // senão o número acima seria decoração.
-  const perto = new ShipDamage();
-  hit(perto, 0);
-  hit(perto, MERGE_DISTANCE * 0.5);
-  const longe = new ShipDamage();
-  hit(longe, 0);
-  hit(longe, MERGE_DISTANCE * 1.5);
+  // And it really has to merge what is close and separate what is far, or else the number
+  // above would be decoration.
+  const near = new ShipDamage();
+  hit(near, 0);
+  hit(near, MERGE_DISTANCE * 0.5);
+  const far = new ShipDamage();
+  hit(far, 0);
+  hit(far, MERGE_DISTANCE * 1.5);
   cases.push({
-    nome: 'fusão · perto vira um rombo, longe vira dois',
-    medido: `perto ${perto.breaches.length} · longe ${longe.breaches.length}`,
-    esperado: 'perto 1 · longe 2',
-    erro: perto.breaches.length === 1 && longe.breaches.length === 2 ? '—' : 'fusão fora do raio',
-    passou: perto.breaches.length === 1 && longe.breaches.length === 2,
+    nome: 'merge · close becomes one breach, far becomes two',
+    medido: `close ${near.breaches.length} · far ${far.breaches.length}`,
+    esperado: 'close 1 · far 2',
+    erro: near.breaches.length === 1 && far.breaches.length === 2 ? '—' : 'merge outside the radius',
+    passou: near.breaches.length === 1 && far.breaches.length === 2,
   });
 
-  // --- 2. a vazão é linear na área, inclusive saturada -------------------------
-  // **É este caso que pega a volta do teto fixo.** Com um teto em m³/s por rombo,
-  // dobrar a área de um furo bem submerso não muda nada — e é isso que fazia
-  // agrupar os tiros valer um décimo de varrê-los. Raso (a veia ainda obedece
-  // Torricelli) e fundo (a veia já saturou) têm de escalar igual.
-  for (const [rotulo, profundidade] of [['raso', 0.2], ['fundo', 3]] as const) {
-    const simples = breachInflow(AREA, profundidade);
-    const dobro = breachInflow(AREA * 2, profundidade);
-    check(`vazão · dobrar a área dobra a vazão (${rotulo})`, dobro / simples, 2, 0.001, '×');
+  // --- 2. the inflow is linear in the area, saturated included -----------------
+  // **This is the case that catches the fixed ceiling coming back.** With a ceiling in
+  // m³/s per breach, doubling the area of a well-submerged hole changes nothing — and that
+  // is what made grouping the shots worth a tenth of spreading them. Shallow (the jet still
+  // obeys Torricelli) and deep (the jet has already saturated) have to scale the same.
+  for (const [label, depth] of [['shallow', 0.2], ['deep', 3]] as const) {
+    const single = breachInflow(AREA, depth);
+    const twice = breachInflow(AREA * 2, depth);
+    check(`inflow · doubling the area doubles the inflow (${label})`, twice / single, 2, 0.001, '×');
   }
 
-  // A saturação continua existindo — ela é o que impede o último segundo do
-  // naufrágio de virar um degrau. Sem este caso, "linear na área" seria satisfeito
-  // por remover o teto, que é o defeito oposto.
-  const fundo = breachInflow(AREA, 3);
-  const abissal = breachInflow(AREA, 12);
-  check('vazão · a veia satura com a profundidade', abissal / fundo, 1, 0.001, '×');
+  // The saturation still exists — it is what keeps the sinking's last second from becoming
+  // a step. Without this case, "linear in the area" would be satisfied by removing the
+  // ceiling, which is the opposite defect.
+  const deep = breachInflow(AREA, 3);
+  const abyssal = breachInflow(AREA, 12);
+  check('inflow · the jet saturates with depth', abyssal / deep, 1, 0.001, '×');
 
-  // --- 2b. o rombo acima da linha d'água ---------------------------------------
+  // --- 2b. the breach above the waterline -------------------------------------
   //
-  // A faixa de costado que abre rombo vai até o convés, em `y = 1,3`, e a linha
-  // d'água passa perto de `y = 0,05`. São 1,25 m de casco seco contra 85 cm de
-  // casco molhado — e o jogador mira no que enxerga, que é a parte seca. Sem
-  // embarque por onda, quatro rombos entre dois navios rendiam `inflow 0` nos
-  // dois painéis e um porão parado em 2% depois de um combate inteiro.
+  // The band of side that can open a breach runs up to the deck, at `y = 1.3`, and the
+  // waterline passes near `y = 0.05`. That is 1.25 m of dry hull against 85 cm of wet hull
+  // — and the player aims at what they can see, which is the dry part. With no wave
+  // shipping, four breaches between two ships gave `inflow 0` on both panels and a hold
+  // stuck at 2% after a whole fight.
   //
-  // O que se prende aqui são as três propriedades que fazem isso ser física de
-  // jogo e não um número inventado: em mar liso o buraco alto continua seco; o
-  // mar grosso molha mais que o manso; e nada disso mexe no regime submerso, que
-  // é o modelo de verdade.
-  const ACIMA = -0.5;
-  const liso = breachInflow(AREA, ACIMA, 0);
-  const manso = breachInflow(AREA, ACIMA, 0.25);
-  const grosso = breachInflow(AREA, ACIMA, 0.9);
+  // What is pinned down here are the three properties that make this game physics and not
+  // an invented number: on a flat sea the high hole stays dry; a rough sea wets it more
+  // than a gentle one; and none of that touches the submerged regime, which is the real
+  // model.
+  const ABOVE = -0.5;
+  const flat = breachInflow(AREA, ABOVE, 0);
+  const gentle = breachInflow(AREA, ABOVE, 0.25);
+  const rough = breachInflow(AREA, ABOVE, 0.9);
 
-  check('onda · mar liso não molha rombo alto', liso, 0, 1e-9, 'm³/s');
+  check('wave · a flat sea does not wet a high breach', flat, 0, 1e-9, 'm³/s');
   check(
-    'onda · mar grosso molha mais que mar manso',
-    grosso > manso && manso > 0 ? 1 : 0,
+    'wave · a rough sea wets more than a gentle one',
+    rough > gentle && gentle > 0 ? 1 : 0,
     1,
     0.001,
-    'sim/não',
+    'yes/no',
   );
-  // O rombo submerso não pode ganhar nem perder vazão por causa da onda: ali
-  // quem manda é a coluna d'água, e somar o embarque seria contar duas vezes.
+  // A submerged breach cannot gain or lose inflow because of the wave: there what rules is
+  // the water column, and adding the shipping would be counting it twice.
   check(
-    'onda · não interfere no rombo submerso',
+    'wave · does not interfere with a submerged breach',
     breachInflow(AREA, 0.6, 0.9) / breachInflow(AREA, 0.6, 0),
     1,
     0.001,
     '×',
   );
 
-  // --- 3. mirar bem não pode custar caro --------------------------------------
-  // O teste de ponta a ponta da propriedade do topo. Doze acertos, duas formas de
-  // distribuí-los, e a área de entrada de água que sai de cada uma. Agrupado
-  // *pode* render menos — dois tiros no mesmo palmo realmente se sobrepõem —, mas
-  // não pode render uma fração.
+  // --- 3. aiming well cannot cost dearly --------------------------------------
+  // The end-to-end test of the property at the top. Twelve hits, two ways of distributing
+  // them, and the water-entry area that comes out of each. Grouped *may* yield less — two
+  // shots in the same hand's breadth really do overlap —, but it cannot yield a fraction.
   //
-  // O piso é 60%: com os números de hoje a razão dá ~0,88, e o valor antigo dava
-  // 0,24. Qualquer coisa abaixo de 60% significa que o modelo voltou a punir quem
-  // acerta, que é a única coisa que este arquivo existe para impedir.
-  const PISO = 0.6;
+  // The floor is 60%: with today's numbers the ratio comes to ~0.88, and the old value gave
+  // 0.24. Anything below 60% means the model has gone back to punishing whoever hits, which
+  // is the one thing this file exists to prevent.
+  const FLOOR = 0.6;
   const REPS = 120;
-  let somaAgrupada = 0;
-  let somaVarrida = 0;
+  let groupedSum = 0;
+  let spreadSum = 0;
 
   for (let r = 0; r < REPS; r++) {
     const random = createRandom(0xda3a6e + r * 7919);
-    const agrupada = new ShipDamage();
-    const varrida = new ShipDamage();
+    const grouped = new ShipDamage();
+    const spread = new ShipDamage();
 
     for (let i = 0; i < 12; i++) {
-      // Agrupada: mira o meio-navio e erra 1 m. Varrida: o costado inteiro.
-      hit(agrupada, Math.max(-7, Math.min(7, gaussian(random) * 1)));
-      hit(varrida, (random() * 2 - 1) * 6);
+      // Grouped: aim amidships and miss by 1 m. Spread: the whole side.
+      hit(grouped, Math.max(-7, Math.min(7, gaussian(random) * 1)));
+      hit(spread, (random() * 2 - 1) * 6);
     }
 
-    somaAgrupada += openArea(agrupada);
-    somaVarrida += openArea(varrida);
+    groupedSum += openArea(grouped);
+    spreadSum += openArea(spread);
   }
 
-  const razao = somaAgrupada / somaVarrida;
+  const ratio = groupedSum / spreadSum;
   cases.push({
-    nome: 'salva · fogo agrupado rende perto do varrido',
-    medido: `${(razao * 100).toFixed(0)}% da área`,
-    esperado: `≥ ${(PISO * 100).toFixed(0)}%`,
-    erro: razao >= PISO ? '—' : `${((PISO - razao) * 100).toFixed(0)} pontos abaixo do piso`,
-    passou: razao >= PISO,
+    nome: 'broadside · grouped fire yields close to spread fire',
+    medido: `${(ratio * 100).toFixed(0)}% of the area`,
+    esperado: `≥ ${(FLOOR * 100).toFixed(0)}%`,
+    erro: ratio >= FLOOR ? '—' : `${((FLOOR - ratio) * 100).toFixed(0)} points below the floor`,
+    passou: ratio >= FLOOR,
   });
 
   const falhas = cases.filter((c) => !c.passou).length;

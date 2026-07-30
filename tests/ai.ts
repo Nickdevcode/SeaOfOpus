@@ -1,30 +1,29 @@
 /**
- * Testes da IA — as duas propriedades de que o duelo inteiro depende.
+ * AI tests — the two properties the whole duel rests on.
  *
- * Rodável no navegador, como `tests/ballistics.ts`:
+ * Runnable in the browser, like `tests/ballistics.ts`:
  *
  * ```js
  * const t = await import('/tests/ai.ts');
  * console.table(t.runAiTests().cases);
  * ```
  *
- * **O que se prova aqui, e por que só isto.** A tática da IA não tem "resposta
- * certa" para comparar — é comportamento, e comportamento se mede olhando a
- * telemetria de um duelo. O que *tem* resposta certa são as duas conversões
- * geométricas em que ela se apoia, e as duas são exatamente onde um sinal trocado
- * passa despercebido para sempre:
+ * **What gets proved here, and why only this.** The AI's tactics have no "right answer"
+ * to compare against — it is behavior, and behavior is measured by watching a duel's
+ * telemetry. What *does* have a right answer are the two geometric conversions it rests
+ * on, and both are exactly where a flipped sign goes unnoticed forever:
  *
- * 1. **`Cannon.solveAim` é o inverso de `Cannon.getAimLocal`.** Se não for, a peça
- *    aponta para o lado espelhado e a IA erra todo tiro sem nenhum erro aparente no
- *    código — os dois trechos parecem certos isoladamente.
- * 2. **O sinal do timoneiro fecha a malha.** Rumo cresce para bombordo, roda
- *    positiva desce o rumo. Com o sinal trocado a realimentação vira positiva e o
- *    navio gira cada vez mais rápido para longe do rumo pedido, o que na tela lê
- *    como "a IA é maluca" e não como um menos fora de lugar.
- * 3. **Os três capitães estão em ordem nos eixos que decidem o duelo.** Não é uma
- *    conversão geométrica, mas tem resposta certa: os presets são uma tabela escrita
- *    à mão, e um número fora de ordem ali produz um "Legend" mais fácil que um
- *    "Deckhand" sem que nada quebre nem apareça no `tsc`.
+ * 1. **`Cannon.solveAim` is the inverse of `Cannon.getAimLocal`.** If it is not, the gun
+ *    points to the mirrored side and the AI misses every shot with no apparent error in
+ *    the code — both pieces look right in isolation.
+ * 2. **The helmsman's sign closes the loop.** The heading grows to port, a positive wheel
+ *    lowers the heading. With the sign flipped the feedback turns positive and the ship
+ *    turns faster and faster away from the requested heading, which on screen reads as
+ *    "the AI is crazy" and not as a misplaced minus.
+ * 3. **The three captains are in order on the axes that decide the duel.** It is not a
+ *    geometric conversion, but it does have a right answer: the presets are a hand-written
+ *    table, and one number out of order there produces a "Legend" that is easier than a
+ *    "Deckhand" without anything breaking or showing up in `tsc`.
  */
 
 import * as THREE from 'three';
@@ -54,25 +53,25 @@ export interface TestReport {
 }
 
 /**
- * Reprodução isolada da cinemática do cano — a mesma composição que
- * `Cannon.getBarrelQuaternion` monta, sem precisar de um navio inteiro.
+ * An isolated reproduction of the barrel's kinematics — the same composition
+ * `Cannon.getBarrelQuaternion` puts together, without needing a whole ship.
  *
- * Duplicar a fórmula aqui é deliberado: um teste que chamasse `getAimLocal` para
- * conferir `solveAim` provaria só que duas funções concordam. Escrevendo a
- * composição a partir da definição ('YXZ' aplicado a −Z), o teste confere as duas
- * contra a **geometria**, que é o que se quer garantir.
+ * Duplicating the formula here is deliberate: a test that called `getAimLocal` to check
+ * `solveAim` would only prove that two functions agree. By writing the composition from
+ * the definition ('YXZ' applied to −Z), the test checks both against the **geometry**,
+ * which is what we want to guarantee.
  */
 function barrelDirection(sideYaw: number, traverse: number, elevation: number): THREE.Vector3 {
   const euler = new THREE.Euler(elevation, sideYaw + traverse, 0, 'YXZ');
   return new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion().setFromEuler(euler));
 }
 
-/** A mesma decomposição de `Cannon.solveAim`, para testá-la sem instanciar a peça. */
+/** The same decomposition as `Cannon.solveAim`, to test it without instancing the gun. */
 function solveAim(sideYaw: number, direction: THREE.Vector3, out: AimAngles): AimAngles {
   const length = direction.length();
   out.elevation = Math.asin(Math.max(-1, Math.min(1, direction.y / length)));
   let traverse = Math.atan2(-direction.x, -direction.z) - sideYaw;
-  // Mesmo `wrapAngle` de `MathUtils`.
+  // The same `wrapAngle` as in `MathUtils`.
   traverse = ((traverse + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
   out.traverse = traverse;
   out.bears =
@@ -98,10 +97,10 @@ export function runAiTests(): TestReport {
 
   const angles: AimAngles = { traverse: 0, elevation: 0, bears: false };
 
-  // --- 1. ida e volta em toda a faixa útil, nos dois bordos -------------------
-  // Varre travessia × elevação dentro dos batentes e cobra que decompor a direção
-  // devolva exatamente os ângulos que a geraram. O pior erro da varredura é o que
-  // vai para a tabela: uma média esconderia um único ponto espelhado.
+  // --- 1. round trip over the whole useful range, on both sides ---------------
+  // It sweeps traverse × elevation inside the stops and demands that decomposing the
+  // direction return exactly the angles that generated it. The sweep's worst error is what
+  // goes into the table: an average would hide a single mirrored point.
   let worstTraverse = 0;
   let worstElevation = 0;
 
@@ -119,24 +118,24 @@ export function runAiTests(): TestReport {
     }
   }
 
-  // 1 µrad: é erro de ponto flutuante, não de fórmula. Um sinal trocado apareceria
-  // aqui como radianos inteiros, não como micro-radianos.
-  check('pontaria · ida e volta (travessia)', worstTraverse * RAD, 0, 0.0001, '°');
-  check('pontaria · ida e volta (elevação)', worstElevation * RAD, 0, 0.0001, '°');
+  // 1 µrad: that is floating-point error, not formula error. A flipped sign would show
+  // up here as whole radians, not as micro-radians.
+  check('aim · round trip (traverse)', worstTraverse * RAD, 0, 0.0001, '°');
+  check('aim · round trip (elevation)', worstElevation * RAD, 0, 0.0001, '°');
 
-  // --- 2. o bordo aponta para fora --------------------------------------------
-  // Com travessia e elevação zeradas, a peça de boreste tem de olhar para +X e a de
-  // bombordo para −X. É o teste que pega o espelhamento de bordo, que passaria
-  // impune pelo caso 1 (ele é simétrico).
+  // --- 2. the side points outboard --------------------------------------------
+  // With traverse and elevation zeroed, the starboard gun has to look toward +X and the
+  // port one toward −X. It is the test that catches the side mirroring, which would pass
+  // unpunished through case 1 (that one is symmetric).
   const starboard = barrelDirection(-Math.PI / 2, 0, 0);
   const port = barrelDirection(Math.PI / 2, 0, 0);
-  check('bordo · boreste aponta para +X', starboard.x, 1, 0.001, '');
-  check('bordo · bombordo aponta para −X', port.x, -1, 0.001, '');
+  check('side · starboard points toward +X', starboard.x, 1, 0.001, '');
+  check('side · port points toward −X', port.x, -1, 0.001, '');
 
-  // --- 3. o setor de tiro é o través, não a proa ------------------------------
-  // A tática inteira de `ShipAI` se apoia nisto: a peça **não** alcança um alvo pela
-  // proa, e por isso manter o inimigo sob fogo é trabalho do timão. Se algum ajuste
-  // futuro abrir o batente, este caso avisa antes de a tática virar redundante.
+  // --- 3. the firing arc is the beam, not the bow -----------------------------
+  // The whole of `ShipAI`'s tactics rests on this: the gun does **not** reach a target
+  // over the bow, and that is why keeping the enemy under fire is the helm's job. If some
+  // future tuning opens the stop, this case warns before the tactics become redundant.
   const ahead = new THREE.Vector3(0, 0, -1);
   const abeam = new THREE.Vector3(1, 0, 0);
   solveAim(-Math.PI / 2, ahead, angles);
@@ -145,119 +144,120 @@ export function runAiTests(): TestReport {
   const bearsAbeam = angles.bears;
 
   cases.push({
-    nome: 'setor · través sim, proa não',
-    medido: `proa ${bearsAhead ? 'alcança' : 'fora'} · través ${bearsAbeam ? 'alcança' : 'fora'}`,
-    esperado: 'proa fora · través alcança',
-    erro: `batente ±${(TRAVERSE_LIMIT * RAD).toFixed(1)}°`,
+    nome: 'arc · beam yes, bow no',
+    medido: `bow ${bearsAhead ? 'bears' : 'out'} · beam ${bearsAbeam ? 'bears' : 'out'}`,
+    esperado: 'bow out · beam bears',
+    erro: `stop ±${(TRAVERSE_LIMIT * RAD).toFixed(1)}°`,
     passou: !bearsAhead && bearsAbeam,
   });
 
-  // --- 4. o timoneiro fecha a malha no sinal certo ----------------------------
-  // Simula a cascata de `Helmsman` contra um modelo grosseiro de navio: a roda vira
-  // no limite da taxa, o leme produz guinada proporcional a ela, e o rumo integra a
-  // guinada. Não é a física de `Rudder` — é só o **sinal** dela, que é o que se está
-  // testando. Com o menos trocado em qualquer ponto da cadeia, o erro cresce em vez
-  // de cair, e nenhuma tolerância salva.
+  // --- 4. the helmsman closes the loop with the right sign --------------------
+  // It simulates `Helmsman`'s cascade against a coarse ship model: the wheel turns at the
+  // rate limit, the rudder produces yaw proportional to it, and the heading integrates the
+  // yaw. It is not `Rudder`'s physics — it is only its **sign**, which is what is being
+  // tested. With the minus flipped anywhere in the chain, the error grows instead of
+  // falling, and no tolerance saves it.
   const KP = 8;
   const KD = 11;
-  /** Guinada por radiano de roda, em rad/s. Ordem de grandeza da Chalupa a 5 nós. */
+  /** Yaw per radian of wheel, in rad/s. The sloop's order of magnitude at 5 knots. */
   const YAW_PER_WHEEL = 0.045;
 
   let heading = 0;
   let wheel = 0;
   let yawRate = 0;
-  const course = 1; // ~57° a bombordo
+  const course = 1; // ~57° to port
   const dt = 1 / 60;
 
   for (let step = 0; step < 60 * 25; step++) {
     const error = angleDelta(heading, course);
     const desired = Math.max(-MAX_WHEEL, Math.min(MAX_WHEEL, -KP * error + KD * yawRate));
 
-    // Malha interna: a roda persegue o ângulo comandado no limite da taxa.
+    // Inner loop: the wheel chases the commanded angle at the rate limit.
     const room = WHEEL_RATE * dt;
     const command = Math.max(-1, Math.min(1, (desired - wheel) / room));
     wheel = Math.max(-MAX_WHEEL, Math.min(MAX_WHEEL, wheel + command * WHEEL_RATE * dt));
 
-    // Roda positiva é boreste, e boreste **baixa** o rumo: daí o menos.
+    // A positive wheel is starboard, and starboard **lowers** the heading: hence the
+    // minus.
     yawRate = -wheel * YAW_PER_WHEEL;
     heading += yawRate * dt;
   }
 
   check(
-    'timoneiro · converge no rumo pedido',
+    'helmsman · converges on the requested heading',
     angleDelta(heading, course) * RAD,
     0,
     1.5,
     '°',
   );
 
-  // --- 5. os presets sobem de dificuldade em todos os eixos --------------------
-  // A tabela de `Difficulty` é escrita à mão, e o eixo de avaria entrou nela depois
-  // dos outros. Um `holdShift` fora de ordem não quebra nada, não aparece no `tsc` e
-  // produz um Legend que cuida pior do navio que o Deckhand — que é o tipo de erro
-  // que só se descobre jogando três partidas inteiras.
+  // --- 5. the presets climb in difficulty on every axis -----------------------
+  // `Difficulty`'s table is hand-written, and the damage-control axis went into it after
+  // the others. A `holdShift` out of order breaks nothing, does not show up in `tsc` and
+  // produces a Legend that looks after the ship worse than a Deckhand — which is the kind
+  // of error you only find by playing three whole matches.
   //
-  // Cada linha diz o sentido em que o número deve andar do grumete para a lenda.
-  const eixos: readonly { nome: string; ler: (id: DifficultyId) => number; sobe: boolean }[] = [
-    { nome: 'aimSigma', ler: (id) => DIFFICULTIES[id].aimSigma, sobe: false },
-    { nome: 'leadFraction', ler: (id) => DIFFICULTIES[id].leadFraction, sobe: true },
-    { nome: 'engageRange', ler: (id) => DIFFICULTIES[id].engageRange, sobe: true },
-    { nome: 'fireTolerance', ler: (id) => DIFFICULTIES[id].fireTolerance, sobe: false },
-    { nome: 'reaction', ler: (id) => DIFFICULTIES[id].reaction, sobe: false },
-    { nome: 'transitScale', ler: (id) => DIFFICULTIES[id].transitScale, sobe: false },
-    { nome: 'floodAlarm', ler: (id) => DIFFICULTIES[id].floodAlarm, sobe: false },
-    // Perícia de avaria: a lenda entrega mais serviço por descida, desce menos vezes
-    // e erra menos o buraco.
-    { nome: 'holdShift', ler: (id) => DIFFICULTIES[id].holdShift, sobe: true },
-    { nome: 'gunShift', ler: (id) => DIFFICULTIES[id].gunShift, sobe: false },
-    { nome: 'triage', ler: (id) => DIFFICULTIES[id].triage, sobe: true },
-    { nome: 'bilgeFloor', ler: (id) => DIFFICULTIES[id].bilgeFloor, sobe: false },
+  // Each row says which way the number has to move from deckhand to legend.
+  const axes: readonly { name: string; read: (id: DifficultyId) => number; rises: boolean }[] = [
+    { name: 'aimSigma', read: (id) => DIFFICULTIES[id].aimSigma, rises: false },
+    { name: 'leadFraction', read: (id) => DIFFICULTIES[id].leadFraction, rises: true },
+    { name: 'engageRange', read: (id) => DIFFICULTIES[id].engageRange, rises: true },
+    { name: 'fireTolerance', read: (id) => DIFFICULTIES[id].fireTolerance, rises: false },
+    { name: 'reaction', read: (id) => DIFFICULTIES[id].reaction, rises: false },
+    { name: 'transitScale', read: (id) => DIFFICULTIES[id].transitScale, rises: false },
+    { name: 'floodAlarm', read: (id) => DIFFICULTIES[id].floodAlarm, rises: false },
+    // Damage-control skill: the legend delivers more work per trip below, goes down fewer
+    // times and misses the hole less often.
+    { name: 'holdShift', read: (id) => DIFFICULTIES[id].holdShift, rises: true },
+    { name: 'gunShift', read: (id) => DIFFICULTIES[id].gunShift, rises: false },
+    { name: 'triage', read: (id) => DIFFICULTIES[id].triage, rises: true },
+    { name: 'bilgeFloor', read: (id) => DIFFICULTIES[id].bilgeFloor, rises: false },
   ];
 
-  for (const eixo of eixos) {
-    const valores = DIFFICULTY_ORDER.map(eixo.ler);
-    const emOrdem = valores.every(
-      (v, i) => i === 0 || (eixo.sobe ? v > valores[i - 1]! : v < valores[i - 1]!),
+  for (const axis of axes) {
+    const valores = DIFFICULTY_ORDER.map(axis.read);
+    const inOrder = valores.every(
+      (v, i) => i === 0 || (axis.rises ? v > valores[i - 1]! : v < valores[i - 1]!),
     );
     cases.push({
-      nome: `preset · ${eixo.nome} ${eixo.sobe ? 'cresce' : 'diminui'} com a perícia`,
+      nome: `preset · ${axis.name} ${axis.rises ? 'rises' : 'falls'} with skill`,
       medido: valores.join(' → '),
-      esperado: eixo.sobe ? 'estritamente crescente' : 'estritamente decrescente',
-      erro: emOrdem ? '—' : 'fora de ordem',
-      passou: emOrdem,
+      esperado: axis.rises ? 'strictly increasing' : 'strictly decreasing',
+      erro: inOrder ? '—' : 'out of order',
+      passou: inOrder,
     });
   }
 
-  // O turno de porão tem de caber um serviço inteiro, senão o marujo desce, começa a
-  // caminhada e sobe sem ter pregado nada — um rodízio que só custa escada. O piso é
-  // a travessia média do porão (~4 m ida e volta ao paiol, a 1,15 m/s) mais os 2,4 s
-  // de `REPAIR_TIME`.
-  const TURNO_MINIMO = 7;
-  const menorTurno = Math.min(...DIFFICULTY_ORDER.map((id) => DIFFICULTIES[id].holdShift));
+  // The hold shift has to fit a whole job, or else the sailor goes below, starts the walk
+  // and comes back up without having nailed anything — a rotation that only costs stairs.
+  // The floor is the hold's average transit (~4 m round trip to the locker, at 1.15 m/s)
+  // plus `REPAIR_TIME`'s 2.4 s.
+  const MIN_SHIFT = 7;
+  const shortestShift = Math.min(...DIFFICULTY_ORDER.map((id) => DIFFICULTIES[id].holdShift));
   cases.push({
-    nome: 'rodízio · o turno de porão cabe uma tábua',
-    medido: `${menorTurno.toFixed(1)} s`,
-    esperado: `≥ ${TURNO_MINIMO} s`,
-    erro: menorTurno >= TURNO_MINIMO ? '—' : `${(TURNO_MINIMO - menorTurno).toFixed(1)} s curto`,
-    passou: menorTurno >= TURNO_MINIMO,
+    nome: 'rotation · the hold shift fits one plank',
+    medido: `${shortestShift.toFixed(1)} s`,
+    esperado: `≥ ${MIN_SHIFT} s`,
+    erro: shortestShift >= MIN_SHIFT ? '—' : `${(MIN_SHIFT - shortestShift).toFixed(1)} s short`,
+    passou: shortestShift >= MIN_SHIFT,
   });
 
-  // O piso da bomba tem de ficar **abaixo** do alarme que faz o marujo descer, com
-  // folga. Invertidos, ele desce ao porão, bombeia até um nível que ainda dispara o
-  // alarme e desce de novo no passo seguinte — um marujo que passa a partida na
-  // escada. Colados, o mesmo em câmera lenta. A folga de 3 pontos percentuais é o
-  // que a água leva ~4 s para repor com um rombo aberto, ou seja: tempo de ele
-  // chegar à peça antes de ser chamado de volta.
-  const FOLGA = 0.03;
+  // The pump's floor has to sit **below** the alarm that sends the sailor down, with room
+  // to spare. Inverted, he goes into the hold, pumps to a level that still trips the alarm
+  // and goes down again on the next step — a sailor who spends the match on the stairs.
+  // Touching, the same thing in slow motion. The 3 percentage points of margin are what
+  // the water takes ~4 s to put back with an open breach, that is: time for him to reach
+  // the gun before being called back.
+  const MARGIN = 0.03;
   for (const id of DIFFICULTY_ORDER) {
     const { bilgeFloor, floodAlarm, label } = DIFFICULTIES[id];
-    const margem = floodAlarm - bilgeFloor;
+    const margin = floodAlarm - bilgeFloor;
     cases.push({
-      nome: `porão · ${label} larga a bomba antes do próprio alarme`,
-      medido: `piso ${(bilgeFloor * 100).toFixed(0)}% · alarme ${(floodAlarm * 100).toFixed(0)}%`,
-      esperado: `margem ≥ ${(FOLGA * 100).toFixed(0)} pontos`,
-      erro: margem >= FOLGA ? '—' : `${(margem * 100).toFixed(1)} pontos de margem`,
-      passou: margem >= FOLGA,
+      nome: `hold · ${label} leaves the pump before their own alarm`,
+      medido: `floor ${(bilgeFloor * 100).toFixed(0)}% · alarm ${(floodAlarm * 100).toFixed(0)}%`,
+      esperado: `margin ≥ ${(MARGIN * 100).toFixed(0)} points`,
+      erro: margin >= MARGIN ? '—' : `${(margin * 100).toFixed(1)} points of margin`,
+      passou: margin >= MARGIN,
     });
   }
 
