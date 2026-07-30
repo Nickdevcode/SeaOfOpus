@@ -1,39 +1,38 @@
 /**
- * Teste do instantâneo — o que o host escreve é o que o convidado lê?
+ * Snapshot test — is what the host writes what the guest reads?
  *
  * ```js
  * const s = await import('/tests/snapshot.ts');
  * console.table(s.runSnapshotTests().cases);
  * ```
  *
- * ## Por que este teste existe
+ * ## Why this test exists
  *
- * Porque o formato de rede tem uma classe de defeito que **nenhum outro teste
- * pega e nenhum jogador consegue descrever**: um campo que o escritor manda e o
- * leitor não lê (ou lê na ordem errada). Não há erro, não há exceção, não há
- * `NaN`. O que acontece é que todos os campos dali para a frente saem
- * deslocados, e o jogo do outro lado passa a mostrar valores que pertencem a
- * outra coisa — o rumo do vento lido como fração do dia, o marujo lido como
- * lista de eventos.
+ * Because the network format has a class of defect **no other test catches and no player
+ * can describe**: a field the writer sends and the reader does not read (or reads in the
+ * wrong order). There is no error, no exception, no `NaN`. What happens is that every
+ * field from there on comes out shifted, and the game on the other side starts showing
+ * values that belong to something else — the wind's heading read as the fraction of the
+ * day, the sailor read as the event list.
  *
- * Os dois defeitos reais que motivaram este arquivo:
+ * The two real defects that motivated this file:
  *
- * - **O rumo da ondulação de fundo não viajava.** Só que o sintoma era "o navio
- *   dele flutua estranho", que ninguém liga a um campo faltando.
- * - **A lista de rombos tinha tetos diferentes nos dois lados** — o escritor
- *   mandava quantos houvesse, o leitor parava em 32. Acima disso o instantâneo
- *   inteiro saía do lugar, e o duelo do convidado virava ruído.
+ * - **The background swell's heading did not travel.** Except that the symptom was "his
+ *   ship floats strangely", which nobody connects to a missing field.
+ * - **The breach list had different ceilings on the two sides** — the writer sent however
+ *   many there were, the reader stopped at 32. Above that the whole snapshot came out
+ *   shifted, and the guest's duel became noise.
  *
- * ## Como ele testa
+ * ## How it tests
  *
- * Montando um mundo **falso e todo diferente**: cada campo recebe um valor
- * distinto e improvável, escolhido para que um deslocamento de bytes não possa
- * passar despercebido. Zeros e valores repetidos são o inimigo aqui — dois
- * campos trocados de lugar com o mesmo valor dentro parecem certos.
+ * By assembling a **fake world where everything is different**: each field receives a
+ * distinct, improbable value, chosen so that a byte shift cannot go unnoticed. Zeros and
+ * repeated values are the enemy here — two fields swapped with the same value inside look
+ * right.
  *
- * O `Match` é pato-tipado: `encodeSnapshot` só lê campos simples, então não é
- * preciso montar um navio de verdade (nem uma tela, o que permite rodar isto
- * fora do navegador).
+ * `Match` is duck-typed: `encodeSnapshot` only reads simple fields, so there is no need to
+ * assemble a real ship (or a screen, which is what allows running this outside the
+ * browser).
  */
 
 import * as THREE from 'three';
@@ -60,12 +59,11 @@ export interface TestReport {
 }
 
 /**
- * Tolerância de cada grandeza, em unidades dela.
+ * Each quantity's tolerance, in its own units.
  *
- * Sai da escala de quantização de `QUANT`, com uma folga de arredondamento: o
- * formato **é** com perda, e cobrar igualdade exata seria reprovar o desenho em
- * vez de testá-lo. O que se prova aqui é que a perda cabe onde ela foi
- * projetada para caber.
+ * It comes out of `QUANT`'s quantization scale, with some rounding slack: the format **is**
+ * lossy, and demanding exact equality would be failing the design instead of testing it.
+ * What gets proved here is that the loss fits where it was designed to fit.
  */
 const TOLERANCE = {
   angle: 1e-4,
@@ -74,13 +72,13 @@ const TOLERANCE = {
   angular: 1e-3,
   local: 5e-3,
   breach: 3e-3,
-  /** Um byte sobre 0..1. */
+  /** One byte over 0..1. */
   byte: 3e-3,
-  /** Fração do dia sobre `u16`. */
+  /** Fraction of the day over `u16`. */
   timeOfDay: 2e-5,
 } as const;
 
-/** Um valor por campo, todos diferentes. Ver o cabeçalho. */
+/** One value per field, all different. See the header. */
 function makeShip(seed: number) {
   const n = (offset: number) => seed + offset;
   const orientation = new THREE.Quaternion()
@@ -134,13 +132,13 @@ function makeCrew(seed: number) {
   return {
     controller: {
       local: new THREE.Vector3(0.85 + seed, 1.45 - seed * 0.5, -2.35 + seed),
-      // ⚠️ **O primeiro está fora da faixa de propósito, e é um caso de teste.**
-      // 7,5 rad é mais de uma volta inteira, e é exatamente o que o cabrestante
-      // produz: `followCapstan` soma o ângulo varrido direto no rumo, então cada
-      // volta de barra são 2π acumulados. Nesta escala o `i16` satura em ±3,2767 —
-      // sem normalizar antes de quantizar, este marujo chega do outro lado com a
-      // cabeça travada em 3,2767 rad em vez dos 1,2168 equivalentes. Ver
-      // `crewCases`, que compara o ângulo **equivalente** e não o número cru.
+      // ⚠️ **The first is out of range on purpose, and it is a test case.**
+      // 7.5 rad is more than a full turn, and it is exactly what the capstan produces:
+      // `followCapstan` adds the swept angle straight into the heading, so each turn of
+      // the bars is 2π accumulated. At this scale the `i16` saturates at ±3.2767 —
+      // without normalizing before quantizing, this sailor arrives on the other side with
+      // his head stuck at 3.2767 rad instead of the equivalent 1.2168. See `crewCases`,
+      // which compares the **equivalent** angle and not the raw number.
       yaw: seed === 0 ? 7.5 : -2.5625,
       pitch: seed === 0 ? -0.4375 : 0.6875,
       station: seed === 0 ? 'helm' : 'cannon',
@@ -148,21 +146,21 @@ function makeCrew(seed: number) {
       grounded: seed === 0,
       onLadder: seed !== 0,
       atCapstan: seed === 0,
-      // O mar, com valores opostos como todo o resto deste arquivo. O bit dele é o
-      // **sétimo** e fecha o byte de estado do corpo: um deslocamento ali não
-      // desalinha o quadro, só faz o adversário nadar no convés.
+      // The sea, with opposite values like everything else in this file. Its bit is the
+      // **seventh** and closes the body-state byte: a shift there does not misalign the
+      // frame, it just makes the opponent swim on the deck.
       inWater: seed === 0,
     },
-    // A tábua na mão é o único estado do corpo que **não** mora no controlador:
-    // quem vê o rombo e o botão segurado no mesmo passo é a interação. Os dois
-    // marujos com valores opostos, como todo o resto deste arquivo — um campo
-    // booleano igual nos dois é um campo que pode estar sendo lido do lugar
-    // errado sem ninguém notar.
+    // The plank in hand is the only body state that does **not** live in the controller:
+    // what sees the breach and the held button on the same step is the interaction. The
+    // two sailors with opposite values, like everything else in this file — a boolean
+    // field that is the same on both is a field that could be being read from the wrong
+    // place without anyone noticing.
     interaction: { patching: seed !== 0 },
   };
 }
 
-/** Todos os cinco tipos de evento, cada um com números próprios. */
+/** All five event types, each with numbers of its own. */
 function makeEvents(): MatchEvent[] {
   return [
     {
@@ -242,11 +240,11 @@ export function runSnapshotTests(): TestReport {
     );
 
     check(
-      'cabeçalho · tick, fila, fome, recibo e desfecho',
+      'header · tick, queue, starvation, receipt and outcome',
       header
-        ? `tick ${header.tick} · fila ${header.bufferDepth} · fome ${header.starved} · ack ${header.ackTick} · fim ${header.over}/${header.winner}`
-        : 'não decodificou',
-      'tick 987654 · fila 7 · fome 3 · ack 123456 · fim true/1',
+        ? `tick ${header.tick} · queue ${header.bufferDepth} · starved ${header.starved} · ack ${header.ackTick} · over ${header.over}/${header.winner}`
+        : 'did not decode',
+      'tick 987654 · queue 7 · starved 3 · ack 123456 · over true/1',
       Boolean(
         header &&
           header.tick === 987654 &&
@@ -256,29 +254,29 @@ export function runSnapshotTests(): TestReport {
           header.over &&
           header.winner === 1,
       ),
-      'o cabeçalho não é o que foi escrito',
+      'the header is not what was written',
     );
 
     const waves = match.environment.waveField;
     const windError = Math.abs(world.windDirection - waves.windDirection);
-    // ⚠️ Este é o campo que faltava, e o caso que este arquivo existe para ter.
+    // ⚠️ This is the field that was missing, and the case this file exists to have.
     const swellError = Math.abs(world.swellDirection - waves.swellDirection);
     check(
-      'mar · vento, força, relógio e **ondulação de fundo**',
-      `vento ±${windError.toExponential(1)} · swell ±${swellError.toExponential(1)} · tempo ${world.waveTime}`,
-      `os três dentro de ${TOLERANCE.angle}, tempo exato`,
+      'sea · wind, strength, clock and **background swell**',
+      `wind ±${windError.toExponential(1)} · swell ±${swellError.toExponential(1)} · time ${world.waveTime}`,
+      `all three within ${TOLERANCE.angle}, time exact`,
       windError < TOLERANCE.angle &&
         swellError < TOLERANCE.angle &&
         Math.abs(world.windStrength - waves.windStrength) < TOLERANCE.byte &&
         world.waveTime === waves.time,
-      'um campo do mar não atravessou o fio — os dois lados navegam mares diferentes',
+      'a field of the sea did not cross the wire — the two sides sail different seas',
     );
 
     const weather = match.environment.weather;
     check(
-      'céu · tempo, transição, nuvem, chuva, visibilidade e clarão',
-      `${world.sky.current}→${world.sky.target} · nuvem ${world.sky.clouds.toFixed(3)} · vis ${world.sky.visibility} · hora ${world.sky.timeOfDay.toFixed(4)}`,
-      'squall→storm · nuvem 0.875 · vis 1450 · hora 0.7365',
+      'sky · weather, transition, cloud, rain, visibility and flash',
+      `${world.sky.current}→${world.sky.target} · cloud ${world.sky.clouds.toFixed(3)} · vis ${world.sky.visibility} · hour ${world.sky.timeOfDay.toFixed(4)}`,
+      'squall→storm · cloud 0.875 · vis 1450 · hour 0.7365',
       world.sky.current === weather.current &&
         world.sky.target === weather.target &&
         Math.abs(world.sky.baseWind - weather.windBase) < TOLERANCE.byte &&
@@ -287,7 +285,7 @@ export function runSnapshotTests(): TestReport {
         world.sky.visibility === weather.visibility &&
         Math.abs(world.sky.flash - weather.flash) < TOLERANCE.byte &&
         Math.abs(world.sky.timeOfDay - match.environment.dayNight.timeOfDay) < TOLERANCE.timeOfDay,
-      'um lado navega sob um céu que o outro não vê',
+      'one side sails under a sky the other does not see',
     );
 
     cases.push(...shipCases(match, world));
@@ -295,12 +293,12 @@ export function runSnapshotTests(): TestReport {
     cases.push(...eventCases(match, world));
   }
 
-  // --- 2. o casco no teto de rombos não desalinha o quadro ----------------------
+  // --- 2. a hull at the breach ceiling does not misalign the frame -------------
   //
-  // O caso que quebrava tudo: enquanto escritor e leitor tinham tetos
-  // diferentes, um casco muito castigado deslocava **todo o resto** do
-  // instantâneo. O sintoma não era um rombo a mais faltando; era o marujo, o
-  // adversário e os eventos lidos em cima de bytes de outra coisa.
+  // The case that broke everything: while writer and reader had different ceilings, a
+  // badly beaten hull shifted **all the rest** of the snapshot. The symptom was not one
+  // more breach missing; it was the sailor, the opponent and the events read on top of
+  // bytes belonging to something else.
   {
     const match = makeMatch(MAX_BREACHES);
     const world = createWorldState();
@@ -318,8 +316,8 @@ export function runSnapshotTests(): TestReport {
 
     const crew = world.crew[1]!;
     const source = match.crew[1]!.controller;
-    // Se os bytes tivessem escorregado, o marujo — que é lido **depois** das duas
-    // listas de estrago — sairia em qualquer lugar menos onde ele está.
+    // If the bytes had slipped, the sailor — who is read **after** the two damage lists —
+    // would come out anywhere but where he is.
     const intact =
       Boolean(header) &&
       world.ships[0]!.breaches?.length === MAX_BREACHES &&
@@ -329,20 +327,19 @@ export function runSnapshotTests(): TestReport {
       world.events.length === 5;
 
     check(
-      'teto · casco com a lista cheia não desloca o resto do quadro',
-      `rombos ${world.ships[0]!.breaches?.length} · tábuas ${world.ships[1]!.patches?.length} · posto "${crew.station}" · eventos ${world.events.length}`,
+      'ceiling · a hull with a full list does not shift the rest of the frame',
+      `breaches ${world.ships[0]!.breaches?.length} · planks ${world.ships[1]!.patches?.length} · station "${crew.station}" · events ${world.events.length}`,
       `${MAX_BREACHES} / ${MAX_BREACHES} / "cannon" / 5`,
       intact,
-      'o quadro saiu do lugar: daqui para a frente o convidado lê bytes de outra coisa',
+      'the frame came out shifted: from here on the guest reads bytes belonging to something else',
     );
   }
 
-  // --- 3. sem a lista, o resto continua no lugar --------------------------------
+  // --- 3. without the list, the rest stays in place ----------------------------
   //
-  // A lista de estrago é um campo **condicional**, e a promessa dele é que o
-  // quadro se lê sozinho nas duas formas. Um leitor que consumisse a contagem
-  // mesmo quando ela não foi escrita deslocaria tudo — pelo mesmo caminho, ao
-  // contrário.
+  // The damage list is a **conditional** field, and its promise is that the frame reads on
+  // its own in both shapes. A reader that consumed the count even when it was not written
+  // would shift everything — by the same path, in reverse.
   {
     const match = makeMatch(4);
     const world = createWorldState();
@@ -361,23 +358,23 @@ export function runSnapshotTests(): TestReport {
     const crew = world.crew[0]!;
     const source = match.crew[0]!.controller;
     check(
-      'campo condicional · quadro sem a lista de estrago se lê igual',
-      `rombos ${world.ships[0]!.breaches} · tábuas ${world.ships[0]!.patches} · olhar ${crew.yaw.toFixed(4)} · eventos ${world.events.length}`,
-      // 1,2168 e não 7,5: o rumo atravessa normalizado. Ver `crewCases`.
+      'conditional field · a frame without the damage list reads the same',
+      `breaches ${world.ships[0]!.breaches} · planks ${world.ships[0]!.patches} · gaze ${crew.yaw.toFixed(4)} · events ${world.events.length}`,
+      // 1.2168 and not 7.5: the heading crosses normalized. See `crewCases`.
       'null / null / 1.2168 / 5',
       world.ships[0]!.breaches === null &&
         world.ships[0]!.patches === null &&
         Math.abs(wrapAngle(crew.yaw - source.yaw)) < TOLERANCE.angle &&
         world.events.length === 5,
-      'o leitor e o escritor discordam sobre quando a lista está no quadro',
+      'the reader and the writer disagree about when the list is in the frame',
     );
   }
 
-  // --- 4. lixo não derruba o tratador de rede -----------------------------------
+  // --- 4. garbage does not take down the network handler -----------------------
   //
-  // Um quadro truncado (outra versão, pacote cortado) tem de virar `null`, e não
-  // exceção: isto roda dentro do `onmessage` do socket, e o que escapar dali
-  // derruba a rede da partida inteira sem nada aparecer na tela.
+  // A truncated frame (another version, a cut packet) has to become `null`, and not an
+  // exception: this runs inside the socket's `onmessage`, and whatever escapes there takes
+  // down the whole match's network with nothing showing up on screen.
   {
     const match = makeMatch(2);
     const full = encodeSnapshot(match, {
@@ -402,11 +399,11 @@ export function runSnapshotTests(): TestReport {
     }
 
     check(
-      'quadro truncado · vira null, nunca exceção',
-      `${refused} de ${truncations.length} recusados · lançou ${threw}`,
-      `${truncations.length} recusados · lançou false`,
+      'truncated frame · becomes null, never an exception',
+      `${refused} of ${truncations.length} refused · threw ${threw}`,
+      `${truncations.length} refused · threw false`,
       !threw && refused === truncations.length,
-      'um pacote ruim derruba o tratador de rede e o mundo congela sem erro',
+      'a bad packet takes down the network handler and the world freezes with no error',
     );
   }
 
@@ -414,7 +411,7 @@ export function runSnapshotTests(): TestReport {
   return { passou: falhas === 0, total: cases.length, falhas, cases };
 }
 
-/** Cada campo de cada casco, medido contra a tolerância da grandeza dele. */
+/** Every field of every hull, measured against its quantity's tolerance. */
 function shipCases(match: Match, world: ReturnType<typeof createWorldState>): TestCase[] {
   const out: TestCase[] = [];
 
@@ -429,10 +426,10 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
       read.angularVelocity.distanceTo(source.body.angularVelocity) < TOLERANCE.angular;
 
     out.push({
-      nome: `casco ${slot} · pose, velocidade e giro`,
+      nome: `hull ${slot} · pose, velocity and spin`,
       medido: `pos ±${read.position.distanceTo(source.body.comPosition).toExponential(1)} m · vel ±${read.velocity.distanceTo(source.body.velocity).toExponential(1)} m/s`,
-      esperado: 'posição ±1 mm · velocidade ±5 mm/s',
-      erro: pose ? '—' : 'o casco chega numa pose diferente da que foi escrita',
+      esperado: 'position ±1 mm · velocity ±5 mm/s',
+      erro: pose ? '—' : 'the hull arrives in a pose different from the one written',
       passou: pose,
     });
 
@@ -446,10 +443,10 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
       Math.abs(read.sinkTime - source.damage.sinkTime) < 1e-3;
 
     out.push({
-      nome: `casco ${slot} · roda, paióis, âncora e alagamento`,
-      medido: `bala ${read.cannonballs} · tábua ${read.planks} · âncora ${read.anchorState} ${read.anchorDeploy.toFixed(2)} · porão ${read.floodFraction.toFixed(3)}`,
+      nome: `hull ${slot} · wheel, lockers, anchor and flooding`,
+      medido: `shot ${read.cannonballs} · plank ${read.planks} · anchor ${read.anchorState} ${read.anchorDeploy.toFixed(2)} · hold ${read.floodFraction.toFixed(3)}`,
       esperado: `${source.cannonballs} · ${source.planks} · ${source.anchor.state} ${source.anchor.deploy} · ${source.damage.floodFraction}`,
-      erro: gear ? '—' : 'um estado do navio chega errado do outro lado',
+      erro: gear ? '—' : 'one of the ship states arrives wrong on the other side',
       passou: gear,
     });
 
@@ -465,10 +462,10 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
         Math.abs(b.recoil - a.recoil) < TOLERANCE.byte;
     }
     out.push({
-      nome: `casco ${slot} · as duas peças (mira, carga e recuo)`,
+      nome: `hull ${slot} · both guns (aim, charge and recoil)`,
       medido: `${read.cannons.map((c) => `${c.state} ${c.traverse.toFixed(4)}`).join(' | ')}`,
       esperado: `${source.cannons.map((c) => `${c.state} ${c.traverse.toFixed(4)}`).join(' | ')}`,
-      erro: guns ? '—' : 'a peça do outro lado aponta para onde ela não está apontada',
+      erro: guns ? '—' : 'the gun on the other side points where it is not pointing',
       passou: guns,
     });
 
@@ -495,10 +492,10 @@ function shipCases(match: Match, world: ReturnType<typeof createWorldState>): Te
     }
 
     out.push({
-      nome: `casco ${slot} · rombos abertos e tábuas pregadas`,
-      medido: `${read.breaches?.length} rombos · ${read.patches?.length} tábuas`,
-      esperado: `${source.damage.breaches.length} · ${source.damage.patches.length}, com posição, área e reparo`,
-      erro: damage ? '—' : 'o costado do outro conta uma história diferente da verdadeira',
+      nome: `hull ${slot} · open breaches and nailed planks`,
+      medido: `${read.breaches?.length} breaches · ${read.patches?.length} planks`,
+      esperado: `${source.damage.breaches.length} · ${source.damage.patches.length}, with position, area and repair`,
+      erro: damage ? '—' : 'the enemy hull tells a different story from the true one',
       passou: damage,
     });
   }
@@ -514,10 +511,10 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
     const source = crewman.controller;
     const read = world.crew[slot]!;
 
-    // ⚠️ **O rumo é comparado como ângulo, e não como número.** O fio carrega
-    // `wrapAngle(yaw)`, então um marujo que girou mais de uma volta chega do outro
-    // lado com o **ângulo equivalente** — que é a resposta certa, e a única que
-    // cabe na faixa do `i16` nesta escala. Comparar cru reprovaria o conserto.
+    // ⚠️ **The heading is compared as an angle, and not as a number.** The wire carries
+    // `wrapAngle(yaw)`, so a sailor who has spun more than a full turn arrives on the other
+    // side with the **equivalent angle** — which is the right answer, and the only one that
+    // fits the `i16`'s range at this scale. Comparing raw would fail the fix.
     const yawError = Math.abs(wrapAngle(read.yaw - source.yaw));
 
     const ok =
@@ -529,31 +526,30 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
       read.grounded === source.grounded &&
       read.onLadder === source.onLadder &&
       read.atCapstan === source.atCapstan &&
-      // O bit da tábua divide o byte com os outros cinco estados de corpo. Um
-      // deslocamento de bit ali não desalinha o quadro — ele só faz o corpo do
-      // adversário contar a história errada, que é o tipo de defeito que passa
-      // meses no ar.
+      // The plank's bit shares the byte with the other five body states. A bit shift
+      // there does not misalign the frame — it just makes the opponent's body tell the
+      // wrong story, which is the kind of defect that stays up for months.
       read.patching === crewman.interaction.patching &&
       read.inWater === source.inWater;
 
     out.push({
-      nome: `marujo ${slot} · posição, olhar, posto e estado do corpo`,
-      medido: `"${read.station}" peça ${read.cannonIndex} · chão ${read.grounded} escada ${read.onLadder} cabrestante ${read.atCapstan} tábua ${read.patching} mar ${read.inWater}`,
-      esperado: `"${source.station}" peça ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan} ${crewman.interaction.patching} ${source.inWater}`,
-      erro: ok ? '—' : 'o marujo do outro lado está num lugar, num posto ou numa pose diferente',
+      nome: `sailor ${slot} · position, gaze, station and body state`,
+      medido: `"${read.station}" gun ${read.cannonIndex} · ground ${read.grounded} ladder ${read.onLadder} capstan ${read.atCapstan} plank ${read.patching} sea ${read.inWater}`,
+      esperado: `"${source.station}" gun ${source.cannonIndex} · ${source.grounded} ${source.onLadder} ${source.atCapstan} ${crewman.interaction.patching} ${source.inWater}`,
+      erro: ok ? '—' : 'the sailor on the other side is in a different place, station or pose',
       passou: ok,
     });
 
-    // E um caso só para o rumo, porque o defeito que ele cobre é invisível dentro
-    // do caso acima: o número **satura** em vez de errar por pouco, e saturado ele
-    // continua sendo um ângulo plausível. Quem não normalizasse aqui veria o
-    // adversário com a cabeça travada em 187,7° enquanto suspende a âncora — e
-    // nada, nem um `NaN` nem um estouro, diria que foi isso que aconteceu.
+    // And one case just for the heading, because the defect it covers is invisible inside
+    // the case above: the number **saturates** instead of being slightly wrong, and
+    // saturated it is still a plausible angle. Whoever did not normalize here would see
+    // the opponent with his head stuck at 187.7° while weighing the anchor — and nothing,
+    // not a `NaN` nor an overflow, would say that was what happened.
     out.push({
-      nome: `marujo ${slot} · rumo fora da faixa sobrevive como ângulo equivalente`,
-      medido: `${source.yaw.toFixed(4)} rad → ${read.yaw.toFixed(4)} rad · erro ${yawError.toExponential(1)}`,
+      nome: `sailor ${slot} · a heading out of range survives as the equivalent angle`,
+      medido: `${source.yaw.toFixed(4)} rad → ${read.yaw.toFixed(4)} rad · error ${yawError.toExponential(1)}`,
       esperado: `${wrapAngle(source.yaw).toFixed(4)} rad (±${TOLERANCE.angle})`,
-      erro: yawError < TOLERANCE.angle ? '—' : 'o rumo saturou no fio: mais de uma volta não cabe no `i16` desta escala',
+      erro: yawError < TOLERANCE.angle ? '—' : 'the heading saturated on the wire: more than one turn does not fit the `i16` at this scale',
       passou: yawError < TOLERANCE.angle,
     });
   }
@@ -562,12 +558,12 @@ function crewCases(match: Match, world: ReturnType<typeof createWorldState>): Te
 }
 
 /**
- * Os cinco tipos de evento.
+ * The five event types.
  *
- * Importa mais do que parece: os eventos são **os últimos** do quadro e têm
- * tamanho variável por tipo. Um tipo novo escrito e não lido não perde só aquele
- * evento — ele para a leitura de todos os seguintes, porque não há como saber
- * quantos bytes pular.
+ * It matters more than it looks: the events are **the last** thing in the frame and have a
+ * variable size per type. A new type written and not read does not only lose that event —
+ * it stops the read of every following one, because there is no way to know how many bytes
+ * to skip.
  */
 function eventCases(match: Match, world: ReturnType<typeof createWorldState>): TestCase[] {
   const source = match.netEvents;
@@ -591,10 +587,10 @@ function eventCases(match: Match, world: ReturnType<typeof createWorldState>): T
 
   return [
     {
-      nome: 'eventos · os cinco tipos, na ordem e com os campos',
-      medido: `${read.length} eventos: ${read.map((e) => e.kind).join(', ')}`,
+      nome: 'events · all five types, in order and with their fields',
+      medido: `${read.length} events: ${read.map((e) => e.kind).join(', ')}`,
       esperado: `${source.length}: ${source.map((e) => e.kind).join(', ')}`,
-      erro: ok ? '—' : 'um tipo de evento não atravessa, e leva os seguintes junto',
+      erro: ok ? '—' : 'one event type does not cross, and takes the following ones with it',
       passou: ok,
     },
   ];
