@@ -1,42 +1,41 @@
 /**
- * Fumaça, respingo, lasca e clarão — tudo o que o combate cospe no ar.
+ * Smoke, splash, splinter and flash — everything the combat spits into the air.
  *
- * **Uma malha por camada, não um objeto por partícula.** Um bordo inteiro de
- * canhonaço põe umas 300 baforadas no ar; 300 `Sprite` seriam 300 chamadas de
- * desenho e 300 nós na cena. Aqui são duas `InstancedBufferGeometry` — uma
- * translúcida normal (fumaça, respingo, lasca) e uma aditiva (o clarão da boca
- * e o brilho da pólvora) — e cada quadro sobe um pedaço de buffer com só as
- * partículas vivas.
+ * **One mesh per layer, not one object per particle.** A whole broadside puts some 300
+ * puffs in the air; 300 `Sprite`s would be 300 draw calls and 300 nodes in the scene.
+ * Here there are two `InstancedBufferGeometry`s — one normally translucent (smoke,
+ * splash, splinter) and one additive (the muzzle flash and the powder's glow) — and each
+ * frame uploads one slice of buffer with only the live particles.
  *
- * **O billboard é feito no vertex shader**, lendo os eixos da câmera direto da
- * `viewMatrix`. Sai de graça e evita o que o `Sprite` do three faz: recalcular
- * uma matriz por partícula na CPU.
+ * **The billboarding is done in the vertex shader**, reading the camera's axes straight
+ * out of the `viewMatrix`. It comes for free and avoids what three's `Sprite` does:
+ * recomputing one matrix per particle on the CPU.
  *
- * **Sem névoa.** A névoa da cena é `FogExp2` com densidade 1/3200, o que a 200 m
- * — o dobro do alcance útil de tiro — deixa 99,6% da cor passar. Somar o cálculo
- * aos dois shaders custaria mais do que o efeito que ninguém veria.
+ * **No fog.** The scene's fog is `FogExp2` with a density of 1/3200, which at 200 m —
+ * twice the useful range of a shot — lets 99.6% of the color through. Adding the
+ * computation to both shaders would cost more than the effect nobody would see.
  */
 
 import * as THREE from 'three';
 import { createRandom } from '../core/MathUtils';
 import { createPuffTexture } from '../textures/ProceduralTextures';
 
-/** Partículas simultâneas na camada translúcida. */
+/** Simultaneous particles in the translucent layer. */
 const SMOKE_CAPACITY = 900;
-/** E na aditiva, que é sempre um punhado por disparo. */
+/** And in the additive one, which is always a handful per shot. */
 const GLOW_CAPACITY = 220;
 
 /**
- * Arrasto do ar sobre uma baforada, por segundo.
+ * The air's drag on a puff, per second.
  *
- * Fumaça é leve e para rápido: em meio segundo ela perde quase toda a
- * velocidade de saída e passa a só subir e crescer.
+ * Smoke is light and stops fast: in half a second it loses nearly all its exit velocity
+ * and goes on to only rise and grow.
  */
 const SMOKE_DRAG = 2.6;
 
 const VERTEX_SHADER = /* glsl */ `
   attribute vec3 aOffset;
-  attribute vec3 aParams;  // x tamanho, y alfa, z rotação
+  attribute vec3 aParams;  // x size, y alpha, z rotation
   attribute vec3 aTint;
 
   varying vec2 vUv;
@@ -52,8 +51,8 @@ const VERTEX_SHADER = /* glsl */ `
     float s = sin(aParams.z);
     vec2 corner = vec2(position.x * c - position.y * s, position.x * s + position.y * c) * aParams.x;
 
-    // Colunas da viewMatrix transpostas = eixos da câmera no mundo. A malha fica
-    // parada na origem, então não há modelMatrix para atrapalhar.
+    // The viewMatrix's columns transposed = the camera's axes in the world. The mesh
+    // stays put at the origin, so there is no modelMatrix in the way.
     vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
     vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
 
@@ -71,8 +70,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   void main() {
     vec4 texel = texture2D(uMap, vUv);
     float alpha = texel.a * vAlpha;
-    // Corte cedo: com centenas de quads empilhados, o pixel quase transparente
-    // custa o mesmo que o opaco e não aparece.
+    // Cut early: with hundreds of stacked quads, the nearly transparent pixel costs the
+    // same as the opaque one and does not show.
     if (alpha < 0.004) discard;
     gl_FragColor = vec4(vTint * texel.rgb, alpha);
   }
@@ -81,30 +80,30 @@ const FRAGMENT_SHADER = /* glsl */ `
 export interface EmitOptions {
   position: THREE.Vector3;
   velocity: THREE.Vector3;
-  /** Cor multiplicada pelo sprite. */
+  /** Color multiplied into the sprite. */
   tint: THREE.Color;
-  /** Raio inicial em metros. */
+  /** Initial radius in meters. */
   size: number;
-  /** Crescimento do raio, em metros por segundo. */
+  /** Growth of the radius, in meters per second. */
   growth: number;
-  /** Segundos de vida. */
+  /** Seconds of life. */
   life: number;
-  /** Opacidade no nascimento; cai a zero no fim da vida. */
+  /** Opacity at birth; it falls to zero at the end of the life. */
   alpha: number;
-  /** Frenagem exponencial, por segundo. */
+  /** Exponential braking, per second. */
   drag: number;
-  /** Empuxo vertical, em m/s². Positivo sobe (fumaça), negativo cai (água). */
+  /** Vertical buoyancy, in m/s². Positive rises (smoke), negative falls (water). */
   rise: number;
-  /** Giro, em rad/s. */
+  /** Spin, in rad/s. */
   spin: number;
 }
 
 /**
- * Uma camada de partículas com um modo de mistura.
+ * One particle layer with one blending mode.
  *
- * As partículas vivas ficam sempre no começo dos arrays: quando uma morre, a
- * última viva toma o lugar dela. Isso mantém o pedaço a enviar para a GPU
- * contíguo e dispensa varrer buracos.
+ * The live particles are always at the start of the arrays: when one dies, the last live
+ * one takes its place. That keeps the slice to send to the GPU contiguous and does away
+ * with scanning for holes.
  */
 class ParticleLayer {
   readonly mesh: THREE.Mesh;
@@ -152,9 +151,9 @@ class ParticleLayer {
     this.spin = new Float32Array(capacity);
     this.rotation = new Float32Array(capacity);
 
-    // O quad é escrito à mão em vez de emprestado de um `PlaneGeometry`: os
-    // atributos seriam compartilhados, e descartar a geometria emprestada
-    // derrubaria os buffers que esta ainda usa.
+    // The quad is written by hand instead of borrowed from a `PlaneGeometry`: the
+    // attributes would be shared, and disposing of the borrowed geometry would take down
+    // the buffers this one still uses.
     const geometry = new THREE.InstancedBufferGeometry();
     geometry.setAttribute(
       'position',
@@ -187,8 +186,8 @@ class ParticleLayer {
       fragmentShader: FRAGMENT_SHADER,
       transparent: true,
       blending,
-      // Sem escrita de profundidade: partícula translúcida que escreve no
-      // z-buffer recorta a de trás e a fumaça vira um mosaico de quadrados.
+      // No depth writing: a translucent particle that writes into the z-buffer cuts out
+      // the one behind it and the smoke becomes a mosaic of squares.
       depthWrite: false,
       depthTest: true,
       side: THREE.DoubleSide,
@@ -205,8 +204,8 @@ class ParticleLayer {
   }
 
   /**
-   * Nasce uma partícula. Com a camada cheia, o pedido é ignorado — perder uma
-   * baforada num bordo de 300 é invisível; travar para abrir espaço, não.
+   * A particle is born. With the layer full, the request is ignored — losing one puff out
+   * of a broadside's 300 is invisible; stalling to make room is not.
    */
   emit(options: EmitOptions): void {
     if (this.count >= this.capacity) return;
@@ -231,7 +230,7 @@ class ParticleLayer {
     this.tints.setXYZ(i, options.tint.r, options.tint.g, options.tint.b);
   }
 
-  /** Integra e sobe os buffers. Roda no tempo de render, não no passo fixo. */
+  /** Integrates and uploads the buffers. It runs on render time, not on the fixed step. */
   update(dt: number): void {
     const offsets = this.offsets.array as Float32Array;
     const params = this.params.array as Float32Array;
@@ -243,8 +242,8 @@ class ParticleLayer {
         continue;
       }
 
-      // Frenagem exponencial exata, e não `v -= v*k*dt`: a fumaça de canhão sai
-      // a 14 m/s e a forma explícita explodiria com quadros longos.
+      // Exact exponential braking, and not `v -= v*k*dt`: the cannon's smoke leaves at
+      // 14 m/s and the explicit form would blow up on long frames.
       const decay = Math.exp(-this.drag[i]! * dt);
       this.vx[i]! *= decay;
       this.vy[i]! *= decay;
@@ -259,8 +258,8 @@ class ParticleLayer {
       this.rotation[i]! += this.spin[i]! * dt;
 
       const t = this.age[i]! / this.life[i]!;
-      // Sobe rápido e some devagar: é o perfil de uma baforada de pólvora, que
-      // aparece de estalo e depois se dissolve.
+      // Rises fast and fades slowly: it is the profile of a puff of powder smoke, which
+      // appears with a crack and then dissolves.
       const envelope = Math.min(t * 6, 1) * (1 - t) * (1 - t);
 
       offsets[i * 3] = this.px[i]!;
@@ -276,8 +275,8 @@ class ParticleLayer {
     (this.mesh.geometry as THREE.InstancedBufferGeometry).instanceCount = this.count;
     if (this.count === 0) return;
 
-    // Só o prefixo vivo sobe para a GPU; o resto do buffer é lixo antigo que
-    // `instanceCount` já manda o driver ignorar.
+    // Only the live prefix goes up to the GPU; the rest of the buffer is old garbage
+    // `instanceCount` already tells the driver to ignore.
     for (const attribute of [this.offsets, this.params, this.tints]) {
       attribute.clearUpdateRanges();
       attribute.addUpdateRange(0, this.count * 3);
@@ -290,7 +289,7 @@ class ParticleLayer {
     (this.mesh.geometry as THREE.InstancedBufferGeometry).instanceCount = 0;
   }
 
-  /** Tira a partícula `i` trazendo a última viva para o lugar dela. */
+  /** Removes particle `i` by bringing the last live one into its place. */
   private remove(i: number): void {
     const last = --this.count;
     if (i === last) return;
@@ -333,7 +332,7 @@ export class Effects {
   private readonly glow: ParticleLayer;
   private readonly texture: THREE.Texture;
   private readonly random = createRandom(4271);
-  /** Acumulador do rastro, para o cadenciar por distância e não por quadro. */
+  /** The trail's accumulator, to pace it by distance and not by frame. */
   private trailClock = 0;
 
   constructor(scene: THREE.Scene) {
@@ -346,7 +345,7 @@ export class Effects {
     scene.add(this.smoke.mesh, this.glow.mesh);
   }
 
-  /** Partículas vivas nas duas camadas — o overlay de depuração lê daqui. */
+  /** Live particles in both layers — the debug overlay reads from here. */
   get liveCount(): number {
     return this.smoke.live + this.glow.live;
   }
@@ -372,8 +371,8 @@ export class Effects {
   }
 
   /**
-   * O tiro: clarão na boca, jato de fumaça na direção do cano e a nuvem que fica
-   * boiando ao lado do navio por uns segundos.
+   * The shot: a flash at the muzzle, a jet of smoke along the barrel's axis and the cloud
+   * that hangs beside the ship for a few seconds.
    */
   muzzleBlast(position: THREE.Vector3, direction: THREE.Vector3): void {
     this.glow.emit({
@@ -389,7 +388,7 @@ export class Effects {
       spin: this.signed(6),
     });
 
-    // O jato: rápido, colado no eixo do cano, com abertura pequena.
+    // The jet: fast, hugging the barrel's axis, with a narrow spread.
     for (let i = 0; i < 14; i++) {
       const speed = 7 + this.random() * 9;
       this.scatter(_velocity.copy(direction).multiplyScalar(speed), 2.4);
@@ -407,8 +406,8 @@ export class Effects {
       });
     }
 
-    // E a nuvem lenta que sobra na amurada, que é o que denuncia de onde veio o
-    // tiro quando se olha o outro navio de longe.
+    // And the slow cloud left at the bulwark, which is what gives away where the shot
+    // came from when you look at the other ship from a distance.
     for (let i = 0; i < 6; i++) {
       this.scatter(_velocity.copy(direction).multiplyScalar(1.4), 1.6);
       this.smoke.emit({
@@ -427,10 +426,10 @@ export class Effects {
   }
 
   /**
-   * A bala entrando na água: coluna branca para cima e névoa em volta.
+   * The ball going into the water: a white column upward and mist around it.
    *
-   * O tamanho vem da velocidade de impacto, então tiro curto faz espirrinho e
-   * tiro longo, que chega mergulhando forte, levanta a coluna inteira.
+   * The size comes from the impact velocity, so a short shot makes a little splash and a
+   * long shot, which arrives diving hard, throws up the whole column.
    */
   waterSplash(position: THREE.Vector3, speed: number): void {
     const power = Math.min(speed / 70, 1.6);
@@ -446,14 +445,15 @@ export class Effects {
         growth: 0.9,
         life: 0.75 + this.random() * 0.7,
         alpha: 0.85,
-        // Gotícula não flutua: cai, e cair é o que dá o arco do respingo.
+        // A droplet does not float: it falls, and falling is what gives the splash its
+        // arc.
         drag: 0.7,
         rise: -7.5,
         spin: this.signed(2),
       });
     }
 
-    // O anel de espuma que fica na superfície depois que a coluna cai.
+    // The ring of foam left on the surface after the column falls.
     for (let i = 0; i < 5; i++) {
       const angle = (i / 5) * Math.PI * 2;
       _velocity.set(Math.cos(angle) * 2.2, 0.4, Math.sin(angle) * 2.2);
@@ -472,7 +472,7 @@ export class Effects {
     }
   }
 
-  /** A bala entrando na madeira: o clarão do impacto e a lasca que salta dele. */
+  /** The ball going into the wood: the impact's flash and the splinter that leaps out of it. */
   woodImpact(position: THREE.Vector3, normal: THREE.Vector3, speed: number): void {
     this.glow.emit({
       position,
@@ -491,16 +491,16 @@ export class Effects {
   }
 
   /**
-   * Lascas e poeira de serragem saltando da madeira arrebentada.
+   * Splinters and sawdust leaping out of the shattered wood.
    *
-   * Separada de `woodImpact` porque a bala não é a única coisa que arranca tábua: um
-   * abalroamento também, e ele **não** tem clarão de pólvora — o clarão é o metal
-   * quente entrando, não a madeira cedendo. Pôr o mesmo efeito nos dois daria uma
-   * faísca em cada encostão de casco.
+   * Kept apart from `woodImpact` because a ball is not the only thing that tears out
+   * planking: a collision does too, and it has **no** powder flash — the flash is hot
+   * metal going in, not wood giving way. Putting the same effect on both would give a
+   * spark on every nudge between hulls.
    *
-   * @param power força do estrago, 0..1,5. É força e não velocidade porque as duas
-   *   causas vivem em escalas diferentes: uma bala chega a 70 m/s e dois cascos se
-   *   encontram a 3, e o que se quer nos dois casos é a mesma lasca voando.
+   * @param power the damage's force, 0..1.5. It is force and not velocity because the two
+   *   causes live on different scales: a ball arrives at 70 m/s and two hulls meet at 3,
+   *   and what you want in both cases is the same splinter flying.
    */
   splinters(position: THREE.Vector3, normal: THREE.Vector3, power: number): void {
     for (let i = 0; i < 12; i++) {
@@ -537,15 +537,15 @@ export class Effects {
   }
 
   /**
-   * A água entrando por um rombo, vista de dentro do porão.
+   * The water coming in through a breach, seen from inside the hold.
    *
-   * A vazão decide quantas gotas e com que força — um furo raso goteja, um
-   * rombo fundo esguicha, e a diferença é lida sem precisar de número na tela.
+   * The inflow decides how many drops and with what force — a shallow hole drips, a deep
+   * breach jets, and the difference is read with no number on screen.
    */
   waterJet(position: THREE.Vector3, direction: THREE.Vector3, inflow: number): void {
     if (inflow <= 0) return;
-    // Cadência proporcional à vazão, sorteada por quadro para não amarrar o
-    // efeito à taxa de quadros.
+    // A rate proportional to the inflow, drawn per frame so the effect is not tied to
+    // the frame rate.
     if (this.random() > Math.min(inflow * 22, 1)) return;
 
     const speed = 2 + inflow * 26;
@@ -565,10 +565,10 @@ export class Effects {
   }
 
   /**
-   * O rastro da bala.
+   * The ball's trail.
    *
-   * Cadenciado por tempo acumulado (`trailClock`), e não uma baforada por
-   * quadro: a 144 Hz o rastro viraria uma corda sólida, e a 30 Hz, pontilhado.
+   * Paced by accumulated time (`trailClock`), and not one puff per frame: at 144 Hz the
+   * trail would become a solid rope, and at 30 Hz, a dotted line.
    */
   ballTrail(position: THREE.Vector3, velocity: THREE.Vector3): void {
     if (this.trailClock < 0.028) return;
@@ -588,12 +588,12 @@ export class Effects {
     });
   }
 
-  /** Fecha a janela do rastro. Chamado depois de percorrer todas as balas. */
+  /** Closes the trail's window. Called after walking through every ball. */
   endTrailWindow(): void {
     if (this.trailClock >= 0.028) this.trailClock = 0;
   }
 
-  /** Espalha um vetor com ruído isotrópico de amplitude `amount`. */
+  /** Scatters a vector with isotropic noise of amplitude `amount`. */
   private scatter(target: THREE.Vector3, amount: number): void {
     target.x += this.signed(amount);
     target.y += this.signed(amount);

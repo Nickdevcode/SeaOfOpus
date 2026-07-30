@@ -1,27 +1,25 @@
 /**
- * A esteira — o rastro de espuma que o casco deixa na água.
+ * The wake — the trail of foam the hull leaves in the water.
  *
- * É um mapa de densidade de espuma desenhado num render target quadrado que
- * acompanha o navio, e que o shader do oceano lê em `sampleWake`. A cada quadro
- * acontecem dois passes:
+ * It is a foam density map drawn into a square render target that follows the ship, and
+ * which the ocean's shader reads in `sampleWake`. Two passes happen every frame:
  *
- * 1. **Desvanecimento** — o alvo anterior é copiado para o novo com um
- *    deslocamento de UV que compensa o quanto o centro andou, multiplicado pelo
- *    decaimento e com uma difusão leve. É isso que faz a espuma *ficar na água*
- *    em vez de andar junto com o navio: o conteúdo é reprojetado no mundo.
- * 2. **Carimbo** — cada casco desenha um quadrilátero por cima, aditivo, com a
- *    forma da espuma que ele está produzindo *agora*. Quadros sucessivos ao
- *    longo da trajetória é que constroem o rastro; ninguém desenha o rastro
- *    inteiro de uma vez.
+ * 1. **Fade** — the previous target is copied into the new one with a UV offset that
+ *    compensates for how far the center moved, multiplied by the decay and with a light
+ *    diffusion. That is what makes the foam *stay in the water* instead of traveling
+ *    along with the ship: the content is reprojected into the world.
+ * 2. **Stamp** — each hull draws a quad on top, additively, with the shape of the foam it
+ *    is producing *right now*. It is successive frames along the trajectory that build
+ *    the trail; nobody draws the whole trail at once.
  *
- * **Por que ping-pong e não um alvo só.** Ler e escrever a mesma textura no
- * mesmo passe é comportamento indefinido em WebGL; a única saída barata é ter
- * dois alvos e alternar.
+ * **Why ping-pong and not a single target.** Reading and writing the same texture in the
+ * same pass is undefined behavior in WebGL; the only cheap way out is two targets and
+ * alternating between them.
  *
- * **Por que o centro é encaixado na grade de texels.** Se ele andasse livre, o
- * deslocamento de UV cairia no meio de um texel e a amostragem bilinear borraria
- * o mapa inteiro a cada quadro — em dez segundos a espuma vira névoa. Encaixado,
- * o deslocamento é sempre um número inteiro de texels e a cópia é exata.
+ * **Why the center is snapped to the texel grid.** If it moved freely, the UV offset
+ * would land in the middle of a texel and the bilinear sampling would blur the whole map
+ * every frame — in ten seconds the foam becomes mist. Snapped, the offset is always a
+ * whole number of texels and the copy is exact.
  */
 
 import * as THREE from 'three';
@@ -31,40 +29,40 @@ import { HULL_BEAM, HULL_LENGTH } from '../ship/ShipDimensions';
 import type { Ship } from '../ship/Ship';
 
 /**
- * Aresta da área coberta, em metros.
+ * Edge of the covered area, in meters.
  *
- * O duelo acontece entre 40 e 120 m; 256 m cobrem a manobra inteira com folga e
- * ainda dão 0,5 m por texel na resolução média. Aumentar isso desperdiça texels
- * em água vazia — a esteira só existe onde alguém passou.
+ * The duel happens between 40 and 120 m; 256 m cover the whole maneuvering with room to
+ * spare and still give 0.5 m per texel at the medium resolution. Raising it wastes texels
+ * on empty water — the wake only exists where somebody passed.
  */
 const WAKE_SIZE = 256;
 
 /**
- * Meia-vida útil da espuma, em segundos.
+ * The foam's useful half-life, in seconds.
  *
- * O rastro visível de uma chalupa a 8 nós tem uns 60 m; a 4 m/s isso dá ~15 s de
- * vida. O decaimento é exponencial, então a cauda some antes disso — na prática
- * o rastro fica em torno de 50 m, que é o que se vê no jogo.
+ * A sloop's visible trail at 8 knots is some 60 m; at 4 m/s that gives ~15 s of life. The
+ * decay is exponential, so the tail disappears before that — in practice the trail sits
+ * around 50 m, which is what you see in the game.
  */
 const FOAM_LIFETIME = 14;
 
-/** Quanto o quadrilátero de carimbo é maior que o casco, em cada eixo. */
+/** How much bigger than the hull the stamp's quad is, on each axis. */
 const STAMP_BEAM = 2.4;
 const STAMP_LENGTH = 1.2;
 
-/** Meias dimensões do casco em unidades normalizadas do carimbo. */
+/** The hull's half-dimensions in the stamp's normalized units. */
 const HULL_HALF = 1 / STAMP_BEAM;
 const HULL_END = 1 / STAMP_LENGTH;
 
 /**
- * Velocidade em que a esteira já está no talo, em m/s.
+ * The speed at which the wake is already flat out, in m/s.
  *
- * ~5,7 nós. Acima disso a espuma não fica mais densa, só mais longa — que é o
- * que a integração ao longo do tempo faz sozinha.
+ * ~5.7 knots. Above that the foam does not get any denser, only longer — which is what
+ * the integration over time does on its own.
  */
 const FULL_WAKE_SPEED = 2.9;
 
-/** Densidade acrescentada por segundo de navegação a toda velocidade. */
+/** Density added per second of sailing at full speed. */
 const EMISSION_RATE = 2.6;
 
 const FADE_VERTEX = /* glsl */ `
@@ -87,9 +85,9 @@ const FADE_FRAGMENT = /* glsl */ `
   void main() {
     vec2 uv = vUv + uOffset;
 
-    // Fora do mapa anterior não havia espuma nenhuma: é água que acabou de
-    // entrar na área. Sem este teste o ClampToEdge esticaria a borda para
-    // dentro e o navio pareceria arrastar uma mancha atrás de si.
+    // Outside the previous map there was no foam at all: it is water that has just
+    // entered the area. Without this test ClampToEdge would stretch the edge inward and
+    // the ship would look like it was dragging a smear behind it.
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
       gl_FragColor = vec4(0.0);
       return;
@@ -102,8 +100,8 @@ const FADE_FRAGMENT = /* glsl */ `
       texture2D(uPrevious, uv + vec2(0.0, uTexel.y)).r +
       texture2D(uPrevious, uv - vec2(0.0, uTexel.y)).r;
 
-    // Difusão leve: espuma se espalha enquanto morre. Pesada demais e o rastro
-    // vira um borrão; de menos e as bordas do carimbo ficam duras.
+    // Light diffusion: foam spreads as it dies. Too heavy and the trail becomes a blur;
+    // too little and the stamp's edges stay hard.
     float value = mix(center, neighbours * 0.25, 0.2) * uDecay;
 
     gl_FragColor = vec4(value, 0.0, 0.0, 1.0);
@@ -132,35 +130,35 @@ const STAMP_FRAGMENT = /* glsl */ `
   ${NOISE_GLSL}
 
   void main() {
-    // p.x é o través, p.y corre da popa (−1) para a proa (+1). O carimbo é
-    // maior que o casco, então "along" reescala p.y para que ±1 caiam
-    // exatamente no talhamar e no painel de popa.
+    // p.x is athwartships, p.y runs from the stern (−1) to the bow (+1). The stamp is
+    // bigger than the hull, so "along" rescales p.y so that ±1 land exactly on the stem
+    // and on the transom.
     vec2 p = vUv * 2.0 - 1.0;
     float across = abs(p.x);
     float along = clamp(p.y / ${HULL_END.toFixed(5)}, -1.0, 1.0);
 
-    // Meia largura do casco na altura da linha d'água: afila até um ponto na
-    // proa e afina de leve na popa, que na chalupa é um painel estreito.
+    // The hull's half-width at the waterline: it tapers to a point at the bow and
+    // narrows slightly at the stern, which on a sloop is a narrow transom.
     float bow = max(along, 0.0);
     float stern = max(-along, 0.0);
     float halfWidth = ${HULL_HALF.toFixed(5)} *
       (1.0 - pow(bow, 2.6)) *
       (1.0 - 0.18 * pow(stern, 3.0));
 
-    // A faixa de espuma nasce onde o costado empurra a água para o lado: nas
-    // duas bordas do casco, não embaixo dele.
+    // The band of foam is born where the side pushes the water aside: at the hull's two
+    // edges, not underneath it.
     float edge = abs(across - halfWidth);
     float side = 1.0 - smoothstep(0.0, 0.16, edge);
-    // Na proa a onda ainda está se formando; a espuma abre pouco atrás dela.
+    // At the bow the wave is still forming; the foam opens a little behind it.
     side *= smoothstep(1.0, 0.72, along);
 
-    // Popa: água revolvida pelo leme e pelo vazio que o casco deixa. Mais larga
-    // e mais suja que as faixas laterais.
+    // Stern: water churned by the rudder and by the void the hull leaves. Wider and
+    // dirtier than the side bands.
     float churn = smoothstep(-0.42, -1.0, p.y) *
       (1.0 - smoothstep(halfWidth * 0.9, halfWidth * 1.45, across));
 
-    // O ruído é ancorado no **mundo**, não no casco: preso ao casco, o grão
-    // andaria junto e o rastro sairia listrado.
+    // The noise is anchored in the **world**, not to the hull: tied to the hull, the
+    // grain would travel along and the trail would come out striped.
     float grain = fbm(vec3(vWorld * 0.6, uTime * 0.15), 3, 2.0, 0.5);
 
     float density = max(side, churn * 0.9) * (0.5 + 0.75 * grain);
@@ -169,7 +167,7 @@ const STAMP_FRAGMENT = /* glsl */ `
   }
 `;
 
-/** Alvo de espuma: R8 é tudo que o oceano lê, e custa um quarto de um RGBA. */
+/** Foam target: R8 is all the ocean reads, and it costs a quarter of an RGBA. */
 function createTarget(resolution: number): THREE.WebGLRenderTarget {
   const target = new THREE.WebGLRenderTarget(resolution, resolution, {
     format: THREE.RedFormat,
@@ -189,7 +187,7 @@ function createTarget(resolution: number): THREE.WebGLRenderTarget {
 const _shipPosition = new THREE.Vector3();
 
 export class WakeFoam {
-  /** Centro da área coberta, em metros de mundo. Só x e z importam. */
+  /** Center of the covered area, in world meters. Only x and z matter. */
   readonly center = new THREE.Vector3();
   readonly size = WAKE_SIZE;
 
@@ -208,7 +206,7 @@ export class WakeFoam {
   private readonly stamps: THREE.Mesh[] = [];
 
   private time = 0;
-  /** Falso até o primeiro passe: antes disso o alvo tem lixo de alocação. */
+  /** False until the first pass: before that the target holds allocation garbage. */
   private primed = false;
 
   constructor(quality: QualitySettings) {
@@ -230,8 +228,8 @@ export class WakeFoam {
       depthWrite: false,
     });
 
-    // Triângulo de tela cheia: um a menos que o quad, e sem a costura diagonal
-    // onde os dois triângulos se encontram.
+    // A fullscreen triangle: one fewer than the quad, and with no diagonal seam where
+    // the two triangles meet.
     const fullscreen = new THREE.BufferGeometry();
     fullscreen.setAttribute(
       'position',
@@ -242,28 +240,28 @@ export class WakeFoam {
     fadeMesh.frustumCulled = false;
     this.fadeScene.add(fadeMesh);
 
-    // Câmera olhando para baixo, com **top e bottom trocados**. A inversão do
-    // eixo Y da projeção é o que faz `uv.y` crescer com o Z do mundo, que é a
-    // convenção que `Ocean.sampleWake` espera. Sem ela a esteira sairia
-    // espelhada e apareceria do lado errado do casco.
+    // A camera looking down, with **top and bottom swapped**. Flipping the projection's
+    // Y axis is what makes `uv.y` grow with the world's Z, which is the convention
+    // `Ocean.sampleWake` expects. Without it the wake would come out mirrored and show up
+    // on the wrong side of the hull.
     const half = WAKE_SIZE / 2;
     this.stampCamera = new THREE.OrthographicCamera(-half, half, -half, half, 0.1, 400);
     this.stampCamera.rotation.x = -Math.PI / 2;
 
-    // Quadrilátero no plano XZ, com v = 1 na proa (−Z local, como no navio).
+    // A quad in the XZ plane, with v = 1 at the bow (local −Z, as on the ship).
     this.stampGeometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   }
 
-  /** A textura que o oceano amostra. */
+  /** The texture the ocean samples. */
   get texture(): THREE.Texture {
     return this.front.texture;
   }
 
   /**
-   * Avança a esteira um quadro.
+   * Advances the wake by one frame.
    *
-   * Tem que rodar na fase de render (mexe em render targets) e depois de
-   * `syncModel`, para carimbar na pose que vai aparecer na tela.
+   * It has to run in the render phase (it touches render targets) and after `syncModel`,
+   * so it stamps in the pose that will show up on screen.
    */
   update(renderer: THREE.WebGLRenderer, dt: number, ships: readonly Ship[]): void {
     if (dt <= 0) return;
@@ -277,7 +275,7 @@ export class WakeFoam {
       (this.center.x - previousCenter.x) / WAKE_SIZE,
       (this.center.z - previousCenter.z) / WAKE_SIZE,
     );
-    // Decaimento exponencial exato: independe da taxa de quadros.
+    // Exact exponential decay: independent of the frame rate.
     this.fadeMaterial.uniforms.uDecay!.value = this.primed ? Math.exp(-dt / FOAM_LIFETIME) : 0;
     this.fadeMaterial.uniforms.uPrevious!.value = this.front.texture;
 
@@ -305,7 +303,7 @@ export class WakeFoam {
     this.primed = true;
   }
 
-  /** Apaga tudo — usado ao reiniciar a partida. */
+  /** Erases everything — used when restarting the match. */
   reset(): void {
     this.primed = false;
     this.center.set(0, 0, 0);
@@ -335,10 +333,10 @@ export class WakeFoam {
   }
 
   /**
-   * Reposiciona a área sobre o primeiro navio, encaixada na grade de texels.
+   * Repositions the area over the first ship, snapped to the texel grid.
    *
-   * O primeiro da lista é o do jogador. Centrar no meio dos dois seria mais
-   * "justo", mas faria a área saltar quando um deles afundasse.
+   * The first on the list is the player's. Centering between the two would be "fairer",
+   * but it would make the area jump when one of them sank.
    */
   private recenter(ships: readonly Ship[]): void {
     const lead = ships[0];
@@ -351,7 +349,7 @@ export class WakeFoam {
     );
   }
 
-  /** Põe um carimbo por navio que esteja produzindo espuma neste instante. */
+  /** Places one stamp per ship producing foam at this instant. */
   private syncStamps(dt: number, ships: readonly Ship[]): void {
     this.stampScene.clear();
 
@@ -359,8 +357,8 @@ export class WakeFoam {
       const ship = ships[i]!;
       if (ship.damage.isSunk) continue;
 
-      // Velocidade sobre a água na direção que importa: um navio parado de
-      // través na corrente não abre esteira, um navio a ré abre.
+      // Speed through the water in the direction that matters: a ship lying beam-on in
+      // the current opens no wake, a ship going astern does.
       const speed = Math.abs(ship.surge);
       const strength = Math.min(speed / FULL_WAKE_SPEED, 1);
       if (strength < 0.02) continue;
@@ -372,8 +370,8 @@ export class WakeFoam {
       stamp.scale.set(HULL_BEAM * STAMP_BEAM, 1, HULL_LENGTH * STAMP_LENGTH);
 
       const uniforms = (stamp.material as THREE.ShaderMaterial).uniforms;
-      // Emissão por *tempo*, não por quadro: a 30 ou a 144 fps o rastro tem a
-      // mesma densidade.
+      // Emission per *time*, not per frame: at 30 or at 144 fps the trail has the same
+      // density.
       uniforms.uAmount!.value = strength * EMISSION_RATE * dt;
       uniforms.uTime!.value = this.time;
 
@@ -381,7 +379,7 @@ export class WakeFoam {
     }
   }
 
-  /** Carimbos são criados sob demanda e reaproveitados — um por navio. */
+  /** Stamps are created on demand and reused — one per ship. */
   private getStamp(index: number): THREE.Mesh {
     let stamp = this.stamps[index];
     if (stamp) return stamp;
@@ -394,12 +392,12 @@ export class WakeFoam {
       vertexShader: STAMP_VERTEX,
       fragmentShader: STAMP_FRAGMENT,
       transparent: true,
-      // Aditivo: cada quadro soma um pouco de espuma no que já estava lá.
+      // Additive: each frame adds a little foam on top of what was already there.
       blending: THREE.AdditiveBlending,
       depthTest: false,
       depthWrite: false,
-      // A projeção tem Y invertido, o que troca o sentido de enrolamento dos
-      // triângulos; desenhar os dois lados evita depender disso.
+      // The projection has Y flipped, which reverses the triangles' winding order;
+      // drawing both sides avoids depending on that.
       side: THREE.DoubleSide,
     });
 

@@ -1,83 +1,82 @@
 /**
- * A bandeira do tope: um pano de Verlet preso à cabeça do mastro.
+ * The masthead ensign: a Verlet cloth made fast to the masthead.
  *
- * Ela existe por um motivo de jogo, não de enfeite — e o motivo é o mesmo que
- * fez a flâmula ser modelada em primeiro lugar. A duzentos metros a Chalupa é
- * uma silhueta escura contra o céu, e o que se distingue nela é o pano: a vela,
- * quando está de frente, e a bandeira, sempre. Só que uma bandeira **rígida**
- * mente duas vezes por partida inteira. A geometria antiga trazia um seno
- * assado nos vértices e apontava para a popa em qualquer condição: com o vento
- * pela alheta ela ficava atravessada, com calmaria continuava esticada, e a
- * onda dela era a mesma prega congelada em todos os quadros do jogo.
+ * It exists for a gameplay reason, not for decoration — and the reason is the same one
+ * that got the pennant modeled in the first place. At two hundred meters the sloop is a
+ * dark silhouette against the sky, and what you tell apart on it is the cloth: the sail,
+ * when it is face-on, and the ensign, always. Except that a **rigid** ensign lies twice
+ * over a whole match. The old geometry carried a sine baked into the vertices and pointed
+ * aft in any condition: with the wind on the quarter it lay athwart, in a calm it stayed
+ * stretched, and its ripple was the same frozen fold in every frame of the game.
  *
- * O que se ganha ao simular não é "a bandeira mexe". É que ela vira um
- * **instrumento**: ela aponta a sotavento, e portanto diz de onde vem o vento
- * antes de o jogador olhar o HUD. Num jogo em que o rumo em relação ao vento
- * decide a velocidade, esse é o dado mais importante da tela — e agora ele está
- * desenhado no topo do próprio mastro, que é onde todo marinheiro real olha.
+ * What you gain by simulating it is not "the ensign moves". It is that it becomes an
+ * **instrument**: it points to leeward, and therefore says where the wind comes from
+ * before the player looks at the HUD. In a game where the heading relative to the wind
+ * decides the speed, that is the most important datum on screen — and now it is drawn at
+ * the top of the mast itself, which is where every real sailor looks.
  *
- * ## Por que Verlet, e por que separado da vela
+ * ## Why Verlet, and why separate from the sail
  *
- * A vela (`SailSim`) tem 143 nós presos em duas relingas e é o que empurra o
- * navio; a bandeira tem 55 nós presos numa borda só e não faz força nenhuma.
- * Compartilhar o solver custaria mais em parametrização do que os quarenta
- * milissegundos por minuto que este arquivo inteiro gasta. E o vento — que é o
- * que os dois têm de comum — vem de fora, do mesmo `localWind` que a vela lê.
+ * The sail (`SailSim`) has 143 nodes made fast on two boltropes and is what pushes the
+ * ship; the ensign has 55 nodes made fast on one edge only and makes no force at all.
+ * Sharing the solver would cost more in parameterization than the forty milliseconds per
+ * minute this whole file spends. And the wind — which is what the two have in common —
+ * comes from outside, from the same `localWind` the sail reads.
  *
- * O tecido roda no referencial do navio, como a vela: a malha é filha do casco,
- * então as posições já estão nesse sistema e o balanço do mar entra de graça.
+ * The cloth runs in the ship's frame, like the sail: the mesh is a child of the hull, so
+ * the positions are already in that system and the sea's motion comes in for free.
  */
 
 import * as THREE from 'three';
 import { clamp01 } from '../core/MathUtils';
 import { ENSIGN_FRAME, ensignRestPoint, ensignVertexIndex } from './ShipParts';
 
-/** Folga do pano ao longo do comprimento. Pouca: flâmula é esticada. */
+/** The cloth's slack along its length. Little: a pennant is stretched. */
 const CHORD_SLACK = 1.01;
-/** Folga na altura, onde o pano realmente ondula. */
+/** Slack in the height, where the cloth really ripples. */
 const SPAN_SLACK = 1.05;
 const RELAX_ITERATIONS = 3;
 const CLOTH_DAMPING = 0.984;
 
 /**
- * Aceleração do pano por unidade de **pressão dinâmica** — ou seja, multiplicada
- * pelo quadrado da velocidade do vento, como toda força de fluido.
+ * The cloth's acceleration per unit of **dynamic pressure** — that is, multiplied by the
+ * square of the wind's speed, like every fluid force.
  *
- * O quadrado importa aqui mais do que na vela: entre a calmaria (6 m/s) e o
- * temporal (20 m/s) a pressão muda dez vezes, e é isso que faz a bandeira pender
- * mole num caso e ficar rija no outro. Com uma relação linear a diferença seria
- * de três vezes, e o jogador não leria o tempo pela bandeira.
+ * The square matters more here than on the sail: between a calm (6 m/s) and a storm
+ * (20 m/s) the pressure changes tenfold, and that is what makes the ensign hang limp in
+ * one case and stand stiff in the other. With a linear relationship the difference would
+ * be threefold, and the player would not read the weather off the ensign.
  */
 const WIND_GAIN = 0.085;
-/** Gravidade sentida pelo pano — só o bastante para a ponta cair na calmaria. */
+/** The gravity the cloth feels — just enough for the tip to droop in a calm. */
 const CLOTH_GRAVITY = 2.6;
 
 /**
- * Ganho da onda viajante que percorre o pano, também sobre a pressão dinâmica.
+ * The gain of the traveling wave that runs along the cloth, also over the dynamic
+ * pressure.
  *
- * Verlet sozinho, com vento constante, converge para uma bandeira **reta**: sem
- * turbulência não há o que a faça ondular, e o resultado é uma tábua apontando a
- * sotavento — que foi exatamente o que a primeira versão desenhou. A onda entra
- * como uma força transversal que anda ao longo do comprimento, que é o que uma
- * bandeira faz de verdade: a instabilidade de esteira corre da haste para a
- * ponta, crescendo.
+ * Verlet on its own, with a constant wind, converges to a **straight** ensign: with no
+ * turbulence there is nothing to make it ripple, and the result is a board pointing to
+ * leeward — which is exactly what the first version drew. The wave comes in as a
+ * transverse force that travels along the length, which is what an ensign really does:
+ * the wake instability runs from the staff to the tip, growing.
  *
- * Um pouco maior que o empurrão do vento de propósito. É a onda que dá vida ao
- * pano, e ela precisa vencer a tração que o próprio vento impõe — foi por
- * subestimar isso que a primeira tentativa produziu um deslocamento de milímetros
- * por segundo, invisível a qualquer distância.
+ * A little larger than the wind's push, on purpose. It is the wave that gives the cloth
+ * life, and it has to overcome the tension the wind itself imposes — it was by
+ * underestimating that that the first attempt produced a displacement of millimeters per
+ * second, invisible at any distance.
  */
 const RIPPLE_GAIN = 0.2;
 /**
- * Comprimentos de onda por metro de pano.
+ * Wavelengths per meter of cloth.
  *
- * 0,8 dá uma onda e meia nos 1,9 m da flâmula. Estava em 1,35 — duas ondas e
- * meia —, e o pano só tem dez colunas de vértice: cada crista ficava com quatro
- * quadriláteros e a onda lia como serrilha, não como pano. A malha decide o
- * comprimento de onda mínimo que vale a pena simular.
+ * 0.8 gives one and a half waves across the pennant's 1.9 m. It was at 1.35 — two and a
+ * half waves —, and the cloth only has ten columns of vertices: each crest got four
+ * quads and the wave read as jagging, not as cloth. The mesh decides the shortest
+ * wavelength worth simulating.
  */
 const RIPPLE_WAVES = 0.8;
-/** Quantas vezes por segundo a onda percorre o pano, por m/s de vento. */
+/** How many times per second the wave runs along the cloth, per m/s of wind. */
 const RIPPLE_SPEED = 0.21;
 
 interface ClothConstraint {
@@ -97,7 +96,7 @@ export class EnsignSim {
   private time = 0;
 
   /**
-   * @param mesh malha da bandeira, ou `null` para um navio sem pano visível.
+   * @param mesh the ensign's mesh, or `null` for a ship with no visible cloth.
    */
   constructor(mesh: THREE.Mesh | null) {
     this.geometry = mesh?.geometry ?? null;
@@ -109,8 +108,8 @@ export class EnsignSim {
 
     const { columns, rows, length, height } = ENSIGN_FRAME;
     this.pinned = new Uint8Array((columns + 1) * (rows + 1));
-    // Só a borda da haste. Todo o resto voa — inclusive as duas bordas
-    // horizontais, que é onde a ondulação de uma flâmula aparece.
+    // Only the staff's edge. Everything else flies — including the two horizontal edges,
+    // which is where a pennant's ripple shows.
     for (let j = 0; j <= rows; j++) this.pinned[ensignVertexIndex(0, j)] = 1;
 
     const dz = length / columns;
@@ -138,11 +137,11 @@ export class EnsignSim {
   }
 
   /**
-   * Um passo do pano.
+   * One step of the cloth.
    *
-   * @param localWind vento aparente no referencial do navio — o **mesmo** vetor
-   *   que a vela usa para fazer força. É o que garante que a bandeira e o pano
-   *   nunca contem histórias diferentes sobre de onde o vento vem.
+   * @param localWind the apparent wind in the ship's frame — the **same** vector the sail
+   *   uses to make force. It is what guarantees the ensign and the canvas never tell
+   *   different stories about where the wind comes from.
    */
   update(dt: number, localWind: THREE.Vector3): void {
     const positions = this.positions;
@@ -158,8 +157,8 @@ export class EnsignSim {
     const windX = speed > 1e-4 ? localWind.x / speed : 0;
     const windZ = speed > 1e-4 ? localWind.z / speed : 1;
 
-    // A onda cresce com a pressão e some com vento fraco: em calmaria uma
-    // bandeira pende, não tremula.
+    // The wave grows with the pressure and disappears in a light wind: in a calm an
+    // ensign hangs, it does not flutter.
     const ripple = RIPPLE_GAIN * dynamic * clamp01(speed / 5);
     const phase = this.time * speed * RIPPLE_SPEED * Math.PI * 2;
     const dt2 = dt * dt;
@@ -173,15 +172,15 @@ export class EnsignSim {
       const y = positions[o + 1]!;
       const z = positions[o + 2]!;
 
-      // A onda cresce com a distância da haste (`u²`): junto ao mastro o pano
-      // está preso e não tem para onde ir; na ponta ele chicoteia.
+      // The wave grows with the distance from the staff (`u²`): at the mast the cloth is
+      // made fast and has nowhere to go; at the tip it whips.
       const u = (index % (columns + 1)) / columns;
       const swing =
         ripple * u * u * Math.sin(u * Math.PI * 2 * RIPPLE_WAVES * ENSIGN_FRAME.length - phase);
 
-      // O empurrão do vento é ao longo do vento; a onda é **perpendicular** a
-      // ele, no plano horizontal. Girar 90° em Y é trocar as componentes e um
-      // sinal, sem nenhuma matriz.
+      // The wind's push is along the wind; the wave is **perpendicular** to it, in the
+      // horizontal plane. Turning 90° in Y is swapping the components and one sign, with
+      // no matrix at all.
       const ax = pressure * windX + swing * -windZ;
       const az = pressure * windZ + swing * windX;
 
@@ -228,7 +227,7 @@ export class EnsignSim {
     this.geometry.getAttribute('normal').needsUpdate = true;
   }
 
-  /** Devolve o pano à forma de repouso — usado ao reiniciar uma partida. */
+  /** Returns the cloth to its rest shape — used when restarting a match. */
   reset(): void {
     const positions = this.positions;
     const previous = this.previous;

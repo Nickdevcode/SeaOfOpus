@@ -1,50 +1,49 @@
 /**
- * A tábua na mão do jogador, enquanto ele prega o rombo.
+ * The plank in the player's hands, while they nail the breach shut.
  *
- * **Ela não é filha de um osso.** O caminho óbvio seria `handBone.add(plank)`
- * com um offset fixo, e ele funciona — desde que o offset esteja escrito no
- * mesmo referencial em que o osso vive depois de atravessar a conversão Z-up →
- * Y-up do exportador glTF e a convenção de eixo de osso do Blender. São duas
- * passagens em que um sinal trocado não dá erro nenhum: dá uma tábua flutuando
- * ao lado da mão, e a única forma de descobrir é olhando.
+ * **It is not a child of a bone.** The obvious path would be `handBone.add(plank)` with a
+ * fixed offset, and it works — provided the offset is written in the same frame the bone
+ * lives in after going through the glTF exporter's Z-up → Y-up conversion and Blender's
+ * bone-axis convention. Those are two passes where a flipped sign produces no error at
+ * all: it produces a plank floating beside the hand, and the only way to find out is by
+ * looking.
  *
- * Então a peça é montada **a partir das duas mãos**, todo quadro:
+ * So the piece is assembled **from the two hands**, every frame:
  *
- * - o eixo do comprimento é a reta que liga um punho ao outro;
- * - o giro em torno dele sai da orientação da mão direita;
- * - o centro é o ponto médio, deslocado pelo que o clipe mediu.
+ * - the length axis is the line joining one wrist to the other;
+ * - the roll around it comes out of the right hand's orientation;
+ * - the center is the midpoint, displaced by whatever the clip measured.
  *
- * Os números de `SOCKET_*` foram medidos no Blender, com a action `Carry`
- * tocando, projetando o referencial da tábua nessa mesma base — e eles se
- * mexem menos de 3 mm ao longo do ciclo, que é o que prova que a base é rígida
- * em relação à peça. Se alguém reconstruir o clipe com a pose mudada, é só
- * remedir: `anim_carry.socket()` cospe estes seis números.
+ * The `SOCKET_*` numbers were measured in Blender, with the `Carry` action playing,
+ * projecting the plank's frame onto that same basis — and they move less than 3 mm across
+ * the cycle, which is what proves the basis is rigid relative to the piece. If somebody
+ * rebuilds the clip with a changed pose, just measure again: `anim_carry.socket()` spits
+ * out these six numbers.
  *
- * O ganho de fazer assim é que a tábua **não pode** descolar das mãos. Ela não
- * é posicionada perto de onde as mãos deveriam estar; ela é posicionada onde as
- * mãos estão.
+ * The gain from doing it this way is that the plank **cannot** come off the hands. It is
+ * not positioned near where the hands should be; it is positioned where the hands are.
  */
 
 import * as THREE from 'three';
 import { PLANK_LENGTH, PLANK_THICKNESS, PLANK_WIDTH, loadPlank } from '../ship/PlankAsset';
 
 /**
- * Onde o centro da tábua fica em relação ao ponto médio dos dois punhos, na
- * base `(u, e2, e3)` descrita no topo. Em metros.
+ * Where the plank's center sits relative to the midpoint between the two wrists, in the
+ * `(u, e2, e3)` basis described at the top. In meters.
  *
- * O terceiro número é o que carrega o sentido: 13 cm **para fora** da linha dos
- * punhos, que é meia largura de tábua mais a palma. Os outros dois são ruído de
- * medição e ficam aqui porque copiá-los custa nada e arredondá-los a zero seria
- * escolher um número em vez de medir.
+ * The third number is the one that carries the meaning: 13 cm **outboard** of the wrists'
+ * line, which is half a plank's width plus the palm. The other two are measurement noise
+ * and are here because copying them costs nothing and rounding them to zero would be
+ * choosing a number instead of measuring one.
  */
 const SOCKET_OFFSET = { along: 0.0013, up: 0.0025, out: -0.1313 } as const;
 
-/** Eixo do comprimento da tábua na mesma base. Quase o eixo entre os punhos. */
+/** The plank's length axis in the same basis. Almost the axis between the wrists. */
 const SOCKET_LENGTH = new THREE.Vector3(0.9956, -0.0207, -0.0918);
-/** Eixo da largura. É ele que decide de que lado a face grande olha. */
+/** The width axis. It is what decides which way the wide face looks. */
 const SOCKET_WIDTH = new THREE.Vector3(-0.0912, -0.4513, -0.8877);
 
-/** Direção do osso no repouso do Blender: os ossos apontam no +Y local. */
+/** The bone's direction at Blender's rest pose: bones point along local +Y. */
 const BONE_AXIS = new THREE.Vector3(0, 1, 0);
 
 const _left = new THREE.Vector3();
@@ -69,21 +68,21 @@ export class CarriedPlank {
   private disposed = false;
 
   /**
-   * Acha os dois ossos e pendura a tábua no nó do avatar.
+   * Finds the two bones and hangs the plank off the avatar's node.
    *
-   * Debaixo do avatar, e não da cena, por uma razão só: é ele que some quando o
-   * jogador assume o canhão e quando a câmera está dentro da cabeça. Pendurada
-   * na cena, a tábua continuaria visível sozinha, flutuando no convés — e o
-   * custo de acompanhar o pai é uma inversão de matriz por quadro.
+   * Under the avatar, and not under the scene, for one reason only: it is what disappears
+   * when the player takes the cannon and when the camera is inside the head. Hung off the
+   * scene, the plank would go on being visible on its own, floating on the deck — and the
+   * cost of following the parent is one matrix inversion per frame.
    *
-   * @returns `false` quando os ossos não estão no GLB — e aí o reparo continua
-   *   funcionando, sem madeira à vista.
+   * @returns `false` when the bones are not in the GLB — and then the repair goes on
+   *   working, with no wood in sight.
    */
   attach(skeleton: THREE.Skeleton, parent: THREE.Object3D): boolean {
     this.handLeft = findBone(skeleton, 'hand.L');
     this.handRight = findBone(skeleton, 'hand.R');
     if (!this.handLeft || !this.handRight) {
-      console.warn('[plank] ossos das mãos não encontrados; o reparo fica sem tábua');
+      console.warn('[plank] hand bones not found; the repair goes without a plank');
       return false;
     }
 
@@ -93,12 +92,11 @@ export class CarriedPlank {
       mesh.name = 'carried-plank';
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      // A matriz é escrita à mão a cada quadro; deixar o Three recompô-la a
-      // partir de posição e quaternion seria decompor o que acabou de ser
-      // composto.
+      // The matrix is written by hand every frame; letting Three recompose it from
+      // position and quaternion would be decomposing what has just been composed.
       mesh.matrixAutoUpdate = false;
-      // A peça vive colada às mãos, que o avatar já tira do culling por sair da
-      // caixa de repouso do esqueleto.
+      // The piece lives glued to the hands, which the avatar already takes out of
+      // culling by leaving the skeleton's rest box.
       mesh.frustumCulled = false;
       mesh.visible = false;
       parent.add(mesh);
@@ -110,13 +108,13 @@ export class CarriedPlank {
   }
 
   /**
-   * Põe a tábua entre as mãos, ou a esconde.
+   * Puts the plank between the hands, or hides it.
    *
-   * Chamar **depois** do `mixer.update` e de qualquer escrita direta em osso: o
-   * que se lê aqui são as matrizes de mundo dos punhos, e elas só valem depois
-   * que a pose do quadro terminou de ser montada.
+   * Call it **after** `mixer.update` and after any direct write to a bone: what is read
+   * here are the wrists' world matrices, and they are only valid once the frame's pose has
+   * finished being assembled.
    *
-   * @param visible se o jogador está com a tábua nas mãos neste quadro.
+   * @param visible whether the player has the plank in hand this frame.
    */
   update(visible: boolean): void {
     const mesh = this.mesh;
@@ -125,9 +123,10 @@ export class CarriedPlank {
     mesh.visible = visible;
     if (!visible) return;
 
-    // Sobe a cadeia até a raiz sem descer nos filhos: sem isto o que se lê é a
-    // pose do quadro **anterior**, e a tábua anda um quadro atrás das mãos —
-    // que é justamente onde ela seria notada, no gesto de erguer a peça.
+    // Walk up the chain to the root without descending into the children: without this
+    // what is read is the **previous** frame's pose, and the plank runs one frame behind
+    // the hands — which is exactly where it would be noticed, in the gesture of raising
+    // the piece.
     this.handLeft.updateWorldMatrix(true, false);
     this.handRight.updateWorldMatrix(true, false);
 
@@ -139,9 +138,9 @@ export class CarriedPlank {
     if (_u.lengthSq() < 1e-8) return;
     _u.normalize();
 
-    // O giro em torno do eixo dos punhos sai da mão direita. Sem um segundo
-    // vetor, a base fica com um grau de liberdade solto e a tábua rola em torno
-    // das mãos a cada quadro.
+    // The roll around the wrists' axis comes out of the right hand. Without a second
+    // vector, the basis is left with one loose degree of freedom and the plank rolls
+    // around the hands every frame.
     _boneDir.copy(BONE_AXIS).transformDirection(this.handRight.matrixWorld);
     _e2.copy(_boneDir).addScaledVector(_u, -_boneDir.dot(_u));
     if (_e2.lengthSq() < 1e-8) return;
@@ -156,18 +155,18 @@ export class CarriedPlank {
 
     combine(_length, SOCKET_LENGTH);
     combine(_width, SOCKET_WIDTH);
-    // A espessura fecha a base pela regra da mão direita. O sinal negativo é o
-    // que casa com o arquivo: a tábua sai do Blender com o comprimento em X, a
-    // **espessura** em Y e a largura em Z, e nessa ordem os três formam uma base
-    // canhota se a normal for tomada direto do produto vetorial.
+    // The thickness closes the basis by the right-hand rule. The negative sign is what
+    // matches the file: the plank comes out of Blender with the length in X, the
+    // **thickness** in Y and the width in Z, and in that order the three form a
+    // left-handed basis if the normal is taken straight from the cross product.
     _thickness.crossVectors(_length, _width).negate().normalize();
     _width.crossVectors(_thickness, _length).normalize();
 
     _basis.makeBasis(_length, _thickness, _width);
     _basis.setPosition(_center);
 
-    // A base foi montada em coordenadas de mundo, e a malha é filha do avatar:
-    // desfazer a transformação do pai é o que põe as duas no mesmo referencial.
+    // The basis was assembled in world coordinates, and the mesh is a child of the
+    // avatar: undoing the parent's transform is what puts the two in the same frame.
     const parent = this.parent;
     if (parent) {
       parent.updateWorldMatrix(true, false);
@@ -184,36 +183,35 @@ export class CarriedPlank {
     this.handLeft = null;
     this.handRight = null;
     if (!this.mesh) return;
-    // Geometria e material são do módulo `PlankAsset` e continuam servindo as
-    // tábuas pregadas nos dois cascos: aqui só se solta a instância.
+    // The geometry and the material belong to the `PlankAsset` module and go on serving
+    // the planks nailed to both hulls: here only the instance is released.
     this.mesh.removeFromParent();
     this.mesh = null;
   }
 }
 
 /**
- * Acha um osso pelo nome do Blender, com ou sem o ponto.
+ * Finds a bone by its Blender name, with or without the dot.
  *
- * **O `GLTFLoader` sanitiza os nomes.** O rig chama os ossos lateralizados de
- * `hand.L` e `hand.R`, e é assim que eles saem do exportador; o carregador do
- * Three troca o ponto por nada e o que chega na cena é `handL`. O motivo é o
- * `PropertyBinding`, que usa ponto como separador de caminho — um osso chamado
- * `hand.L` seria lido como a propriedade `L` do objeto `hand`.
+ * **`GLTFLoader` sanitizes the names.** The rig calls the sided bones `hand.L` and
+ * `hand.R`, and that is how they come out of the exporter; Three's loader replaces the
+ * dot with nothing and what arrives in the scene is `handL`. The reason is
+ * `PropertyBinding`, which uses the dot as a path separator — a bone named `hand.L` would
+ * be read as the `L` property of the `hand` object.
  *
- * Isto não aparece em nenhum outro lugar do projeto porque os seis ossos que o
- * `FirstPersonBody` procura (`root`, `pelvis`, `spine_0N`) são justamente os que
- * não têm lado. O sintoma aqui foi um aviso no console e um reparo sem madeira,
- * com todo o resto funcionando.
+ * This does not show up anywhere else in the project because the six bones
+ * `FirstPersonBody` looks for (`root`, `pelvis`, `spine_0N`) are precisely the ones with
+ * no side. The symptom here was a warning in the console and a repair with no wood, with
+ * everything else working.
  *
- * Procurar as duas formas custa uma varredura e sobrevive a uma troca de
- * carregador nos dois sentidos.
+ * Looking for both forms costs one scan and survives a loader swap in either direction.
  */
 function findBone(skeleton: THREE.Skeleton, name: string): THREE.Bone | null {
   const plain = name.replace(/\./g, '');
   return skeleton.bones.find((bone) => bone.name === name || bone.name === plain) ?? null;
 }
 
-/** Reconstrói um eixo medido na base `(u, e2, e3)` deste quadro. */
+/** Rebuilds an axis measured in this frame's `(u, e2, e3)` basis. */
 function combine(out: THREE.Vector3, coefficients: THREE.Vector3): void {
   out
     .copy(_u)
@@ -223,7 +221,7 @@ function combine(out: THREE.Vector3, coefficients: THREE.Vector3): void {
     .normalize();
 }
 
-/** As medidas da peça, reexportadas para quem desenhar a mira ou o prompt. */
+/** The piece's measurements, re-exported for whoever draws the aim or the prompt. */
 export const PLANK_SIZE = {
   length: PLANK_LENGTH,
   width: PLANK_WIDTH,
