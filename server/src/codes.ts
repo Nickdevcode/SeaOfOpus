@@ -1,25 +1,25 @@
 /**
- * Códigos de sala.
+ * Room codes.
  *
- * Quatro casas de um alfabeto de 32 dão 1.048.576 salas. Não é muito, e não
- * precisa ser: o código só tem de ser único **entre as salas abertas agora**, que
- * numa fila de projeto pessoal são unidades. O que ele precisa mesmo é caber num
- * ditado por voz — daí o alfabeto sem `I`, `O`, `0` e `1`.
+ * Four slots from a 32-character alphabet give 1,048,576 rooms. That is not many, and it
+ * does not need to be: the code only has to be unique **among the rooms open right now**,
+ * which on a personal project's queue is a handful. What it really has to do is fit into
+ * something dictated out loud — hence the alphabet with no `I`, `O`, `0` or `1`.
  */
 
 import { CODE_ALPHABET, CODE_LENGTH } from '../../shared/protocol';
 
 /**
- * Sorteia um código.
+ * Draws a code.
  *
- * `crypto.getRandomValues` em vez de `Math.random` por um motivo prático, não de
- * segurança: um código de sala é adivinhável por natureza (são só quatro casas),
- * mas um gerador previsível deixaria qualquer um enumerar as salas abertas no
- * momento em vez de ter de tentar um milhão de vezes.
+ * `crypto.getRandomValues` instead of `Math.random` for a practical reason, not a
+ * security one: a room code is guessable by nature (it is only four slots), but a
+ * predictable generator would let anyone enumerate the rooms open at the moment instead
+ * of having to try a million times.
  *
- * A rejeição de amostras acima de `limit` tira o viés do módulo: 256 não é
- * múltiplo de 32... na verdade é, mas a guarda fica porque o alfabeto pode mudar
- * de tamanho, e nesse dia o viés apareceria em silêncio.
+ * Rejecting samples above `limit` removes the modulo bias: 256 is not a multiple of
+ * 32... actually it is, but the guard stays because the alphabet can change size, and on
+ * that day the bias would show up in silence.
  */
 export function generateCode(): string {
   const size = CODE_ALPHABET.length;

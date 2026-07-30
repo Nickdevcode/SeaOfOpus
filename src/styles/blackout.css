@@ -1,27 +1,26 @@
 /**
- * O apagão do resgate.
+ * The rescue's blackout.
  *
  * Uma folha preta sobre tudo, e nada mais — nem texto, nem giro, nem "carregando".
- * É a elipse mais antiga que existe: corta-se para o preto e volta-se com o
- * personagem noutro lugar, e ninguém pergunta como ele chegou lá. Escrever
- * "Sendo resgatado…" seria explicar uma coisa que o corte já contou.
+ * It is the oldest ellipsis there is: you cut to black and come back with the character
+ * somewhere else, and nobody asks how they got there. Writing "Being rescued…" would be
+ * explaining something the cut has already told.
  *
- * A opacidade é escrita pelo JS quadro a quadro (ver `Blackout`), e não por
- * `@keyframes`: o apagão precisa durar o que dura, e o `prefers-reduced-motion`
- * do `base.css` reduz toda animação a 0,01 ms — o que aqui não seria "menos
- * movimento", seria o teleporte acontecendo à vista de todos. Um valor por
- * quadro, e só enquanto ele está no ar.
+ * The opacity is written by JS frame by frame (see `Blackout`), and not by `@keyframes`:
+ * the blackout has to last as long as it lasts, and `base.css`'s `prefers-reduced-motion`
+ * cuts every animation to 0.01 ms — which here would not be "less motion", it would be
+ * the teleport happening in plain sight. One value per frame, and only while it is up.
  */
 
 .blackout {
   position: absolute;
   inset: 0;
   background: #000;
-  /* Nunca rouba clique: o canvas precisa deles para o ponteiro travado. */
+  /* It never steals a click: the canvas needs them for the pointer lock. */
   pointer-events: none;
   /* Acima de qualquer HUD; abaixo de nada, porque nada mais existe durante ele. */
   z-index: 40;
-  /* Não é um botão nem um aviso — o leitor de tela não tem o que anunciar aqui. */
+  /* It is not a button or a notice — the screen reader has nothing to announce here. */
   opacity: 0;
 }
 

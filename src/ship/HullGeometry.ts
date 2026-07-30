@@ -711,7 +711,7 @@ function buildQuarterdeck(builder: GeometryBuilder, ceiling: GeometryBuilder): v
     const x = side * (camberHalf - 0.62);
     for (let step = 0; step < steps; step++) {
       const top = DECK_Y + rise * (step + 1);
-      // O degrau mais alto encosta na parede; os de baixo avançam para a proa.
+      // The topmost step meets the wall; the lower ones reach forward.
       const centerZ = z - tread * (steps - step - 0.5);
       builder.addBox(
         { x, y: (DECK_Y + top) * 0.5, z: centerZ },
@@ -723,12 +723,12 @@ function buildQuarterdeck(builder: GeometryBuilder, ceiling: GeometryBuilder): v
 }
 
 /**
- * A espessura do convés vista de dentro do buraco da escotilha.
+ * The deck's thickness seen from inside the hatchway.
  *
- * A braçola cobre os 16 cm de cima; daqui para baixo é este colarinho que fecha
- * o corte entre a face de cima e a de baixo do convés. São quatro blocos
- * encaixados na própria espessura do convés, meio centímetro para fora do vão,
- * para não disputarem profundidade com a face interna da braçola.
+ * The coaming covers the top 16 cm; from there down it is this collar that closes the cut
+ * between the deck's top face and its bottom face. It is four blocks fitted into the
+ * deck's own thickness, half a centimeter outside the opening, so they do not fight the
+ * coaming's inner face for depth.
  */
 function buildHatchRim(builder: GeometryBuilder): void {
   const zFore = tToZ(STATIONS.hatch + HATCH_HALF_T);
@@ -737,8 +737,8 @@ function buildHatchRim(builder: GeometryBuilder): void {
   const centerZ = (zAft + zFore) * 0.5;
   const inner = HATCH_HALF_WIDTH + 0.005;
   const thickness = 0.06;
-  // Entra na braçola por cima e passa do teto por baixo: as duas sobras somem
-  // dentro de madeira que já existe, e nenhuma junta fica no fio.
+  // It goes into the coaming from above and past the ceiling from below: both overhangs
+  // disappear inside wood that already exists, and no joint is left on an edge.
   const top = DECK_Y + 0.1;
   const bottom = DECK_Y - DECK_THICKNESS - 0.02;
   const center = { y: (top + bottom) * 0.5 };
@@ -759,13 +759,13 @@ function buildHatchRim(builder: GeometryBuilder): void {
 }
 
 /**
- * Braçola da escotilha: o rebordo que impede a água do convés de cair no porão.
- * Além de real, ela esconde a espessura zero do corte no convés.
+ * The hatch coaming: the rim that keeps the deck's water from falling into the hold.
+ * Besides being real, it hides the zero thickness of the cut in the deck.
  *
- * **Aberta para a ré**, e isso não é economia de geometria: é por ali que a
- * escada sobe, e uma braçola fechada dos quatro lados seria um degrau de 16 cm
- * atravessado na boca do lance — exatamente onde o pé de quem sai do porão
- * aterrissa. Navio de verdade faz igual: o lado por onde se entra é recortado.
+ * **Open aft**, and that is not saving geometry: it is where the stairs come up, and a
+ * coaming closed on all four sides would be a 16 cm step laid across the mouth of the
+ * flight — exactly where the foot of whoever is coming out of the hold lands. A real ship
+ * does the same: the side you come in through is cut away.
  */
 function buildHatchCoaming(builder: GeometryBuilder): void {
   const zFore = tToZ(STATIONS.hatch + HATCH_HALF_T);
@@ -784,7 +784,7 @@ function buildHatchCoaming(builder: GeometryBuilder): void {
     );
   }
 
-  // Só o testeiro de vante, no lado oposto ao da escada.
+  // Only the forward head, on the side opposite the stairs.
   builder.addBox(
     { x: 0, y, z: zFore - thickness * 0.5 },
     { x: (HATCH_HALF_WIDTH + thickness) * 2, y: height, z: thickness },
@@ -793,11 +793,11 @@ function buildHatchCoaming(builder: GeometryBuilder): void {
 }
 
 /**
- * Quilha, roda de proa e cadaste — o esqueleto que aparece por fora.
+ * Keel, stem and sternpost — the skeleton that shows from outside.
  *
- * São varreduras de seção retangular seguindo a linha do fundo e a da proa. Além
- * de darem o perfil certo ao navio de longe, cobrem a costura onde as duas
- * metades do costado se encontram.
+ * They are rectangular-section sweeps following the bottom's line and the bow's. Besides
+ * giving the ship the right profile from a distance, they cover the seam where the hull's
+ * two halves meet.
  */
 function buildBackbone(builder: GeometryBuilder): void {
   const halfWidth = 0.13;
@@ -833,13 +833,13 @@ function buildBackbone(builder: GeometryBuilder): void {
     previous = row;
   }
 
-  // Roda de proa: sobe da quilha até a borda, seguindo o contorno frontal do
-  // casco. É o que dá à Chalupa aquele perfil de proa reta e alta.
+  // Stem: it rises from the keel to the rail, following the hull's front outline. It is
+  // what gives the sloop that straight, tall bow profile.
   const stemSteps = 20;
   const stemRing = (h: number): Vertex[] => {
     const section = sampleSection(0.985, sectionScratchB);
     const y = section.keelY + (section.sheerY - section.keelY) * h;
-    // A proa avança conforme sobe: a roda se inclina para a frente.
+    // The bow reaches out as it rises: the stem rakes forward.
     const z = tToZ(0.985) - 0.06 - h * 0.34;
     const row: Vertex[] = [];
     for (let i = 0; i <= profile.length; i++) {
@@ -855,7 +855,7 @@ function buildBackbone(builder: GeometryBuilder): void {
     previous = row;
   }
 
-  // Cadaste: a peça vertical da popa, onde o leme vai pendurado.
+  // Sternpost: the vertical piece at the stern, which the rudder hangs on.
   const sternSection = sampleSection(0.01, sectionScratchB);
   builder.addBox(
     {
@@ -869,32 +869,32 @@ function buildBackbone(builder: GeometryBuilder): void {
 }
 
 /**
- * Cintados: as duas faixas horizontais que correm o costado.
+ * Wales: the two horizontal bands running along the side.
  *
- * Num navio real são as tábuas mais grossas, que absorvem o encosto no cais. No
- * jogo elas fazem outro trabalho igualmente importante: quebram a superfície
- * lisa do costado e dão à silhueta a linha de tosadura que se lê de longe, que é
- * o que faz a Chalupa parecer a Chalupa mesmo a duzentos metros.
+ * On a real ship they are the thickest planks, which take the shock of coming alongside a
+ * quay. In the game they do another, equally important job: they break the side's smooth
+ * surface and give the silhouette the sheer line you read from a distance, which is what
+ * makes the sloop look like the sloop even at two hundred meters.
  */
 /**
- * Os dois cintados se interrompem no vão do portaló, e não é enfeite: é o que
+ * Both wales stop at the gangway's opening, and that is not decoration: it is what
  * deixa a escada de embarque existir.
  *
- * O de baixo (y = 1,02) avança 5,5 cm da madeira e passa **por trás** do plano
- * dos degraus — na estação do montante de vante ele chega a 1,84 m contra os
- * 1,85 m do montante, ou seja, um centímetro de folga para uma peça de 4 cm de
- * raio. Aumentar o recuo da escada custaria os 5,5 cm inteiros em distância do
- * costado (ver `BOARDING_LADDER_CLEARANCE`); interromper o cintado custa uma
- * falha de 84 cm que um portaló de verdade tem de qualquer forma. É o mesmo
- * recurso da braçola da escotilha, aberta a ré para a escada do porão subir.
+ * The lower one (y = 1.02) stands 5.5 cm proud of the wood and passes **behind** the
+ * rungs' plane — at the forward stile's station it reaches 1.84 m against the stile's
+ * 1.85 m, that is, one centimeter of clearance for a piece with a 4 cm radius. Setting
+ * the ladder further out would cost the whole 5.5 cm in distance from the side (see
+ * `BOARDING_LADDER_CLEARANCE`); interrupting the wale costs an 84 cm gap a real gangway
+ * has anyway. It is the same device as the hatch coaming, open aft so the hold's stairs
+ * can come up.
  *
- * O de cima (y = 1,92) cai dentro do vão pelo mesmo motivo geométrico e por um
- * mais óbvio: com o costado recortado ali, ele ficaria atravessado no meio da
- * porta, pendurado em nada.
+ * The upper one (y = 1.92) falls inside the opening for the same geometric reason and for
+ * a more obvious one: with the side cut away there, it would lie across the middle of the
+ * doorway, hanging from nothing.
  *
- * As pontas do corte são **tampadas**. O cintado é uma varredura de seção
- * fechada, ou seja, um tubo: cortá-lo sem tampa deixaria dois furos por onde se
- * vê o avesso da peça — a mesma armadilha da face única, agora numa peça sólida.
+ * The cut's ends are **capped**. The wale is a closed-section sweep, that is, a tube:
+ * cutting it without a cap would leave two holes you can see the inside of the piece
+ * through — the same trap as the single face, now on a solid piece.
  */
 function buildWales(builder: GeometryBuilder): void {
   const steps = 56;
@@ -935,10 +935,10 @@ function buildWales(builder: GeometryBuilder): void {
         builder.addStrip(ringAt(tA), ringAt(tB), side > 0);
       }
 
-      // As tampas das duas pontas do corte. A ordem direta dos quatro cantos dá
-      // a normal para +Z a boreste e para −Z a bombordo (o percurso do perfil se
-      // espelha junto com o casco), e cada ponta tem de olhar para fora do
-      // pedaço que sobrou — daí a comparação entre o bordo e qual das pontas é.
+      // The caps on the cut's two ends. The direct order of the four corners gives a
+      // normal toward +Z to starboard and toward −Z to port (the profile's traversal
+      // mirrors along with the hull), and each end has to face away from the piece that
+      // is left — hence the comparison between the side and which end it is.
       for (const isFore of [false, true]) {
         const corners = ringAt(isFore ? GANGWAY_T_TO : GANGWAY_T_FROM);
         const [a, b, c, d] = corners as [Vertex, Vertex, Vertex, Vertex];

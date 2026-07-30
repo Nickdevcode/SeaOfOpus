@@ -838,9 +838,9 @@
   grid-column: 1 / -1;
 }
 
-/* Range com trilho gravado no papel e cursor de latão. `appearance: none` é
-   obrigatório: sem ele o Chrome ignora o fundo e mantém o azul do sistema, que
-   destrói a paleta. */
+/* A range with a track engraved into the paper and a brass thumb. `appearance: none` is
+   mandatory: without it Chrome ignores the background and keeps the system blue, which
+   destroys the palette. */
 .field input[type='range'] {
   appearance: none;
   width: 100%;
@@ -869,16 +869,16 @@
 }
 
 /**
- * Grupo de opções mutuamente exclusivas (preset gráfico, tempo).
+ * A group of mutually exclusive options (graphics preset, weather).
  *
- * `flex-wrap` não é preciosismo: a barra de tempo tem **cinco** opções contra as
- * quatro do preset gráfico, e numa coluna de 19 rem os botões não cabiam. Sem
- * quebrar linha, o flex estourava a caixa — "Storm" saía para fora da moldura,
- * com fundo próprio, encostado no campo vizinho. Era o defeito mais visível da
- * tela de ajustes, e ele aparece em qualquer largura de janela.
+ * `flex-wrap` is not fussiness: the weather bar has **five** options against the graphics
+ * preset's four, and in a 19 rem column the buttons did not fit. Without wrapping, the
+ * flex overflowed the box — "Storm" came out of the frame, with a background of its own,
+ * up against the neighboring field. It was the most visible defect on the settings
+ * screen, and it shows at any window width.
  *
- * A quebra resolve por construção, e para qualquer número de opções que venha a
- * existir depois: o grupo vira duas fileiras dentro da mesma moldura.
+ * Wrapping solves it by construction, and for any number of options that may exist later:
+ * the group becomes two rows inside the same frame.
  */
 .segmented {
   display: flex;
@@ -890,8 +890,8 @@
 }
 
 .segmented__option {
-  /* `1 1 auto` com base zero na largura: os botões repartem a linha por igual e
-     encolhem até o texto, em vez de exigir a largura do rótulo mais longo. */
+  /* `1 1 auto` with a zero basis on the width: the buttons share the row evenly and
+     shrink down to the text, instead of demanding the longest label's width. */
   flex: 1 1 auto;
   min-width: 0;
   padding: var(--espaco-2) var(--espaco-2);
@@ -916,7 +916,7 @@
   text-shadow: 0 1px 0 rgba(255, 246, 214, 0.4);
 }
 
-/* Interruptor de duas posições (inverter Y). */
+/* A two-position toggle (invert Y). */
 .toggle {
   width: 3.2rem;
   height: 1.5rem;
@@ -946,14 +946,14 @@
   transform: translateX(1.65rem);
 }
 
-/* --- tabela de controles ----------------------------------------------------- */
+/* --- controls table ---------------------------------------------------------- */
 
-/* Colunas de texto, e **não** grid.
-   A diferença é a ordem de preenchimento, e a captura mostrou que ela importa: um
-   grid flui por linha, e com três colunas o "andar para frente / esquerda / trás"
-   caía um em cada coluna, separando o WASD em três lugares da tela. Multi-coluna
-   flui para baixo, então cada coluna preserva a ordem da lista e os comandos
-   relacionados ficam vizinhos — que é a única razão de a lista ter uma ordem. */
+/* Text columns, and **not** a grid.
+   The difference is the fill order, and the screenshot showed that it matters: a grid
+   flows by row, and with three columns "walk forward / left / back" landed one per
+   column, splitting WASD across three places on the screen. Multi-column flows downward,
+   so each column preserves the list's order and related commands stay neighbors — which
+   is the only reason the list has an order at all. */
 .controls-grid {
   column-count: 3;
   column-gap: var(--espaco-8);
@@ -973,8 +973,8 @@
 }
 
 .controls-row {
-  /* Sem isto uma linha pode ser cortada no pé da coluna, com o rótulo numa e o
-     glifo na seguinte. */
+  /* Without this a row can be cut at the foot of a column, with the label in one and
+     the glyph in the next. */
   break-inside: avoid;
   display: grid;
   grid-template-columns: 1fr auto;
@@ -993,9 +993,9 @@
 }
 
 /**
- * O glifo do aparelho que **não** está em uso desbota em vez de sumir: some é
- * perda de informação, e o jogador de teclado ainda quer saber o botão do
- * controle quando pega ele.
+ * The glyph for the device **not** in use dims instead of disappearing: hiding it is a
+ * loss of information, and the keyboard player still wants to know the controller's
+ * button for when they pick it up.
  */
 .glyph {
   display: inline-flex;
@@ -1060,9 +1060,9 @@
   width: 100%;
 }
 
-/* Cada número é uma **entrada de diário de bordo**: filete de tinta em cima, o
-   valor grande, o rótulo em versalete embaixo. Sem caixa em volta — a folha já
-   é a caixa, e uma segunda moldura aqui viraria papel dentro de papel. */
+/* Each number is a **logbook entry**: a rule of ink on top, the large value, the small-
+   caps label below. With no box around it — the sheet is already the box, and a second
+   frame here would become paper inside paper. */
 .tally__item {
   padding: var(--espaco-3) var(--espaco-2);
   text-align: center;
@@ -1085,7 +1085,7 @@
   color: var(--ink-soft);
 }
 
-/* --- rodapé ------------------------------------------------------------------ */
+/* --- footer ------------------------------------------------------------------ */
 
 .hint-line {
   display: flex;
@@ -1103,10 +1103,10 @@
   gap: var(--espaco-2);
 }
 
-/* Uma dica sem botão no aparelho em uso é escondida pelo `Menu` (ver `syncGlyphs`).
-   A regra é obrigatória: o `display: flex` acima é de folha de autor e vence o
-   `display: none` que o navegador aplica a `[hidden]`, então sem esta linha o
-   elemento continuaria na tela — que é o mesmo motivo de `.overlay[hidden]`. */
+/* A hint with no button on the device in use is hidden by `Menu` (see `syncGlyphs`).
+   The rule is mandatory: the `display: flex` above comes from an author sheet and beats
+   the `display: none` the browser applies to `[hidden]`, so without this line the element
+   would stay on screen — which is the same reason as `.overlay[hidden]`. */
 .hint-line__item[hidden] {
   display: none;
 }

@@ -1,9 +1,9 @@
 /**
- * Renderer e composição de pós-processamento.
+ * Renderer and post-processing composition.
  *
- * Usa WebGL2 (não WebGPU): o ecossistema de pós-processamento é maduro e o
- * driver AMD é estável nesse caminho. Tone mapping ACES Filmic é o que dá o
- * contraste "filme" sem estourar o sol e o specular do mar.
+ * It uses WebGL2 (not WebGPU): the post-processing ecosystem is mature and the AMD driver
+ * is stable on that path. ACES Filmic tone mapping is what gives the "film" contrast
+ * without blowing out the sun and the sea's specular.
  */
 
 import * as THREE from 'three';
@@ -24,9 +24,9 @@ import {
 import { settings, type QualitySettings } from './Settings';
 
 /**
- * Teto de pixels desenhados por quadro, antes do `renderScale` do preset.
+ * Ceiling on pixels drawn per frame, before the preset's `renderScale`.
  *
- * 2560×1440 ≈ 3,7 milhões. Ver `pixelRatioFor` para o porquê de existir um teto.
+ * 2560×1440 ≈ 3.7 million. See `pixelRatioFor` for why a ceiling exists at all.
  */
 const MAX_DRAWN_PIXELS = 2560 * 1440;
 
@@ -41,7 +41,7 @@ export class Renderer {
   private currentScene: THREE.Scene | null = null;
   private currentCamera: THREE.PerspectiveCamera | null = null;
 
-  /** Alvo do god rays: a malha do sol. Precisa ser setado antes de compor. */
+  /** The god rays' target: the sun's mesh. It has to be set before composing. */
   private sunMesh: THREE.Mesh | null = null;
 
   constructor() {
@@ -50,8 +50,8 @@ export class Renderer {
 
     this.webgl = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      // O antialias do contexto é dispensado: o SMAA do composer cuida disso
-      // e ligar os dois só desperdiça banda de memória.
+      // The context's antialias is skipped: the composer's SMAA takes care of that, and
+      // switching both on only wastes memory bandwidth.
       antialias: false,
       powerPreference: 'high-performance',
       stencil: false,
@@ -59,13 +59,13 @@ export class Renderer {
     });
 
     this.webgl.outputColorSpace = THREE.SRGBColorSpace;
-    // O tone mapping fica no composer (efeito ACES), então o renderer entrega
-    // cor linear crua para o pós-processamento.
+    // The tone mapping lives in the composer (ACES effect), so the renderer hands raw
+    // linear color to the post-processing.
     this.webgl.toneMapping = THREE.NoToneMapping;
     this.webgl.shadowMap.enabled = true;
-    // `PCFSoftShadowMap` está depreciado desde a r18x e o próprio three cai para
-    // `PCFShadowMap` sozinho, cuspindo um aviso a cada carga. Pedir direto o que
-    // ele vai usar de qualquer forma deixa o console limpo sem mudar um pixel.
+    // `PCFSoftShadowMap` has been deprecated since r18x and three itself falls back to
+    // `PCFShadowMap` on its own, spitting a warning on every load. Asking directly for
+    // what it is going to use anyway keeps the console clean without changing a pixel.
     this.webgl.shadowMap.type = THREE.PCFShadowMap;
     this.webgl.setClearColor(0x000000, 1);
 
@@ -73,8 +73,8 @@ export class Renderer {
   }
 
   /**
-   * Monta a cadeia de pós-processamento para uma cena/câmera.
-   * Chamado ao entrar no menu e ao entrar na partida.
+   * Builds the post-processing chain for a scene/camera.
+   * Called on entering the menu and on entering the match.
    */
   compose(scene: THREE.Scene, camera: THREE.PerspectiveCamera, sunMesh: THREE.Mesh | null): void {
     this.currentScene = scene;
@@ -84,7 +84,8 @@ export class Renderer {
     this.disposeComposer();
 
     const quality = settings.quality;
-    // HalfFloat evita banding no céu e no specular sem o custo de float cheio.
+    // HalfFloat avoids banding in the sky and in the specular without full float's
+    // cost.
     this.composer = new EffectComposer(this.webgl, {
       frameBufferType: THREE.HalfFloatType,
       multisampling: 0,
@@ -112,8 +113,8 @@ export class Renderer {
       effects.push(
         new BloomEffect({
           intensity: 0.75,
-          // Só o que passa de 1.0 em linear floresce: sol, lanternas e o
-          // clarão do canhão. O mar não vira sopa de luz.
+          // Only what goes past 1.0 in linear blooms: sun, lanterns and the cannon's
+          // flash. The sea does not become soup of light.
           luminanceThreshold: 0.92,
           luminanceSmoothing: 0.25,
           mipmapBlur: true,
@@ -157,9 +158,9 @@ export class Renderer {
     this.webgl.shadowMap.enabled = quality.shadowMapSize > 0;
     this.webgl.setPixelRatio(this.pixelRatioFor(quality));
 
-    // Bloom, god rays e SMAA são decididos na construção dos efeitos, então
-    // trocar de preset em tempo real exige remontar a cadeia. Só vale a pena
-    // se já existe uma cena composta — no construtor ainda não existe.
+    // Bloom, god rays and SMAA are decided when the effects are built, so changing
+    // preset at run time requires rebuilding the chain. It is only worth it if a composed
+    // scene already exists — in the constructor it does not yet.
     if (this.currentScene && this.currentCamera) {
       this.compose(this.currentScene, this.currentCamera, this.sunMesh);
       return;
@@ -169,24 +170,24 @@ export class Renderer {
   }
 
   /**
-   * Quantos pixels reais desenhar por pixel de CSS.
+   * How many real pixels to draw per CSS pixel.
    *
-   * ## Por que há um orçamento, e não só o `devicePixelRatio`
+   * ## Why there is a budget, and not just `devicePixelRatio`
    *
-   * Porque o custo de tudo que este renderizador faz — oceano, sombras, bloom,
-   * god rays, SMAA — é proporcional ao **número de pixels**, e esse número
-   * cresce com o quadrado da razão. Uma tela de notebook 1440×900 com razão 2
-   * são 5,2 milhões de pixels por quadro; a mesma cena num monitor 1080p de
-   * mesa são 2,1 milhões. A máquina do notebook é a mais fraca das duas e estava
-   * recebendo duas vezes e meia o trabalho, e o jogador não tinha como saber:
-   * o menu de qualidade não fala de resolução, fala de sombra e reflexo.
+   * Because the cost of everything this renderer does — ocean, shadows, bloom, god rays,
+   * SMAA — is proportional to the **number of pixels**, and that number grows with the
+   * square of the ratio. A 1440×900 laptop screen at ratio 2 is 5.2 million pixels per
+   * frame; the same scene on a desktop 1080p monitor is 2.1 million. The laptop is the
+   * weaker of the two machines and was receiving two and a half times the work, and the
+   * player had no way to know: the quality menu does not talk about resolution, it talks
+   * about shadows and reflections.
    *
-   * O teto é o de uma tela 1440p. Acima dele a razão é reduzida até caber, o que
-   * na prática só acontece em telas HiDPI e 4K — exatamente onde a densidade
-   * sobrando é a que menos se enxerga. Abaixo, nada muda.
+   * The ceiling is that of a 1440p screen. Above it the ratio is reduced until it fits,
+   * which in practice only happens on HiDPI and 4K screens — exactly where the spare
+   * density is the least visible. Below it, nothing changes.
    *
-   * `renderScale` continua entrando por cima: ele é a escolha do preset, este
-   * teto é o limite físico. O preset Baixo num 4K quer os dois.
+   * `renderScale` still comes in on top: it is the preset's choice, this ceiling is the
+   * physical limit. The Low preset on a 4K wants both.
    */
   private pixelRatioFor(quality: QualitySettings): number {
     const width = window.innerWidth;
@@ -202,9 +203,9 @@ export class Renderer {
     const width = window.innerWidth;
     const height = window.innerHeight;
 
-    // A razão é reavaliada aqui porque ela depende do tamanho da janela: quem
-    // arrasta o jogo de um monitor 4K para um 1080p (ou só redimensiona a aba)
-    // muda o orçamento, e sem isto continuaria com a razão do tamanho anterior.
+    // The ratio is re-evaluated here because it depends on the window's size: whoever
+    // drags the game from a 4K monitor to a 1080p one (or just resizes the tab) changes
+    // the budget, and without this it would keep the previous size's ratio.
     this.webgl.setPixelRatio(this.pixelRatioFor(settings.quality));
     this.webgl.setSize(width, height, false);
     this.composer?.setSize(width, height);
@@ -215,7 +216,7 @@ export class Renderer {
     }
   }
 
-  /** Informação de GPU para o overlay de debug. */
+  /** GPU information for the debug overlay. */
   getGpuInfo(): string {
     const gl = this.webgl.getContext();
     const ext = gl.getExtension('WEBGL_debug_renderer_info');

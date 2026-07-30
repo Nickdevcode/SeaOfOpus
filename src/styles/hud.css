@@ -1,28 +1,28 @@
 /**
- * HUD de combate: o que o jogador precisa saber sem tirar os olhos do mar.
+ * The combat HUD: what the player has to know without taking their eyes off the sea.
  *
- * ## O princípio que ordena o arquivo
+ * ## The principle that orders the file
  *
- * Nada aqui é uma barra de vida, porque o jogo não tem uma. O estado do navio é
- * a água no porão, e o do inimigo é onde ele está e a que distância. Tudo o mais
- * é ruído sobre a tela.
+ * Nothing here is a health bar, because the game does not have one. The ship's state is
+ * the water in the hold, and the enemy's is where they are and how far. Everything else
+ * is noise over the screen.
  *
- * ## E o que os elementos são
+ * ## And what the elements are
  *
- * Cada peça do HUD é **um instrumento que existiria a bordo**, e não um widget:
+ * Each piece of the HUD is **an instrument that would exist aboard**, and not a widget:
  *
- * - a bússola é uma fita de latão gravada correndo sob um pino de agulha;
- * - o poço de porão é uma **sonda de vidro**, o tubo graduado que se lê para
- *   saber quanta água entrou;
- * - o estado das peças são as próprias balas: vazia é o círculo do calibre,
- *   carregada é a bala dentro dele.
+ * - the compass is an engraved brass strip running under a lubber's pin;
+ * - the bilge well is a **glass sounding tube**, the graduated tube you read to know how
+ *   much water has come in;
+ * - the guns' state is the shot itself: empty is the bore's circle, loaded is the ball
+ *   inside it.
  *
- * A diferença não é decorativa. Um instrumento tem uma escala e uma leitura, e o
- * jogador aprende a lê-lo uma vez; um widget precisa de rótulo toda vez. É por
- * isso que a sonda tem marcas gravadas em vez de um número grande do lado.
+ * The difference is not decorative. An instrument has a scale and a reading, and the
+ * player learns to read it once; a widget needs a label every time. That is why the
+ * sounding tube has engraved marks instead of a big number beside it.
  *
- * Posicionado em porcentagem e `vmin`, nunca em pixels: a referência do jogador é
- * a proporção da tela dele.
+ * Positioned in percentages and `vmin`, never in pixels: the player's reference is the
+ * proportion of their own screen.
  */
 
 .hud {
@@ -32,17 +32,16 @@
 }
 
 /**
- * ⚠️ Qualificado pelo `#ui-root`, e **não** é estilo: é o que faz o mouse
- * funcionar.
+ * ⚠️ Qualified by `#ui-root`, and it is **not** styling: it is what makes the mouse work.
  *
- * `base.css` traz `#ui-root > * { pointer-events: auto }`, e um seletor com id
- * ganha de `.hud` por especificidade. Sem esta linha, a camada do HUD — que é
- * `inset: 0`, a tela inteira — passa a receber os cliques no instante em que ela
- * aparece, que é o instante em que a partida começa. O canvas nunca vê o clique,
- * `requestPointerLock` nunca é chamado, e o resultado é um jogo em que a câmera
- * não responde ao mouse e só o controle funciona. As mesmas linhas existem em
- * `prompts.css` e no `.debug-overlay` de `base.css`, pelo mesmo motivo: toda
- * camada que cobre a tela sem ser clicável precisa se declarar aqui.
+ * `base.css` carries `#ui-root > * { pointer-events: auto }`, and a selector with an id
+ * beats `.hud` on specificity. Without this line, the HUD's layer — which is `inset: 0`,
+ * the whole screen — starts receiving the clicks the instant it appears, which is the
+ * instant the match begins. The canvas never sees the click, `requestPointerLock` is
+ * never called, and the result is a game where the camera does not answer the mouse and
+ * only the controller works. The same lines exist in `prompts.css` and in `base.css`'s
+ * `.debug-overlay`, for the same reason: every layer that covers the screen without being
+ * clickable has to declare itself here.
  */
 #ui-root > .hud {
   pointer-events: none;
@@ -52,15 +51,14 @@
   display: none;
 }
 
-/* --- rosa dos ventos --------------------------------------------------------- */
+/* --- compass rose ------------------------------------------------------------ */
 
 /**
- * A fita de bússola: uma chapa de latão gravada correndo por trás de uma janela.
+ * The compass strip: an engraved brass plate running behind a window.
  *
- * A máscara nas bordas não é enfeite — sem ela os rumos aparecem e somem num
- * corte seco, e o corte denuncia a fita como um `div` deslizando. Com o
- * desvanecimento, ela lê como uma fita metálica passando por dentro de uma
- * caixa, que é o que uma bússola de fita realmente é.
+ * The mask at the edges is not decoration — without it the headings appear and disappear
+ * on a hard cut, and the cut gives the strip away as a sliding `div`. With the fade, it
+ * reads as a metal band passing through a box, which is what a strip compass really is.
  */
 .compass {
   position: absolute;
@@ -78,7 +76,7 @@
 .compass__strip {
   position: absolute;
   inset: 0;
-  /* `will-change` porque esta é a única coisa do HUD que se move todo quadro. */
+  /* `will-change` because this is the only thing in the HUD that moves every frame. */
   will-change: transform;
 }
 
@@ -114,8 +112,8 @@
   background: var(--brass-lit);
 }
 
-/* Seta do vento: cor diferente e maior, porque é informação tática, não geográfica.
-   Saber de onde sopra o vento é saber quem consegue fugir. */
+/* The wind arrow: a different color and larger, because it is tactical information, not
+   geographical. Knowing where the wind blows from is knowing who can run away. */
 .compass__wind {
   position: absolute;
   top: 0.05rem;
@@ -126,11 +124,11 @@
 }
 
 /**
- * O pino da agulha: a marca fixa do rumo atual.
+ * The lubber's pin: the fixed mark for the current heading.
  *
- * Desenhado como uma ponta de latão apontando para baixo, e não como um traço.
- * Um traço vertical no meio de uma fita de marcas verticais some dentro delas;
- * a ponta é a única forma diferente na região, então ela se lê de imediato.
+ * Drawn as a brass point aiming down, and not as a stroke. A vertical stroke in the
+ * middle of a strip of vertical ticks disappears among them; the point is the only
+ * different shape in the area, so it reads at once.
  */
 .compass__lubber {
   position: absolute;
@@ -157,7 +155,7 @@
   text-shadow: var(--sombra-texto);
 }
 
-/* --- marcador do inimigo ----------------------------------------------------- */
+/* --- enemy marker ------------------------------------------------------------ */
 
 .target {
   position: absolute;
@@ -167,7 +165,7 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  /* `translate(-50%, -50%)` sai no script junto com a posição projetada. */
+  /* `translate(-50%, -50%)` comes out of the script along with the projected position. */
   will-change: transform;
   transition: opacity var(--transicao-rapida);
 }
@@ -176,8 +174,8 @@
   display: none;
 }
 
-/* Losango vazado, não um retículo cheio: o inimigo tem 16 m e a marca precisa
-   emoldurá-lo sem tapar o costado onde se está tentando acertar. */
+/* A hollow diamond, not a filled reticle: the enemy is 16 m long and the marker has to
+   frame them without covering the side you are trying to hit. */
 .target__mark {
   width: 1.1rem;
   height: 1.1rem;
@@ -186,11 +184,11 @@
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.8), 0 0 6px rgba(204, 74, 41, 0.5);
 }
 
-/* Pastilha escura em vez de texto solto com sombra.
-   A captura mostrou por quê: o marcador cai em cima de qualquer coisa — céu claro,
-   espuma branca, o timão de madeira —, e sombra de texto não salva número pequeno
-   contra fundo de brilho médio. Com o próprio fundo, a distância é legível sobre
-   tudo, que é o requisito de um número que se lê no meio de uma manobra. */
+/* A dark pill instead of loose text with a shadow.
+   The screenshot showed why: the marker lands on top of anything — bright sky, white
+   foam, the wooden helm —, and a text shadow does not save a small number against a
+   mid-brightness background. With a background of its own, the range is legible over
+   everything, which is the requirement for a number read in the middle of a maneuver. */
 .target__range {
   padding: 0.05rem 0.3rem;
   font-family: var(--fonte-numero);
@@ -203,7 +201,7 @@
   white-space: nowrap;
 }
 
-/* Fora de campo, a marca vira seta na borda. O `--angle` vem do script. */
+/* Off screen, the marker becomes an arrow at the edge. `--angle` comes from the script. */
 .target--offscreen .target__mark {
   width: 0;
   height: 0;
@@ -220,16 +218,15 @@
   display: none;
 }
 
-/* --- sonda do porão ---------------------------------------------------------- */
+/* --- bilge sounding tube ----------------------------------------------------- */
 
 /**
- * O poço de porão é uma **sonda**: um tubo de vidro num aro de latão.
+ * The bilge well is a **sounding tube**: a glass tube in a brass ring.
  *
- * Antes era um painel retangular com uma barra dentro — correto e anônimo. A
- * sonda é o instrumento que um navio de verdade usa para essa exata pergunta, e
- * ela traz de graça o que a barra precisava explicar: o vidro tem marcas
- * gravadas, então "quanta água" vira uma leitura de escala em vez de um
- * percentual que precisa de rótulo.
+ * It used to be a rectangular panel with a bar inside — correct and anonymous. The
+ * sounding tube is the instrument a real ship uses for that exact question, and it brings
+ * for free what the bar had to explain: the glass has engraved marks, so "how much water"
+ * becomes a reading off a scale instead of a percentage that needs a label.
  */
 .bilge {
   position: absolute;
@@ -262,9 +259,9 @@
 }
 
 /**
- * O tubo. As marcas gravadas saem de um gradiente repetido — cinco divisões,
- * uma a cada 20% — e ficam **atrás** da água, então elas continuam legíveis por
- * transparência conforme o nível sobe.
+ * The tube. The engraved marks come out of a repeating gradient — five divisions, one
+ * every 20% — and sit **behind** the water, so they stay legible through the transparency
+ * as the level rises.
  */
 .bilge__well {
   position: relative;
@@ -281,8 +278,8 @@
   overflow: hidden;
 }
 
-/* Enche de baixo para cima, como água. Uma barra horizontal aqui seria a
-   metáfora errada — o jogador está olhando um porão alagando. */
+/* It fills bottom-up, like water. A horizontal bar here would be the wrong metaphor —
+   the player is looking at a flooding hold. */
 .bilge__water {
   position: absolute;
   inset: auto 0 0 0;
@@ -293,8 +290,8 @@
   transition: transform 220ms linear;
 }
 
-/* Menisco claro no topo da lâmina: é o que faz ler como superfície de água em vez
-   de preenchimento de barra. */
+/* A pale meniscus at the top of the sheet: it is what makes it read as a water surface
+   instead of a bar's fill. */
 .bilge__water::before {
   content: '';
   position: absolute;
@@ -316,13 +313,13 @@
   color: var(--blood-lit);
 }
 
-/* --- peças e paiol ----------------------------------------------------------- */
+/* --- guns and magazine ------------------------------------------------------- */
 
-/* Coluna única, ancorada **acima** das dicas de comando de `prompts.css`.
-   Antes eram dois blocos com deslocamentos próprios (`+5.5rem` e `+3.4rem`), e a
-   captura mostrou o resultado: "PAIOL 80" atravessava a linha "W A S D — Andar". Um
-   contêiner só com `flex` resolve por construção, e sobra um único número para
-   manter em pé — a altura das três dicas. */
+/* A single column, anchored **above** the control hints from `prompts.css`.
+   It used to be two blocks with offsets of their own (`+5.5rem` and `+3.4rem`), and the
+   screenshot showed the result: "SHOT 80" ran across the line "W A S D — Walk". A single
+   `flex` container solves it by construction, and only one number is left to keep
+   standing — the height of the three hints. */
 .crew-status {
   position: absolute;
   left: var(--espaco-6);
@@ -350,12 +347,12 @@
 }
 
 /**
- * O estado da peça é **a própria bala**: o círculo vazio é o calibre da alma,
- * meia esfera é a carga descendo, a bala cheia é a peça pronta.
+ * The gun's state is **the shot itself**: the empty circle is the bore's caliber, a half
+ * sphere is the charge going down, the full ball is the gun ready.
  *
- * Três estados distinguíveis sem cor (contorno, meia, cheia), então quem não
- * separa vermelho de verde continua lendo. A pastilha é o único lugar do HUD que
- * mantém raio: uma bala é redonda.
+ * Three states distinguishable without color (outline, half, full), so whoever cannot
+ * tell red from green goes on reading. The pip is the only place in the HUD that keeps a
+ * radius: a ball is round.
  */
 .piece__pip {
   width: 0.8rem;
@@ -391,11 +388,12 @@
   color: var(--brass-lit);
 }
 
-/* --- aviso de alagamento ----------------------------------------------------- */
+/* --- flooding warning -------------------------------------------------------- */
 
-/* Moldura vermelha pulsando nas bordas. É o único elemento que ocupa a tela toda,
-   e ocupa porque afundar é a única coisa que o jogador precisa saber mesmo estando
-   de olho no canhão. A opacidade vem do script, proporcional ao alagamento. */
+/* A red vignette pulsing at the edges. It is the only element that takes the whole
+   screen, and it does because sinking is the one thing the player has to know even with
+   their eye on the cannon. The opacity comes from the script, proportional to the
+   flooding. */
 .drown {
   position: absolute;
   inset: 0;
@@ -429,11 +427,11 @@
   white-space: nowrap;
 }
 
-/* --- aviso de estado do inimigo ---------------------------------------------- */
+/* --- enemy state notice ------------------------------------------------------ */
 
-/* Linha discreta sob a bússola: o que o capitão inimigo está fazendo. Existe
-   porque a IA tem intenção legível, e esconder isso desperdiça o trabalho dela —
-   ver o inimigo "PATCHING HOLES" é a recompensa de ter acertado. */
+/* A discreet line under the compass: what the enemy captain is doing. It exists because
+   the AI has legible intent, and hiding that wastes its work — seeing the enemy
+   "PATCHING HOLES" is the reward for having hit them. */
 .foe-state {
   position: absolute;
   left: 50%;

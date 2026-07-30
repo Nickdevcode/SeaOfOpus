@@ -870,10 +870,11 @@ export class Menu {
   }
 
   /**
-   * Troca a tela atual sem empilhar, para quem já está numa e mudou de estado.
+   * Swaps the current screen without pushing, for whoever is already on one and changed
+   * state.
    *
-   * É o que leva de "entrar em sala" para "esperando na sala" sem que o Voltar
-   * passe por um campo de código que já foi preenchido.
+   * It is what takes you from "enter a room" to "waiting in the room" without Back going
+   * through a code field that has already been filled in.
    */
   replace(screen: Exclude<Screen, 'none'>): void {
     this.show(screen);
@@ -888,16 +889,16 @@ export class Menu {
   }
 
   /**
-   * Um passo de navegação numa direção.
+   * One navigation step in a direction.
    *
-   * A regra é a de qualquer painel de ajustes de console, e ela existe porque os
-   * dois eixos fazem coisas diferentes: **vertical troca de campo, horizontal
-   * mexe no campo**. Enquanto ←/→ também trocavam de campo, um deslizante era um
-   * item pelo qual se passava — nunca um item que se pudesse ajustar —, e a tela
-   * de Ajustes ficava com metade dos controles inalcançáveis no gamepad.
+   * The rule is any console settings panel's, and it exists because the two axes do
+   * different things: **vertical changes field, horizontal changes the field's value**.
+   * While ←/→ also changed field, a slider was an item you walked past — never an item you
+   * could adjust —, and the Settings screen was left with half its controls unreachable on
+   * a gamepad.
    *
-   * Na diagonal, o vertical vence: é o que evita que uma inclinada do analógico
-   * mexa num valor quando a intenção era só descer a lista.
+   * On a diagonal, vertical wins: it is what keeps a tilted stick from changing a value
+   * when the intent was only to go down the list.
    */
   private navigate(x: number, y: number): void {
     const focused = document.activeElement as HTMLElement | null;
@@ -916,29 +917,29 @@ export class Menu {
       this.nudgeSlider(focused, direction);
       return;
     }
-    // Grupo de opções (preset, tempo) e interruptor: ←/→ mudam a escolha. Na
-    // ponta do grupo a chamada devolve `false` e o passo escapa para o campo
-    // vizinho, que é a saída horizontal de quem entrou no grupo.
+    // An option group (preset, weather) and a toggle: ←/→ change the choice. At the
+    // group's end the call returns `false` and the step escapes to the neighboring field,
+    // which is the horizontal way out for whoever entered the group.
     if (focused && this.cycleOption(focused, direction)) return;
 
     this.moveFocus(direction);
   }
 
   /**
-   * `A` no item focado.
+   * `A` on the focused item.
    *
-   * O deslizante fica de fora porque `HTMLInputElement.click()` num
-   * `type="range"` não move o cursor um milímetro — era o que o `A` fazia, e o
-   * resultado era o som de confirmação tocando sobre um valor que não mudou.
-   * Quem move deslizante é `nudgeSlider`.
+   * The slider is left out because `HTMLInputElement.click()` on a `type="range"` does not
+   * move the thumb one millimeter — that is what `A` used to do, and the result was the
+   * confirmation sound playing over a value that had not changed. What moves a slider is
+   * `nudgeSlider`.
    */
   private confirm(): void {
     const focused = document.activeElement as HTMLElement | null;
     if (!focused) return;
-    // Nenhum `<input>` faz nada útil com um clique programático: no deslizante o
-    // cursor não anda um milímetro, e no campo de texto não há teclado de console
-    // para abrir. Quem move deslizante é `nudgeSlider`; quem escreve com o
-    // controle são os slots de código, que são botões de verdade.
+    // No `<input>` does anything useful with a programmatic click: on the slider the
+    // thumb does not move a millimeter, and on the text field there is no console
+    // keyboard to open. What moves a slider is `nudgeSlider`; what types with the
+    // controller are the code slots, which are real buttons.
     if (focused instanceof HTMLInputElement) return;
 
     this.callbacks.onNavigate?.('confirm');
@@ -946,12 +947,12 @@ export class Menu {
   }
 
   /**
-   * Move um deslizante um passo, como se o jogador tivesse arrastado o cursor.
+   * Moves a slider one step, as if the player had dragged the thumb.
    *
-   * Escrever `value` não notifica ninguém — o DOM só emite `input` quando quem
-   * mexe é o usuário. Daí o `dispatchEvent`: o valor entra pelo **mesmo** ouvinte
-   * que o mouse e o teclado usam, e não por um segundo caminho de escrita que
-   * teria de ser mantido em dia com o primeiro.
+   * Writing `value` notifies nobody — the DOM only emits `input` when the user is the one
+   * moving it. Hence the `dispatchEvent`: the value comes in through the **same** listener
+   * the mouse and the keyboard use, and not through a second write path that would have to
+   * be kept in step with the first.
    */
   private nudgeSlider(slider: HTMLInputElement, direction: 1 | -1): void {
     const min = Number.parseFloat(slider.min);
@@ -960,9 +961,9 @@ export class Menu {
     const current = Number.parseFloat(slider.value);
     if (!Number.isFinite(current)) return;
 
-    // Reancorar o passo na grade do `min` mantém o valor redondo: somar 0,05 seis
-    // vezes em ponto flutuante produz 0,30000000000000004, e é isso que apareceria
-    // no rótulo e iria parar no `localStorage`.
+    // Re-anchoring the step to `min`'s grid keeps the value round: adding 0.05 six times
+    // in floating point produces 0.30000000000000004, and that is what would show up on
+    // the label and end up in `localStorage`.
     const target = clamp(current + step * direction, min, max);
     const next = Number((min + Math.round((target - min) / step) * step).toFixed(6));
     if (next === current) return;
@@ -973,21 +974,22 @@ export class Menu {
   }
 
   /**
-   * `←`/`→` num grupo de opções ou num interruptor.
+   * `←`/`→` on an option group or on a toggle.
    *
-   * @returns `false` quando o item focado não é um desses, ou quando o grupo
-   * acabou — nos dois casos quem assume é `moveFocus`.
+   * @returns `false` when the focused item is neither of those, or when the group has run
+   * out — in both cases what takes over is `moveFocus`.
    */
   private cycleOption(focused: HTMLElement, direction: 1 | -1): boolean {
-    // Campos de telas de fora primeiro: eles são os mais específicos, e um slot de
-    // código de sala não deve ter de evitar as classes que este arquivo conhece.
+    // Fields from outside screens first: they are the most specific, and a room-code slot
+    // should not have to dodge the classes this file knows about.
     const widget = this.widgets.get(focused);
     if (widget) return widget.cycle(direction);
 
     if (focused.classList.contains('toggle')) {
-      // Duas posições, e cada lado tem um sentido: → liga, ← desliga. Como o
-      // clique alterna, só clica quando o estado pedido é diferente do atual —
-      // senão apertar → duas vezes desligaria o que a primeira ligou.
+      // Two positions, and each side has a meaning: → switches on, ← switches off. Since
+      // the click toggles, it only clicks when the requested state differs from the
+      // current one — otherwise pressing → twice would switch off what the first press
+      // switched on.
       const wanted = direction > 0;
       if ((focused.getAttribute('aria-pressed') === 'true') !== wanted) {
         focused.click();
@@ -1008,7 +1010,7 @@ export class Menu {
     return true;
   }
 
-  /** Move o foco entre os botões da tela ativa, para o d-pad funcionar. */
+  /** Moves the focus between the active screen's buttons, so the d-pad works. */
   private moveFocus(direction: 1 | -1): void {
     const overlay = this.screen === 'none' ? null : this.screens.get(this.screen);
     if (!overlay) return;
@@ -1019,7 +1021,8 @@ export class Menu {
     if (focusable.length === 0) return;
 
     const index = focusable.indexOf(document.activeElement as HTMLElement);
-    // Sem foco na tela, entra pelo primeiro (ou pelo último, se veio de trás).
+    // With no focus on the screen, it enters through the first one (or the last, if it
+    // came from behind).
     const next =
       index < 0
         ? direction > 0 ? 0 : focusable.length - 1
@@ -1030,19 +1033,19 @@ export class Menu {
   }
 
   /**
-   * Acende o glifo do aparelho em uso e desbota o outro.
+   * Lights up the glyph for the device in use and dims the other.
    *
-   * Na tabela de controles desbota em vez de esconder: quem joga de teclado e olha
-   * a tela ainda quer saber qual é o botão do controle. Some seria perder
-   * informação para ganhar nada.
+   * On the controls table it dims instead of hiding: whoever plays on a keyboard and looks
+   * at the screen still wants to know which the controller's button is. Hiding it would be
+   * losing information to gain nothing.
    *
-   * As linhas de dica são o caso oposto e por isso trocam de texto em vez de cor:
-   * ali cabe **um** glifo, e o que ele tem de dizer é o aperto que funciona agora.
+   * The hint lines are the opposite case and therefore swap text instead of color: only
+   * **one** glyph fits there, and what it has to say is the press that works right now.
    */
   private syncGlyphs(input: Input): void {
-    // A chave carrega o layout junto com o aparelho: trocar um Xbox por um
-    // DualSense sem soltar o controle muda todos os rótulos de botão sem mudar o
-    // aparelho ativo, e um teste só em `usingGamepad` não veria nada acontecer.
+    // The key carries the layout along with the device: swapping an Xbox for a DualSense
+    // without letting go of the controller changes every button label without changing
+    // the active device, and a test on `usingGamepad` alone would see nothing happen.
     const key = `${input.usingGamepad ? 'pad' : 'kbm'}:${input.gamepad.layout}`;
     if (key === this.lastGlyphKey) return;
     this.lastGlyphKey = key;
@@ -1058,8 +1061,9 @@ export class Menu {
     for (const hint of this.hintGlyphs) {
       const label = usingPad ? input.padLabel(hint.action) : ACTION_LABELS[hint.action].keyboard;
       hint.glyph.textContent = label;
-      // Ação sem botão no aparelho em uso não vira um travessão solto no rodapé:
-      // a dica inteira sai de cena até o jogador voltar ao outro aparelho.
+      // An action with no button on the device in use does not become a lone dash in the
+      // footer: the whole hint leaves the screen until the player goes back to the other
+      // device.
       hint.item.hidden = label === NO_BINDING;
     }
   }

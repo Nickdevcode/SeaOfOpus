@@ -1,49 +1,49 @@
 /**
- * Tokens de design e reset.
+ * Design tokens and reset.
  *
- * ## A direção, em uma frase
+ * ## The direction, in one sentence
  *
- * **Tudo é um objeto que existiria a bordo.** Não há painéis: há tábuas, chapas
- * de latão e folhas de pergaminho pregadas nelas. É a diferença entre uma
- * interface *temática* e uma interface *do lugar* — e é o que o Sea of Thieves
- * acerta. O retângulo escuro com borda dourada e canto arredondado é o caminho
- * fácil, e ele produz a mesma tela que qualquer outro jogo de tema náutico.
+ * **Everything is an object that would exist aboard.** There are no panels: there are
+ * planks, brass plates and sheets of parchment nailed to them. It is the difference
+ * between a *themed* interface and an interface *of the place* — and it is what Sea of
+ * Thieves gets right. The dark rectangle with a gold border and a rounded corner is the
+ * easy path, and it produces the same screen as every other nautical-themed game.
  *
- * Três regras caem daí, e elas mandam no arquivo inteiro:
+ * Three rules fall out of that, and they rule the whole file:
  *
- * 1. **Madeira não tem canto arredondado.** O raio some de tudo que representa
- *    tábua ou chapa. Sobra só onde o objeto real seria redondo: pastilhas,
- *    cabeças de prego, o vidro da sonda.
- * 2. **Toda superfície tem material.** Madeira ganha veio e fibra, pergaminho
- *    ganha manchas e borda comida, latão ganha o brilho anisotrópico do metal
- *    escovado. Nenhuma delas é uma cor chapada, e nenhuma é uma imagem — tudo é
- *    gradiente repetido, que custa zero de banda.
- * 3. **Ferragem no lugar de borda.** Onde uma folha se prende a alguma coisa, há
- *    prego. Onde uma chapa termina, há cantoneira. A borda de 1 px uniforme em
- *    volta de tudo é a assinatura da interface genérica.
+ * 1. **Wood has no rounded corner.** The radius disappears from everything representing a
+ *    plank or a plate. It survives only where the real object would be round: pips, nail
+ *    heads, the sounding tube's glass.
+ * 2. **Every surface has a material.** Wood gets grain and fiber, parchment gets stains
+ *    and a nibbled edge, brass gets brushed metal's anisotropic sheen. None of them is a
+ *    flat color, and none is an image — it is all repeating gradients, which cost zero
+ *    bandwidth.
+ * 3. **Hardware instead of a border.** Where a sheet is fastened to something, there is a
+ *    nail. Where a plate ends, there is a corner piece. The uniform 1 px border around
+ *    everything is the generic interface's signature.
  *
- * ## Tipografia
+ * ## Typography
  *
- * Cinzel só no logotipo — é uma capital romana lapidar, feita para ser gravada,
- * e ela perde a graça em texto corrido. Todo o resto é IM Fell English, a
- * digitalização dos tipos da Oxford University Press do século XVII: o traço é
- * irregular e a tinta borra nas junções, exatamente como numa carta náutica
- * impressa em prensa. A versão SC (versaletes) fica com rótulos e cabeçalhos.
+ * Cinzel only on the wordmark — it is a lapidary Roman capital, made to be carved, and it
+ * loses its charm in running text. Everything else is IM Fell English, the digitization of
+ * the Oxford University Press's seventeenth-century types: the stroke is irregular and the
+ * ink bleeds at the joins, exactly as on a nautical chart printed on a press. The SC
+ * version (small caps) takes the labels and headings.
  *
- * Números ficam em monoespaçada, e é a única concessão moderna: rumo, distância
- * e porcentagem mudam a cada quadro, e fonte proporcional os faz dançar.
+ * Numbers stay monospaced, and that is the only modern concession: heading, range and
+ * percentage change every frame, and a proportional font makes them dance.
  */
 
 :root {
-  /* --- madeira ---------------------------------------------------------- */
-  /* Do costado alcatroado ao carvalho do convés, na mesma ordem do navio. */
+  /* --- wood ------------------------------------------------------------- */
+  /* From the tarred side to the deck's oak, in the ship's own order. */
   --oak-tar: #170e07;
   --oak-deep: #241708;
   --oak: #3c2614;
   --oak-warm: #6a4322;
   --oak-lit: #97663a;
 
-  /* --- latão ------------------------------------------------------------ */
+  /* --- brass ------------------------------------------------------------ */
   --brass-shadow: #4a3711;
   --brass-dark: #6f5417;
   --brass: #b48c2c;
@@ -58,18 +58,18 @@
   --ink: #2e2213;
   --ink-soft: #5c4a2e;
 
-  /* --- mar e sinal ------------------------------------------------------ */
+  /* --- sea and signal --------------------------------------------------- */
   --sea-deep: #06202c;
   --sea: #104b5f;
   --foam: #d7edf2;
   --blood: #7d1f12;
   --blood-lit: #cc4a29;
 
-  /* --- superfícies ------------------------------------------------------ */
+  /* --- surfaces --------------------------------------------------------- */
   --panel: rgba(24, 15, 8, 0.9);
   --panel-deep: rgba(12, 8, 4, 0.94);
 
-  /* Espaçamento — escala de 4px */
+  /* Spacing — a 4px scale */
   --espaco-1: 0.25rem;
   --espaco-2: 0.5rem;
   --espaco-3: 0.75rem;
@@ -78,27 +78,27 @@
   --espaco-8: 2rem;
   --espaco-12: 3rem;
 
-  /* Tipografia */
+  /* Typography */
   --fonte-titulo: 'Cinzel', 'Georgia', serif;
   --fonte-corpo: 'IM Fell English', 'Georgia', serif;
   --fonte-versalete: 'IM Fell English SC', 'IM Fell English', 'Georgia', serif;
   --fonte-numero: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
 
-  /* Raio: só o que é redondo de verdade. Ver a nota no topo. */
+  /* Radius: only what is genuinely round. See the note at the top. */
   --raio-pastilha: 999px;
   --sombra-texto: 0 2px 5px rgba(0, 0, 0, 0.9);
 
-  /* Movimento */
+  /* Motion */
   --transicao-rapida: 140ms cubic-bezier(0.4, 0, 0.2, 1);
   --transicao-media: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   --transicao-lenta: 620ms cubic-bezier(0.22, 1, 0.36, 1);
 
   /**
-   * Veio de madeira: fibras finas mais as faixas largas das tábuas.
+   * Wood grain: fine fibers plus the planks' wide bands.
    *
-   * Duas camadas de gradiente repetido em vez de uma textura: a primeira dá a
-   * fibra de meio milímetro, a segunda a variação de tom entre tábuas. Sem a
-   * segunda, madeira lê como papel pautado.
+   * Two layers of repeating gradient instead of a texture: the first gives the
+   * half-millimeter fiber, the second the shade variation between planks. Without the
+   * second, wood reads as ruled paper.
    */
   --veio-madeira:
     repeating-linear-gradient(
@@ -116,10 +116,11 @@
     );
 
   /**
-   * Latão escovado: o brilho de metal polido em uma direção só.
+   * Brushed brass: the sheen of metal polished in one direction only.
    *
-   * O truque é o gradiente perpendicular às estrias — é ele que faz o olho ler
-   * "metal" em vez de "amarelo". Sem as estrias finas por cima, vira plástico.
+   * The trick is the gradient perpendicular to the striations — it is what makes the eye
+   * read "metal" instead of "yellow". Without the fine striations on top, it becomes
+   * plastic.
    */
   --chapa-latao:
     repeating-linear-gradient(
@@ -146,7 +147,7 @@ body {
   background: #05121b;
   color: var(--parchment);
   font-family: var(--fonte-corpo);
-  /* O jogo é fullscreen e usa pointer lock: seleção de texto só atrapalha. */
+  /* The game is fullscreen and uses pointer lock: text selection only gets in the way. */
   user-select: none;
   -webkit-user-select: none;
   overscroll-behavior: none;
@@ -168,7 +169,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 10;
-  /* A camada de UI é transparente a cliques por padrão; cada painel reativa. */
+  /* The UI layer is click-through by default; each panel switches it back on. */
   pointer-events: none;
 }
 
@@ -176,10 +177,10 @@ body {
   pointer-events: auto;
 }
 
-/* Telemetria de desenvolvimento (F3). Monoespaçada de propósito: os números
-   mudam a cada frame e fonte proporcional faria a coluna dançar. */
-/* Qualificado pelo #ui-root porque a regra genérica de lá reativa os cliques,
-   e ela ganharia por especificidade de ID. */
+/* Development telemetry (F3). Monospaced on purpose: the numbers change every frame and
+   a proportional font would make the column dance. */
+/* Qualified by #ui-root because the generic rule there switches the clicks back on, and
+   it would win on ID specificity. */
 #ui-root > .debug-overlay {
   position: absolute;
   top: var(--espaco-4);
@@ -193,7 +194,7 @@ body {
   background: var(--panel-deep);
   border: 1px solid var(--brass-dark);
   text-shadow: var(--sombra-texto);
-  /* Não deve roubar cliques do canvas. */
+  /* It must not steal clicks from the canvas. */
   pointer-events: none;
 }
 
@@ -201,7 +202,7 @@ body {
   display: none;
 }
 
-/* Acessibilidade: foco visível para navegação por teclado no menu. */
+/* Accessibility: a visible focus ring for keyboard navigation in the menu. */
 :focus-visible {
   outline: 2px solid var(--brass-flare);
   outline-offset: 3px;
@@ -213,7 +214,7 @@ button {
   cursor: pointer;
 }
 
-/* Respeita quem pediu menos movimento no sistema. */
+/* Respects whoever asked for less motion at the system level. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

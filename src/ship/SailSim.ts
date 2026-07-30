@@ -450,23 +450,23 @@ export class SailSim {
   }
 
   /**
-   * Empurra a lona para fora do mastro, **sempre para vante**.
+   * Pushes the canvas clear of the mast, **always forward**.
    *
-   * Sem isto o pano atravessa o tronco: as quatro bordas estão presas no plano
-   * do mastro e o meio nasce dentro dele, e o mastro não existe para o solver de
-   * Verlet. O que se via era meia vela de cada lado do pau, que é justamente a
-   * leitura de "a vela está do lado errado".
+   * Without this the cloth goes through the trunk: the four edges are made fast in the
+   * mast's plane and the middle is born inside it, and the mast does not exist for the
+   * Verlet solver. What you saw was half a sail on each side of the spar, which is
+   * precisely the reading of "the sail is on the wrong side".
    *
-   * O lado agora é escolhido, e não herdado. A versão anterior mandava cada nó
-   * para o lado em que já estivesse, o que preservava — e petrificava — qualquer
-   * pedaço de pano que tivesse escapado para ré num quadro ruim: a lona ficava
-   * repartida pelo tronco, metade de cada lado, sem nunca se recompor. Como a
-   * pressão passou a inflar sempre a favor da propulsão (ver `stepCloth`), a
-   * vela agora tem um lado certo, e é para ele que o mastro empurra.
+   * The side is now chosen, and not inherited. The previous version sent each node to
+   * whichever side it was already on, which preserved — and petrified — any piece of
+   * cloth that had escaped aft on a bad frame: the canvas ended up split by the trunk,
+   * half on each side, never recomposing. Since the pressure now always inflates in
+   * favor of the thrust (see `stepCloth`), the sail has a right side, and that is the one
+   * the mast pushes toward.
    *
-   * Roda **depois** do relaxamento, e não antes: uma restrição de não penetração
-   * aplicada no meio das iterações é desfeita pela seguinte, e o pano volta a
-   * piscar por dentro do mastro em quadros alternados.
+   * It runs **after** the relaxation, and not before: a non-penetration constraint
+   * applied in the middle of the iterations is undone by the next one, and the cloth goes
+   * back to flickering through the mast on alternate frames.
    */
   private keepOffMast(): void {
     const positions = this.positions;
@@ -485,7 +485,7 @@ export class SailSim {
     }
   }
 
-  /** Devolve o pano à forma de repouso — usado ao reiniciar uma partida. */
+  /** Returns the cloth to its rest shape — used when restarting a match. */
   reset(): void {
     const positions = this.positions;
     const previous = this.previous;

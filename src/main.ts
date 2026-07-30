@@ -747,7 +747,7 @@ if (import.meta.env.DEV) {
     environment.dayNight.update(0);
     if (options.waveTime !== undefined) environment.waveField.time = options.waveTime;
 
-    // Orbita o navio onde ele estiver: com física ele já não fica na origem.
+    // Orbits the ship wherever it is: with physics it no longer sits at the origin.
     const subject = options.enemy ? match.enemyShip : match.playerShip;
     const pivot = subject.model.root.position.clone().setY(target);
     camera.position.set(
@@ -760,10 +760,10 @@ if (import.meta.env.DEV) {
   }
 
   /**
-   * Enquadra os **dois** navios: a câmera sobe até os dois caberem no campo.
+   * Frames **both** ships: the camera rises until the two fit in the field of view.
    *
-   * É o que permite capturar o duelo sem adivinhar coordenadas — a distância entre
-   * eles muda a cada segundo de manobra.
+   * It is what allows capturing the duel without guessing coordinates — the distance
+   * between them changes every second of maneuvering.
    */
   function setDuelView(options: { height?: number; margin?: number } = {}): void {
     const { margin = 1.5 } = options;
@@ -774,8 +774,8 @@ if (import.meta.env.DEV) {
     const mid = a.clone().add(b).multiplyScalar(0.5);
     const spread = a.distanceTo(b) * margin;
 
-    // Altura que enquadra `spread` com o FOV vertical atual, mais uma folga para o
-    // mastro de 12 m não sair pelo topo.
+    // The height that frames `spread` with the current vertical FOV, plus some room so
+    // the 12 m mast does not leave the top.
     const fov = camera.fov * DEG;
     const height = options.height ?? Math.max(spread / (2 * Math.tan(fov / 2)) * 0.7, 25);
 
@@ -785,15 +785,14 @@ if (import.meta.env.DEV) {
   }
 
   /**
-   * Enquadra o corpo do jogador, para conferir animação.
+   * Frames the player's body, to check an animation.
    *
-   * Existe porque a câmera livre reconstrói a orientação a partir do estado dela
-   * a cada quadro: escrever `camera.lookAt` de fora é desfeito no frame
-   * seguinte, e o resultado é uma captura no lugar certo olhando para o lado
-   * errado. Quem aponta a câmera livre é `aimCameraAt`, e é o que esta função
-   * usa.
+   * It exists because the free camera rebuilds its orientation from its own state every
+   * frame: writing `camera.lookAt` from outside is undone on the next frame, and the
+   * result is a capture in the right place looking the wrong way. What aims the free
+   * camera is `aimCameraAt`, and that is what this function uses.
    *
-   * @param azimuth ângulo em volta do personagem, em radianos. 0 é pela proa.
+   * @param azimuth the angle around the character, in radians. 0 is from ahead.
    */
   function setAvatarView(options: {
     azimuth?: number;
@@ -822,30 +821,30 @@ if (import.meta.env.DEV) {
   }
 
   /**
-   * Avança a física sem desenhar nada. É o que permite medir regime permanente em
-   * milissegundos em vez de esperar o navio acelerar em tempo real.
+   * Advances the physics without drawing anything. It is what allows measuring steady
+   * state in milliseconds instead of waiting for the ship to accelerate in real time.
    */
   function stepPhysics(seconds: number): void {
     const steps = Math.round(seconds * 60);
-    // Entrada vazia, e a mesma a cada passo: o que se mede aqui é o navio, e um
-    // marujo mexendo no meio da medição é ruído.
+    // Empty input, and the same one on every step: what is measured here is the ship,
+    // and a sailor moving about in the middle of the measurement is noise.
     const idle = { player: createInputFrame(), enemy: null };
     for (let i = 0; i < steps; i++) match.fixedUpdate(1 / 60, idle);
     match.update(0, 1);
   }
 
   /**
-   * Mede a velocidade de regime num dado ângulo de vento.
+   * Measures the steady-state speed at a given point of sail.
    *
-   * @param pointOfSail graus a partir da popa: 0 é vento em popa, 180 pela proa.
-   * @returns velocidade em nós depois de `settle` segundos de aceleração.
+   * @param pointOfSail degrees from astern: 0 is dead downwind, 180 is dead upwind.
+   * @returns the speed in knots after `settle` seconds of acceleration.
    */
   function probeSail(pointOfSail: number, settle = 90): number {
     const ship = match.playerShip;
     const heading = downwindHeading(environment.waveField) + pointOfSail * DEG;
     ship.spawn(0, 0, heading, environment.waveField);
-    // Sem o duelo rodando, `fixedUpdate` só integra os navios — que é exatamente o
-    // que esta medição quer.
+    // With no duel running, `fixedUpdate` only integrates the ships — which is exactly
+    // what this measurement wants.
     stepPhysics(settle);
     return ship.knots;
   }
@@ -869,14 +868,13 @@ if (import.meta.env.DEV) {
       wake,
       online,
       /**
-       * Rede ruim de mentira, para exercitar o netcode fora de `localhost`.
+       * A fake bad network, to exercise the netcode outside `localhost`.
        *
-       * Zero milissegundos de ida e volta escondem tudo que o netcode existe
-       * para resolver. Um duelo que só foi testado na mesma máquina é um duelo
-       * não testado.
+       * Zero milliseconds of round trip hide everything the netcode exists to solve. A
+       * duel that has only been tested on the same machine is an untested duel.
        *
        * ```js
-       * __game.setSimulatedLag(150, 40, 2)   // 150 ms, 40 de jitter, 2% de perda
+       * __game.setSimulatedLag(150, 40, 2)   // 150 ms, 40 of jitter, 2% loss
        * ```
        */
       setSimulatedLag: (ms: number, jitter = 0, lossPercent = 0) =>

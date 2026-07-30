@@ -1,15 +1,15 @@
 /**
- * Prompts contextuais e retículo do canhão.
+ * Contextual prompts and the cannon's reticle.
  *
- * Tudo posicionado em porcentagem da altura da viewport, e não em pixels: o
- * prompt tem de cair no mesmo ponto da tela num monitor ultrawide e num
- * notebook, porque a referência do jogador é o centro da tela, não a borda.
+ * Everything positioned as a percentage of the viewport's height, and not in pixels: the
+ * prompt has to land on the same point of the screen on an ultrawide monitor and on a
+ * laptop, because the player's reference is the center of the screen, not the edge.
  */
 
 .prompts {
   position: absolute;
   inset: 0;
-  /* A camada nunca recebe clique: o canvas precisa deles para o pointer lock. */
+  /* The layer never takes a click: the canvas needs them for the pointer lock. */
   pointer-events: none;
   font-family: var(--fonte-corpo);
 }
@@ -22,12 +22,12 @@
   display: none;
 }
 
-/* --- ação de interação (F) --------------------------------------------------- */
+/* --- interaction action (F) -------------------------------------------------- */
 
 /**
- * O prompt de ação é uma **placa de latão parafusada na tábua**, a mesma peça
- * dos botões do menu, em tamanho de HUD. Repetir o objeto em vez de inventar um
- * segundo painel é o que faz jogo e menu parecerem o mesmo produto.
+ * The action prompt is a **brass plate screwed to the plank**, the same piece as the
+ * menu's buttons, at HUD size. Repeating the object instead of inventing a second panel
+ * is what makes the game and the menu look like the same product.
  */
 .prompts__action {
   position: absolute;
@@ -43,7 +43,7 @@
     linear-gradient(176deg, var(--oak) 0%, var(--oak-tar) 100%);
   border: 1px solid var(--brass-shadow);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 226, 168, 0.1) inset;
-  /* A barra de progresso é filha e se ancora na base do painel. */
+  /* The progress bar is a child and anchors to the panel's base. */
   overflow: hidden;
   animation: prompt-in var(--transicao-rapida) ease-out;
 }
@@ -86,7 +86,7 @@
   color: #2a1f08;
   background: var(--chapa-latao);
   border: 1px solid var(--brass-shadow);
-  /* O filete escuro embaixo dá o relevo de tecla sem sombra externa. */
+  /* The dark line underneath gives the key's relief with no external shadow. */
   box-shadow: 0 2px 0 var(--brass-shadow);
   text-shadow: 0 1px 0 rgba(255, 246, 214, 0.4);
   white-space: nowrap;
@@ -123,11 +123,11 @@
   background: linear-gradient(90deg, var(--brass-dark), var(--brass-lit));
   transform-origin: left center;
   transform: scaleX(0);
-  /* Curto de propósito: acompanha o cabrestante sem parecer que desliza sozinho. */
+  /* Short on purpose: it follows the capstan without looking like it slides on its own. */
   transition: transform 90ms linear;
 }
 
-/* --- estado da peça operada -------------------------------------------------- */
+/* --- state of the operated station ------------------------------------------- */
 
 .prompts__status {
   position: absolute;
@@ -146,9 +146,9 @@
   display: none;
 }
 
-/* --- retículo do canhão ------------------------------------------------------ */
+/* --- cannon reticle ---------------------------------------------------------- */
 
-/* Quatro traços com um vão no meio: a bala cai, e um ponto cheio no centro
+/* Four strokes with a gap in the middle: the ball drops, and a filled dot at the center
    mentiria sobre onde ela vai bater. O vão obriga o olho a mirar o alvo. */
 .prompts__reticle {
   position: absolute;
@@ -177,7 +177,7 @@
   width: 1px;
   height: 100%;
   transform: translateX(-50%);
-  /* O vão central sai de um gradiente, não de mais dois elementos. */
+  /* The central gap comes out of a gradient, not out of two more elements. */
   background: linear-gradient(
     180deg,
     var(--brass-lit) 0 34%,
@@ -230,12 +230,13 @@
 /* --- ponteiro solto ---------------------------------------------------------- */
 
 /**
- * O aviso de que a câmera espera um clique.
+ * The notice that the camera is waiting for a click.
  *
- * Fica na base da tela, longe do centro: ele aparece **enquanto se joga**, e um
- * cartaz no meio da vista atrapalharia justamente quem já sabe do que se trata e
- * está prestes a clicar. A pulsação lenta é o que o distingue do resto do HUD,
- * que é todo estático — o olho encontra o que se move sem que ele precise ser
+ * It sits at the bottom of the screen, far from the center: it appears **while you are
+ * playing**, and a sign in the middle of the view would get in the way of precisely
+ * whoever already knows what it is about and is about to click. The slow pulse is what
+ * sets it apart from the rest of the HUD, which is all static — the eye finds what moves
+ * without it having to be
  * grande.
  */
 .prompts__resume {
@@ -269,7 +270,7 @@
   }
 }
 
-/* Quem pediu menos movimento não recebe um cartaz piscando por dois minutos. */
+/* Whoever asked for less motion does not get a sign blinking for two minutes. */
 @media (prefers-reduced-motion: reduce) {
   .prompts__resume {
     animation: none;
