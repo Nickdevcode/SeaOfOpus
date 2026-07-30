@@ -197,6 +197,33 @@ const SWIM_SPEED = WALK_SPEED / 2;
 const SWIM_EYE_HEIGHT = 0.22;
 
 /**
+ * Quanto os pés simulados ficam abaixo da linha d'água ao boiar, em metros.
+ *
+ * Cai de graça das duas alturas acima — o olho está a 1,66 m dos pés e a 0,22 m
+ * da superfície, logo a superfície está a 1,44 m dos pés. Existe como constante
+ * **exportada** porque deixou de ser assunto só da física: é ela que o
+ * `PlayerAvatar` soma à posição do corpo para pôr a origem dos clipes de água em
+ * cima da linha d'água. Ver `waterPoseY`.
+ *
+ * ⚠️ **Não é o mesmo número que `FLOAT_CLIP.sink`, e a diferença de 12 cm é
+ * escolha.** O clipe foi construído com a origem do rig 1,32 m abaixo da
+ * superfície; a física simula 1,44. Quem ganha é a física, e a razão é que os dois
+ * números medem coisas diferentes: 1,32 é onde o **animador** pôs os pés do
+ * personagem para que o queixo sobrasse 11,8 cm de água, e 1,44 é onde a
+ * **câmera** está — a superfície fica a 22 cm do olho porque é assim que o mar
+ * enquadra no rodapé da tela, e isso é decisão de vista, não de anatomia.
+ *
+ * Alinhar a origem do clipe com a superfície (somar 1,44) entrega o clipe
+ * exatamente como ele foi verificado: ombro 11,2 cm e queixo 11,8 cm acima da
+ * água, que é a folga que o `verify()` de `anim_float.py` mede **em relação à
+ * origem dele**. Somar 1,32 em vez disso afundaria o clipe 12 cm e o queixo
+ * raspa a superfície — a única coisa que este jogo promete que não acontece. O
+ * preço é que os pés *desenhados* ficam 12 cm acima dos pés *simulados*; eles
+ * estão a um metro e meio de profundidade, num corpo reclinado, e ninguém os vê.
+ */
+export const SWIM_SUBMERSION = EYE_HEIGHT - SWIM_EYE_HEIGHT;
+
+/**
  * Convergência do corpo à altura da onda, em 1/s.
  *
  * É o número que decide se o nadador **flutua** ou **corre num trilho**, e ele se
@@ -744,11 +771,8 @@ export class PlayerController {
 
   /**
    * O relógio da água, público como os outros cinco. Ele lê a velocidade de nado,
-   * que é a grandeza do mundo mais barata que existe aqui.
-   *
-   * ⚠️ Hoje ele **não desenha nada** — os clipes `Float` e `Swim` não existem no
-   * GLB, e a pose provisória da água é a locomoção alimentada com a mesma
-   * velocidade. Ver `SwimClock` e `PlayerAvatar.updateSwim`.
+   * que é a grandeza do mundo mais barata que existe aqui, e reparte os dois
+   * clipes do mar entre si. Ver `SwimClock` e `PlayerAvatar.updateSwim`.
    */
   readonly swim = new SwimClock();
   private bobOffset = 0;
@@ -1121,6 +1145,9 @@ export class PlayerController {
     this.grounded = true;
     this.velocity.set(0, 0, 0);
     this.worldVelocity.set(0, 0, 0);
+    // Pela mesma razão de `enterWater`: se o host discordou de onde este marujo
+    // estava, é aqui que a queda dele termina — e ela não termina num pouso.
+    this.jump.reset();
     ship.body.localToWorld(this.local, this.worldFeet);
   }
 
@@ -1313,11 +1340,11 @@ export class PlayerController {
     // 0,4 rad/s, e um náufrago a dez metros do centro ganharia daí 0,3 m/s no pior
     // caso — abaixo do limiar de movimento da passada.
     const speed = onFoot ? this.remoteSpeed(this.inWater ? ship : null) : 0;
-    this.gait.update(dt, speed, onFoot ? this.grounded : true);
-    // A água entra pelo mesmo caminho, com a mesma velocidade derivada: é a
-    // locomoção que desenha o nado hoje, e a linha de cima já a alimentou. Aqui
-    // fica só o relógio da água, que é o que os clipes `Float`/`Swim` vão consumir
-    // quando existirem. Ver `PlayerAvatar.updateSwim`.
+    // A passada fica com o convés e a água com o mar, e a mesma velocidade derivada
+    // serve às duas — o que muda é qual delas a recebe. Alimentar as duas poria o
+    // adversário nadando com as pernas de quem caminha, que é o defeito espelhado
+    // do que `updateBob` evita do lado de quem simula.
+    this.gait.update(dt, this.inWater ? 0 : speed, onFoot ? this.grounded : true);
     this.swim.update(dt, this.inWater, this.inWater ? speed : 0);
 
     // A escada é indexada pela **altura vencida**, como do lado de quem simula.
@@ -1483,10 +1510,22 @@ export class PlayerController {
     // nado — quem entra na água entra parado, e o primeiro braço é dele.
     this.velocity.set(0, 0, 0);
     this.worldVelocity.set(0, 0, 0);
+    // ⚠️ **O respingo não é um pouso.** `grounded` acabou de virar verdadeiro, e
+    // sem esta linha o relógio do pulo lê o próximo quadro como contato com o
+    // convés: o `airborne` que ficou da queda dispara `JumpLand` com a força do
+    // tombo, e o pirata passa meio segundo se agachando dentro do mar. Pior, o
+    // peso desse agachamento **soma** com o da água e estoura o total de 1 —
+    // exatamente a soma que `PlayerAvatar.poseBudget` existe para manter fechada.
+    //
+    // `reset` e não `settle`: aqui não há `dt` para amortecer com, e não faria
+    // falta. O clipe de ar que se corta é a última pose da queda, e ela está
+    // sendo substituída no mesmo quadro pela boia — apagá-la de uma vez é o mesmo
+    // gesto seco que `JumpClock` já faz na troca ar→pouso, e pela mesma razão.
+    this.jump.reset();
     // O corpo emerge na pose de boia já assentada, e não no ponto de impacto: o
     // que se vê é a cabeça saindo da água, e cair dois metros e meio para depois
     // subir 1,44 m amortecendo seria o corpo ricocheteando na superfície.
-    this.worldFeet.set(world.x, surface - (EYE_HEIGHT - SWIM_EYE_HEIGHT), world.z);
+    this.worldFeet.set(world.x, surface - SWIM_SUBMERSION, world.z);
   }
 
   /**
@@ -1568,12 +1607,7 @@ export class PlayerController {
     this.worldFeet.z += this.worldVelocity.z * dt;
 
     const surface = waves.sampleHeight(this.worldFeet.x, this.worldFeet.z);
-    this.worldFeet.y = damp(
-      this.worldFeet.y,
-      surface - (EYE_HEIGHT - SWIM_EYE_HEIGHT),
-      SWIM_BOB_LAMBDA,
-      dt,
-    );
+    this.worldFeet.y = damp(this.worldFeet.y, surface - SWIM_SUBMERSION, SWIM_BOB_LAMBDA, dt);
 
     // E `local` vira o que a posição de mundo diz que ele é. Daqui para a frente
     // câmera, corpo, interpolação e instantâneo leem o de sempre — inclusive a
@@ -1588,10 +1622,11 @@ export class PlayerController {
 
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     this.swim.update(dt, true, speed);
-    // ⚠️ **E a passada recebe a mesma velocidade** — é ela que desenha a água
-    // enquanto `Float` e `Swim` não existirem no GLB. Ver `PlayerAvatar.updateSwim`
-    // para as três linhas que mudam no dia em que os clipes entrarem; a fase de lá
-    // já mede o mesmo que a de cá (ver `SWIM_CLIP`), então a cadência não muda.
+    // E a passada **não** recebe esta velocidade: quem desenha a água são `Float` e
+    // `Swim`, e alimentar o `GaitClock` aqui poria as pernas do clipe de caminhada
+    // por baixo da braçada, dividindo o corpo entre dois gestos. Quem cuida da
+    // guarda é o próprio `updateBob`. A cadência não mudou na troca — a fase da
+    // água mede a mesma distância que a da passada media (ver `SWIM_DISTANCE`).
     this.updateBob(dt);
   }
 
@@ -1803,6 +1838,15 @@ export class PlayerController {
     // A passada também tem de se apagar: sem isto o corpo mistura caminhada com
     // escalada enquanto o jogador estiver com a tecla de andar apertada.
     this.gait.update(dt, 0, true);
+    // ⚠️ **E a água, que é a única escada que vem molhada.** A do costado tira o
+    // marujo do mar, e este é o único caminho por onde ele sai nadando: nenhum dos
+    // dois assentadores de relógio (`updateBob`, `settleBob`) roda enquanto se
+    // sobe, então sem esta linha o peso da água ficava cravado em 1 pela subida
+    // inteira. Com `Float`/`Swim` no GLB isso é o boiar somando com a escalada e
+    // estourando o total de 1 — e antes deles era invisível, porque a água não
+    // desenhava nada. A escada e o mar se apagam com o mesmo λ, então a soma dos
+    // dois atravessa a troca valendo exatamente um corpo.
+    this.swim.update(dt, false, 0);
 
     const rise = forward * CLIMB_SPEED * dt;
     this.local.y += rise;
@@ -2343,7 +2387,14 @@ export class PlayerController {
   }
 
   private updateBob(dt: number): void {
-    const speed = Math.hypot(this.velocity.x, this.velocity.z);
+    // ⚠️ **Na água a passada recebe zero, e não a velocidade de nado.** Ela
+    // desenhou o mar enquanto `Float` e `Swim` não existiam; agora que existem,
+    // uma passada viva por baixo deles daria um corpo batendo perna dentro da
+    // braçada — e o balanço de câmera que ela alimenta (2,1 cm por passo) viraria
+    // um solavanco que nada na superfície tem para justificar. Com zero, a
+    // locomoção se apaga sozinha e `bobOffset` cai para o ramo de baixo, que é o
+    // que deixa a cabeça do nadador subir e descer só com a onda.
+    const speed = this.inWater ? 0 : Math.hypot(this.velocity.x, this.velocity.z);
     this.gait.update(dt, speed, this.grounded);
     // Fora da escada o clipe de escalada se apaga sozinho. A **fase** fica onde
     // parou de propósito: quem larga a escada e reagarra dois metros acima não

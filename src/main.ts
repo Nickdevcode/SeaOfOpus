@@ -415,12 +415,12 @@ function updateDebug(dt: number): void {
       : []),
     '',
     `player ${match.player.station}${match.player.onLadder ? ' (ladder)' : ''}${match.player.grounded ? '' : ' (airborne)'}${match.player.inWater ? ' (swimming)' : ''}  ·  local x ${match.player.local.x.toFixed(2)}  y ${match.player.local.y.toFixed(2)}  z ${match.player.local.z.toFixed(2)}`,
-    // O relógio da água é o único que ainda não desenha nada — `Float` e `Swim`
-    // não existem no GLB, e a pose provisória sai da locomoção. Esta linha é o que
-    // permite conferir peso, braçada e fase **antes** de os clipes existirem, e é
-    // por ela que quem for ligá-los vai saber que o número já está certo. Ver
+    // O relógio da água tem duas fases e dois clipes, e esta linha mostra as duas
+    // metades: à esquerda o que o relógio pede, à direita (`f`/`s`) o peso que
+    // cada clipe de fato levou. Divergência entre os dois lados quer dizer GLB sem
+    // `Float`/`Swim` — a água devolve zero e o corpo volta a nadar em pé. Ver
     // `PlayerAvatar.updateSwim`.
-    `water ${match.player.inWater ? `${match.player.waterTime.toFixed(1)} s` : 'dry'}  ·  swim w ${match.player.swim.weight.toFixed(2)} stroke ${match.player.swim.stroke.toFixed(2)} phase ${match.player.swim.phase.toFixed(2)} at ${match.player.swim.speed.toFixed(2)} m/s  ·  rescue ${match.player.canRequestRescue() ? 'ready' : '—'}`,
+    `water ${match.player.inWater ? `${match.player.waterTime.toFixed(1)} s` : 'dry'}  ·  swim w ${match.player.swim.weight.toFixed(2)} stroke ${match.player.swim.stroke.toFixed(2)} phase ${match.player.swim.phase.toFixed(2)}/${match.player.swim.floatPhase.toFixed(2)} at ${match.player.swim.speed.toFixed(2)} m/s  ·  pose f ${avatar.float.toFixed(2)} s ${avatar.swim.toFixed(2)}  ·  rescue ${match.player.canRequestRescue() ? 'ready' : '—'}`,
     `body ${match.avatar.root.visible ? 'worn' : 'hidden'}  ·  legs ${(avatar.twist * RAD).toFixed(0)}° ${avatar.reversed ? 'reverse' : 'forward'}  ·  head clip ${avatar.headClip >= HEAD_CLIP_OFF ? 'off' : avatar.headClip.toFixed(2)}  ·  gait w ${avatar.walk.toFixed(2)} r ${avatar.run.toFixed(2)} i ${avatar.idle.toFixed(2)} air ${avatar.air.toFixed(2)} climb ${avatar.climb.toFixed(2)} helm ${avatar.helm.toFixed(2)}`,
     `cannons ${ship.cannons.map((c) => c.state).join(' / ')}  ·  locker ${ship.cannonballs} shot / ${ship.planks} planks  ·  focus ${match.interaction.focus?.id ?? '—'}`,
     `shot in flight ${match.cannonballs.activeCount}  ·  particles ${match.effects.liveCount}`,

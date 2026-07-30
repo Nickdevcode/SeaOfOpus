@@ -577,11 +577,11 @@ nas barras. E é o mesmo corpo que o adversário veste do outro lado do fio — 
 [O adversário tem corpo](#-o-adversário-tem-corpo), onde o defeito clássico
 aparece: o pé patinando no convés.
 
-Oito clipes, todos gerados por script no Blender e medidos, não afinados no olho:
+Dez clipes, todos gerados por script no Blender e medidos, não afinados no olho:
 
 | Clipe | Indexado por | Detalhe |
 |---|---|---|
-| `Idle` | tempo | 3,2 s de respiração, peso migrando de um pé para o outro |
+| `Idle` | tempo | 9,6 s: três respirações contra dois balanços de peso, primos entre si |
 | `Walk` | distância (1,65 m/s nativos) | apoio em 58% do ciclo, sempre um pé no chão |
 | `Run` | distância (3,67 m/s nativos) | apoio em 31%, com **fase aérea** de 6 quadros |
 | `JumpAir` | **velocidade vertical** | 24 quadros: pernas recolhem na subida, estendem na descida |
@@ -589,6 +589,8 @@ Oito clipes, todos gerados por script no Blender e medidos, não afinados no olh
 | `ClimbUp` | **altura vencida** | um ciclo = dois enfrechates; descer é o mesmo clipe ao contrário |
 | `Helm` | **ângulo da roda** | um ciclo = um punho (45°); bombordo é o mesmo clipe ao contrário |
 | `Carry` | tempo (2,4 s) | a tábua atravessada no corpo, uma mão em cada ponta |
+| `Float` | tempo (7,0 s) | boiando: eggbeater nas pernas, sculling nos braços, sem contato nenhum |
+| `Swim` | **distância** (1,32 m/s nativos) | crawl de cabeça erguida — o rosto não entra na água |
 
 ### Um relógio só: o passo que se vê e o que se sente
 
@@ -772,13 +774,17 @@ virar enfeite.
 | Alcance da escada, da água | 1,50 m | um corpo de distância; mais apertado e a onda faria o prompt piscar |
 | Alcance do corpo em rede | ±128 m do navio | teto da quantização de posição local |
 
-> [!note] As poses de água ainda são emprestadas
-> Os clipes `Float` (boiando) e `Swim` (braçada) **existem**, medidos e conferidos
-> em vídeo, mas ainda não estão no GLB — ver o
-> [README do personagem](PirateCharacter/README.md). Até entrarem, quem nada usa a
-> locomoção alimentada com a velocidade de nado, e o relógio de água já corre com a
-> cadência certa: a troca é de três linhas, e existe teste provando que a fase não
-> muda de dono quando ela acontecer.
+> [!note] Os clipes de água têm o zero na linha d'água, não no chão
+> `Float` e `Swim` são os únicos cuja origem **não** fica sob os pés — o corpo é
+> repartido pela superfície, e é isso que faz o `verify()` de cada um poder garantir
+> que a cabeça está fora d'água. O runtime assenta essa origem 1,44 m acima dos pés
+> simulados, que é onde a linha d'água está no corpo: **não** os 1,32 m em que o
+> animador pôs os pés, porque os dois números medem coisas diferentes — 1,32 é onde
+> o queixo sobra 11,8 cm de água, e 1,44 é onde a **câmera** está, a 22 cm da
+> superfície por decisão de enquadramento. O deslocamento é linear no peso da
+> mistura, então a entrada e a saída da água interpolam em linha reta em vez de
+> saltar. Os pés desenhados param 12 cm acima dos simulados, a um metro e meio de
+> profundidade, num corpo reclinado: ninguém os vê.
 
 ### 🪜 A escada de embarque: subir é dela, descer é do portaló
 
@@ -1392,16 +1398,12 @@ onde estava o buraco** · **duelo 1v1 em rede, com sala por código, fila de
 pareamento e servidor próprio na Cloudflare** · **o adversário com corpo no convés
 dele, animado pelos mesmos clipes — andando, correndo, pulando, subindo a escada,
 de mãos na roda, tapando rombo, e com a cabeça acompanhando para onde ele
-olha** · **homem ao mar: portaló nos dois bordos, nado na superfície, escada de
-embarque de volta e resgate por cabo, tudo valendo em rede**.
+olha** · **homem ao mar: portaló nos dois bordos, nado na superfície com clipe
+próprio, boia com outro, escada de embarque de volta e resgate por cabo, tudo
+valendo em rede**.
 
 **O que falta, em ordem de impacto:**
 
-0. 🏊 **As poses de água no GLB.** `Float` e `Swim` já existem — gerados, medidos e
-   conferidos em vídeo —, mas ainda não foram exportados: falta a aprovação de quem
-   vai olhar o clipe rodando. Enquanto isso quem nada usa a locomoção emprestada,
-   com a cadência certa e a pose errada. A troca são três linhas, marcadas no
-   `updateSwim`, e há teste garantindo que a fase não muda de dono na hora.
 1. 🎚️ **Vela ajustável.** É a lacuna que mais se sente. Hoje o pano está sempre cheio,
    e duas chalupas idênticas numa caça de popa **empatam por física** — a que foge não
    é alcançável. Poder ferrar a vela é o que devolve a decisão de parar e brigar, e é

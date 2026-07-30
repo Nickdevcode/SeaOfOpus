@@ -61,10 +61,84 @@ import type {
   SwimClock,
 } from './Locomotion';
 import { CarriedPlank } from './CarriedPlank';
-import type { PlayerController } from './PlayerController';
+import { SWIM_SUBMERSION, type PlayerController } from './PlayerController';
 
 /** Convergência da direção do corpo, em 1/s. */
 const FACING_LAMBDA = 11;
+
+/**
+ * Onde o corpo se assenta na vertical, dada a altura dos pés simulados.
+ *
+ * ## Os dois clipes de água têm outra origem, e é isso que esta linha conserta
+ *
+ * Nos oito clipes de terra `y = 0` é o **chão, sob os pés**, e por isso o avatar
+ * inteiro é pendurado na posição dos pés e acabou. Nos dois de água `y = 0` é a
+ * **linha d'água**: o corpo foi construído repartido nela, pernas e quadril
+ * abaixo, ombros e cabeça acima. Tocar `Float` sem tratar isso põe a linha d'água
+ * do clipe na altura dos pés simulados, e o pirata boia um metro e meio acima do
+ * mar — ou, dito do outro lado, o mar passa a cortá-lo nos tornozelos.
+ *
+ * O conserto é uma soma só: subir o corpo `SWIM_SUBMERSION` quando a água tem o
+ * corpo inteiro, nada quando ela não tem nenhum, e a fração no meio do caminho.
+ *
+ * ## Por que a fração é linear, e por que ela não dá salto
+ *
+ * Porque a pose também é. Na transição, o `root` do rig é a média ponderada dos
+ * dois clipes: com peso `w` na água, a translação de mergulho do `Float` entra
+ * valendo `w × 1,32` e o resto do corpo vem dos clipes de terra. Somar `w × 1,44`
+ * por fora faz o corpo desenhado interpolar **em linha reta** entre os dois
+ * assentamentos — pés simulados quando `w = 0`, clipe assentado na superfície
+ * quando `w = 1`, e nada de descontínuo entre os dois. Qualquer curva diferente
+ * da do peso descolaria a origem do clipe da pose que ele está desenhando.
+ *
+ * ⚠️ **`water` tem de ser o peso que os clipes de fato receberam**, e não o do
+ * relógio: sem `Float` no GLB (um arquivo antigo em cache) o corpo continua sendo
+ * desenhado pela locomoção, que quer os pés no lugar dos pés. Ver `updateSwim`.
+ *
+ * @param feetY altura dos pés simulados, em coordenadas do navio.
+ * @param water quanto do corpo os clipes de água ocuparam, em [0, 1].
+ */
+export function waterPoseY(feetY: number, water: number): number {
+  return feetY + SWIM_SUBMERSION * water;
+}
+
+/**
+ * Reparte o que sobra do corpo entre a tábua e a locomoção.
+ *
+ * É a única aritmética deste arquivo com uma **invariante**, e é por isso que ela
+ * saiu de dentro do método: os pesos têm de somar exatamente 1. O que sobrar
+ * acima de 1 o Three renormaliza, encolhendo todo mundo na mesma proporção; o que
+ * faltar ele preenche com a pose de repouso do rig, que é a T-pose de braços
+ * abertos. Nenhum dos dois defeitos aparece no Blender e os dois aparecem no
+ * primeiro segundo de jogo.
+ *
+ * ⚠️ **A soma só fecha porque as entradas são exclusivas**, e cada exclusão é uma
+ * linha de código em outro arquivo: não há como estar na escada e no leme, nem na
+ * escada e no mar (`updateLadder` apaga a água, que é o que a escada do costado
+ * acabou de tirar dele), nem no mar e no meio de um pulo (`enterWater` encerra o
+ * voo sem disparar pouso). Onde duas delas se cruzam, elas se cruzam com o mesmo
+ * λ e a soma atravessa a troca valendo um corpo. Quem confere isso quadro a quadro
+ * num percurso convés→mar→escada→convés é `tests/locomotion.ts`.
+ *
+ * A única que **convive** com as outras é a tábua — dá para carregar madeira
+ * andando pelo porão —, e é ela que cede a todo o resto: ao posto, porque não se
+ * prega tábua pendurado numa escada; ao pulo, porque não se prega tábua no ar; e a
+ * quem anda, porque um corpo deslizando pelo convés na pose de carregar é
+ * exatamente o defeito que o resto deste arquivo existe para evitar.
+ *
+ * @param posts o que escada, timão, água e pulo já tomaram.
+ * @param carry o peso que a tábua pediu.
+ * @param moving quanto da locomoção é caminhada, em [0, 1].
+ */
+export function poseBudget(
+  posts: { climb: number; helm: number; swim: number; jump: number },
+  carry: number,
+  moving: number,
+): { carry: number; ground: number } {
+  const taken = posts.climb + posts.helm + posts.swim + posts.jump;
+  const held = Math.max(0, Math.min(carry, (1 - taken) * (1 - moving)));
+  return { carry: held, ground: Math.max(0, 1 - taken - held) };
+}
 
 /**
  * Quanto o corpo recua do olho em primeira pessoa, em metros.
@@ -107,6 +181,8 @@ export class PlayerAvatar {
   private climbUp: THREE.AnimationAction | null = null;
   private helm: THREE.AnimationAction | null = null;
   private carry: THREE.AnimationAction | null = null;
+  private float: THREE.AnimationAction | null = null;
+  private swim: THREE.AnimationAction | null = null;
 
   /** A madeira nas mãos enquanto se prega tábua. Ver `CarriedPlank`. */
   private readonly plank = new CarriedPlank();
@@ -223,6 +299,17 @@ export class PlayerAvatar {
       if (!this.carry) {
         console.warn('[avatar] clipe de carregar tábua não encontrado no GLB');
       }
+
+      // E a água, que são **dois** e valem como um: sem `Float` não há pose de
+      // boiar, e sem `Swim` a braçada nunca começa — um par pela metade daria um
+      // corpo que boia e depois desliza sem gesto, que é pior que o corpo em pé
+      // que a locomoção desenhava antes de os dois existirem. Faltando qualquer
+      // um, a água devolve peso zero e o jogo volta a ser o de então.
+      this.float = this.action(character.animations, 'Float');
+      this.swim = this.action(character.animations, 'Swim');
+      if (!this.float || !this.swim) {
+        console.warn('[avatar] clipes de água não encontrados no GLB; o corpo nada sem pose');
+      }
       if (skinned) this.plank.attach((skinned as THREE.SkinnedMesh).skeleton, this.root);
 
       // Quem avança o tempo destes é um relógio, quadro a quadro: a passada para
@@ -245,6 +332,14 @@ export class PlayerAvatar {
       // `CarryClock`, do lado de fora, para que a respiração não recomece do
       // zero a cada vez que a mão volta à madeira.
       this.carry?.setEffectiveTimeScale(0);
+      // A braçada é indexada pela **distância nadada**, como a passada é pela
+      // distância no chão: é o que faz a mão empurrar água em vez de patinar
+      // nela, em qualquer velocidade de nado.
+      this.swim?.setEffectiveTimeScale(0);
+      // E a boia pelo tempo, da mesma família da tábua e do parado — só que num
+      // relógio que este arquivo não possui, para que a respiração de quem cai no
+      // mar duas vezes não recomece do zero na segunda. Ver `SwimClock`.
+      this.float?.setEffectiveTimeScale(0);
 
       this.loaded = true;
       return true;
@@ -355,7 +450,11 @@ export class PlayerAvatar {
     this.updateStation(dt, player);
 
     _velocity.set(player.velocity.x, player.velocity.z);
-    const walking = player.gait.moving > 0.5;
+    // "Andando" é o corpo avançando por gesto próprio, e na água esse gesto é a
+    // braçada. É este bit que aponta o corpo para onde ele **vai** em vez de para
+    // onde ele olha, e um nadador com o rumo preso ao olhar faz de lado o mesmo
+    // que o moonwalk fazia de costas.
+    const walking = player.gait.moving > 0.5 || player.swim.stroke > 0.5;
 
     // A escada leva o corpo inteiro: quem está pendurado nela não está andando
     // nem caindo. O que ela ocupa sai do orçamento antes de tudo.
@@ -364,33 +463,25 @@ export class PlayerAvatar {
     // roda não está andando. Os dois nunca se sobrepõem — não há como estar na
     // escada e no leme —, então somá-los não estoura o total.
     const helming = this.updateHelm(player.helm);
-    // A tábua sai do mesmo orçamento, e é o único posto que **convive** com os
-    // outros: dá para estar no porão com a madeira na mão, e não dá para estar
-    // na escada e no leme ao mesmo tempo. Por isso ela é grampeada ao que
-    // sobrou, em vez de somada de igual para igual — do contrário, um quadro
-    // com escada e tábua ao mesmo tempo passaria de 1 e apagaria a locomoção.
-    //
-    // E ela **cede a quem anda**. O timão e a escada prendem o jogador no
-    // lugar; pregar tábua não prende, e o alcance de reparo é de três metros,
-    // então dá para caminhar segurando o botão. Sem esta cláusula o corpo
-    // deslizaria pelo porão na pose de carregar, com os pés parados — que é
-    // exatamente o defeito que o resto deste arquivo existe para evitar.
-    const carrying = this.updateCarry(
-      player.carry,
-      (1 - climbing - helming) * (1 - player.gait.moving),
-    );
-    // A água sai do mesmo orçamento que a escada e o timão, e pelo mesmo motivo —
-    // não há como estar no mar e pendurado numa barra do mastro. Hoje ela devolve
-    // **zero**: os clipes não existem no GLB e a pose da água é desenhada pela
-    // locomoção logo abaixo, que já recebeu a velocidade de nado. Ver `updateSwim`.
+    // E a água, que é o terceiro posto exclusivo: quem está no mar não está
+    // pendurado numa barra do mastro nem de mãos na roda. Ver `updateSwim`.
     const swimming = this.updateSwim(player.swim);
-    // O que sobra do pulo é o que a locomoção pode ocupar. Os pesos têm de somar
-    // 1: o que faltar o Three preenche com a pose de repouso do rig, que é a
-    // T-pose de braços abertos.
-    const ground = Math.max(
-      0,
-      1 - climbing - helming - carrying - swimming - this.updateJump(player.jump),
+    // O pulo é o quarto, e ele não convive com a água por construção — o respingo
+    // encerra o voo em `PlayerController.enterWater`, sem disparar pouso.
+    const jumping = this.updateJump(player.jump);
+
+    // O resto se reparte entre a tábua e a locomoção, e a soma fecha em 1. A
+    // aritmética está fora daqui porque é a única deste arquivo com invariante:
+    // ver `poseBudget`, que explica por que a tábua é a única que cede.
+    const { carry: carrying, ground } = poseBudget(
+      { climb: climbing, helm: helming, swim: swimming, jump: jumping },
+      // O relógio pede, mas quem não tem clipe não ocupa corpo nenhum: sem esta
+      // guarda o orçamento reservaria peso para uma pose que ninguém desenha, e o
+      // que sobrasse viraria T-pose.
+      this.carry ? player.carry.weight : 0,
+      player.gait.moving,
     );
+    this.applyCarry(player.carry, carrying);
 
     // A torção é exclusiva de quem está dentro do corpo. Visto de fora, o corpo
     // inteiro apontado para onde anda continua sendo o certo — e é essa a pose
@@ -400,7 +491,7 @@ export class PlayerAvatar {
     else this.updateFacing(dt, player, walking);
 
     // Depois do rumo, que é quem diz para onde é "atrás".
-    this.applyPosition(embodied, player);
+    this.applyPosition(embodied, player, swimming);
     this.updateLocomotion(player.gait, ground, twisting && this.body.reversed);
     this.mixer.update(dt);
     // Depois do mixer, sempre: ele reescreve os 43 ossos a cada passagem.
@@ -409,7 +500,16 @@ export class PlayerAvatar {
     // **não** está dentro do corpo: em primeira pessoa a cabeça está recortada e
     // a torção do quadril ocupa o mesmo instante, e as duas rotações não
     // comutam. Ver `HeadLook`.
-    else if (this.headLookReady) this.headLook.apply(player.pitch);
+    //
+    // ⚠️ **E ele cede à água na proporção em que ela tomou o corpo.** Os dois
+    // clipes do mar não têm a cabeça onde a têm por acaso: `anim_swim.solve_attitude`
+    // resolveu a atitude do tronco e a extensão do pescoço **contra uma restrição**
+    // — o rosto nunca entra na água —, e o `verify()` de cada um mede a folga que
+    // sobrou (3,5 cm nadando, 10,4 cm boiando). `HeadLook` não conhece essa
+    // restrição: ele soma até 49° de inclinação por cima do que o clipe já resolveu,
+    // e num corpo deitado 49° para baixo é o rosto do adversário afundando toda vez
+    // que o dono dele olhar para os próprios pés. Na água a cabeça é do clipe.
+    else if (this.headLookReady) this.headLook.apply(player.pitch * (1 - swimming));
     // E a tábua depois dos dois, porque ela lê as matrizes dos punhos: lida
     // antes, ela desenharia a pose do quadro anterior.
     // O limiar é o mesmo do peso do clipe, e não do relógio: andar cede a pose
@@ -432,9 +532,36 @@ export class PlayerAvatar {
    * roda** — os 11 cm somam ao vão que o braço já tem de vencer e as mãos do
    * jogador caem aquém dos punhos. Compensar no clipe não serve: é o mesmo clipe
    * que o outro jogador vê de fora, onde não há recuo nenhum.
+   *
+   * **Na água o recuo continua valendo, e continua sendo 11 cm** — mas a geometria
+   * que ele resolve não é mais a mesma, e os números merecem ficar escritos.
+   * Medidos no GLB, com a origem do clipe já assentada na linha d'água e a câmera
+   * nos 22 cm de `SWIM_EYE_HEIGHT`, a articulação do pescoço fica:
+   *
+   * - **de pé no convés:** 28 cm abaixo e 9 cm atrás da câmera;
+   * - **boiando (`Float`):** 14 cm abaixo e 17 cm atrás — o corpo reclina 15° para
+   *   trás e o recuo soma a isso, então ele está ainda mais fora da vista que em
+   *   terra. A cabeça do clipe fica 9 cm atrás da origem, ou seja atrás da câmera;
+   * - **nadando (`Swim`):** 18 cm abaixo e **1 cm à frente**. O corpo está deitado,
+   *   a cabeça avança 19 cm da origem e o recuo mal dá conta de trazê-la para
+   *   debaixo do olho.
+   *
+   * O último caso é o único que não fecha sozinho no papel. O que salva é o
+   * `near` de 15 cm da câmera: olhando para vante, o plano de corte cai adiante do
+   * pescoço e da cabeça inteira, e o que sobra na tela são os braços na braçada,
+   * que é justamente o que se quer ver. Olhando **para baixo**, no batente do
+   * `PITCH_LIMIT`, o plano desce e o buraco que o recorte abre no pescoço volta a
+   * caber no enquadramento. Isso é coisa de olhar na tela, e o botão está à mão:
+   * `calibrate({ setback })` pela bancada `window.__game`.
+   *
+   * A vertical é a outra metade do assentamento, e ela é toda da água: ver
+   * `waterPoseY`.
+   *
+   * @param water quanto do corpo os clipes de água ocuparam, em [0, 1].
    */
-  private applyPosition(embodied: boolean, player: PlayerController): void {
+  private applyPosition(embodied: boolean, player: PlayerController, water: number): void {
     this.root.position.copy(this.stationPosition);
+    this.root.position.y = waterPoseY(this.root.position.y, water);
     if (!embodied || player.station === 'helm') return;
     this.root.position.x -= Math.sin(this.facing) * this.setback;
     this.root.position.z -= Math.cos(this.facing) * this.setback;
@@ -492,6 +619,11 @@ export class PlayerAvatar {
    * para trás — o "moonwalk" clássico. Virar o corpo para a direção do
    * movimento é mentira barata e invisível: a animação sempre anda para a
    * frente, que é a única coisa que ela sabe fazer.
+   *
+   * **Vale igual na água**, e `walking` já chega contando a braçada: `Swim` é um
+   * crawl que avança de cabeça, e um nadador com o rumo preso ao olhar cruzaria o
+   * mar de lado sempre que o jogador olhasse para a escada em vez de para onde
+   * está indo. Boiando não há para onde apontar, e aí o olhar volta a mandar.
    */
   private updateFacing(dt: number, player: PlayerController, walking: boolean): void {
     // No ar ninguém torce o corpo: o rumo é o que se levou na decolagem. Sem
@@ -560,6 +692,26 @@ export class PlayerAvatar {
     // zera a torção de uma vez, que é o que faz o corpo inteiro ficar de frente
     // para a proa.
     //
+    // ⚠️ **E na água, por um motivo que não é o das mãos ocupadas: lá o eixo da
+    // torção deixa de ser a coluna.** `FirstPersonBody` gira o quadril em torno da
+    // vertical do avatar, e isso é uma torção de tronco enquanto o tronco está de
+    // pé. Nadando, o corpo está deitado: a mesma rotação passa a ser
+    // perpendicular à coluna, e o que ela produz não é um quadril torcido, é um
+    // nadador **dobrado de lado** como uma banana — até 65° deles, que é o limite
+    // que `LEG_OFFSET_LIMIT` autoriza sem ninguém ver problema em terra.
+    //
+    // `hold` planta as pernas no rumo do corpo e zera o desvio, então `apply` sai
+    // pela porta da frente e o clipe chega intacto ao mixer. O que se perde é a
+    // separação pernas/tronco na água, e ali ela não custa nada: quem está
+    // boiando não tem pé no chão para escorregar.
+    if (player.inWater) {
+      this.facing = player.yaw + Math.PI;
+      this.facingReady = true;
+      this.applyFacing(player);
+      this.body.hold(this.facing);
+      return;
+    }
+
     // O custo é real e é o mesmo que a escada já paga: o corpo deixa de
     // acompanhar o olhar. Vale a troca justamente onde as mãos estão ocupadas —
     // e `legTarget` já plantava as pernas aqui, então metade dele já era devida.
@@ -713,55 +865,59 @@ export class PlayerAvatar {
   }
 
   /**
-   * A pose da água, quando ela existir. Devolve quanto do corpo ela tomou.
+   * Põe os dois clipes da água no ponto certo e os reparte entre si. Devolve
+   * quanto do corpo eles tomaram.
    *
-   * ## Hoje isto devolve zero, e não é esquecimento
+   * ## Duas réguas, porque são dois gestos diferentes
    *
-   * `Float` e `Swim` **não existem no GLB** — estão sendo animados em paralelo e só
-   * entram depois de aprovados. Enquanto isso, quem desenha a água é a locomoção:
-   * `PlayerController.updateSwim` alimenta o `GaitClock` com a velocidade de nado,
-   * então as pernas batem no ritmo do avanço (fase pela distância, como sempre) e o
-   * parado assume ao boiar. É a pose que menos mente para um corpo em pé submerso
-   * até o peito, e a soma dos pesos continua fechando em 1 sem uma linha de
-   * exceção. Em primeira pessoa a cabeça está recortada e o que se vê é o mar no
-   * rodapé; de fora, o adversário aparece com o tronco fora da água.
+   * `Swim` é indexado pela **distância nadada**, como a passada é pela distância
+   * no chão: é o que faz a mão empurrar água em vez de patinar nela, em qualquer
+   * velocidade. `Float` é indexado pelo **tempo**, como a tábua, porque boiar não
+   * tem grandeza do mundo de onde ler uma fase — é respiração, e respiração não
+   * acelera com a corrente. As duas moram no mesmo `SwimClock`, que é o único que
+   * sabe se o marujo está no mar.
    *
-   * É a mesma política que este arquivo já aplica ao pulo e à escalada quando um
-   * GLB antigo em cache não os traz: sem clipe, peso zero, jogo inteiro.
+   * A repartição é `stroke`, o irmão do `moving` da passada: acima do limiar de
+   * movimento o corpo dá braçada, abaixo dele boia, e no meio do caminho os dois
+   * clipes se sobrepõem na mesma proporção em que o corpo está entre um gesto e o
+   * outro. `weight` é a água inteira, e é o que este método devolve — a soma dos
+   * dois pesos é exatamente ele, então o orçamento de pose não sabe que a água
+   * tem duas metades.
    *
-   * ## O que muda quando os dois clipes entrarem
+   * ## Sem clipe, peso zero
    *
-   * Exatamente três coisas, e nenhuma delas fora daqui e do controlador:
-   *
-   * 1. **`load`** passa a buscá-los, como já busca `ClimbUp`, e a pôr os dois em
-   *    `setEffectiveTimeScale(0)` — eles são posicionados pela fase, não tocados.
-   * 2. **este método** reparte `clock.weight` entre os dois por `clock.stroke`
-   *    (`Swim` fica com `weight × stroke`, `Float` com o resto), posiciona `.time`
-   *    com `clock.phase` e devolve `clock.weight`.
-   * 3. **`PlayerController.updateSwim`** para de alimentar o `GaitClock` com a
-   *    velocidade de nado. A cadência não muda ao trocar, e é por construção:
-   *    `SWIM_CLIP.distance` é hoje a distância do ciclo de caminhada, e há um caso
-   *    em `tests/locomotion.ts` que prova que as duas fases andam juntas.
+   * Mesma política do pulo e da escalada: um GLB antigo em cache do navegador não
+   * pode tirar do jogador o resto do corpo. Faltando qualquer um dos dois, a água
+   * devolve zero, a locomoção reassume o orçamento e o corpo volta a nadar em pé
+   * — que é exatamente o que ele fazia antes de estes clipes existirem. É por
+   * isso que o **valor devolvido** é o que assenta a vertical em `waterPoseY`, e
+   * não `clock.weight`: sem clipe de água não há origem de água para corrigir.
    */
   private updateSwim(clock: SwimClock): number {
-    void clock;
-    return 0;
+    const float = this.float;
+    const swim = this.swim;
+    if (!float || !swim) return 0;
+
+    swim.time = clock.phase * (swim.getClip().duration || 1);
+    float.time = clock.floatPhase * (float.getClip().duration || 1);
+
+    const stroking = clock.weight * clock.stroke;
+    swim.setEffectiveWeight(stroking);
+    float.setEffectiveWeight(clock.weight - stroking);
+    return clock.weight;
   }
 
   /**
-   * A tábua nas mãos, no que sobrou do orçamento de pose.
+   * A tábua nas mãos, no peso que `poseBudget` liberou para ela.
    *
-   * @param budget quanto de corpo os outros postos deixaram livre.
-   * @returns o peso que este clipe de fato ocupou.
+   * @param weight quanto de corpo a tábua ficou, já grampeado ao orçamento.
    */
-  private updateCarry(clock: CarryClock, budget: number): number {
+  private applyCarry(clock: CarryClock, weight: number): void {
     const action = this.carry;
-    if (!action) return 0;
+    if (!action) return;
 
-    const weight = Math.max(0, Math.min(clock.weight, budget));
     action.time = clock.phase * (action.getClip().duration || 1);
     action.setEffectiveWeight(weight);
-    return weight;
   }
 
   /** Diagnóstico para a bancada `window.__game` e para o overlay de telemetria. */
@@ -774,6 +930,10 @@ export class PlayerAvatar {
     land: number;
     climb: number;
     helm: number;
+    /** Peso da boia. Zero fora da água — e zero também sem os clipes no GLB. */
+    float: number;
+    /** Peso da braçada, que divide a água com a boia por `SwimClock.stroke`. */
+    swim: number;
     /** Torção do quadril em vigor, em radianos. Zero fora da primeira pessoa. */
     twist: number;
     /** `true` quando a passada está sendo lida ao contrário. */
@@ -790,6 +950,8 @@ export class PlayerAvatar {
       land: this.jumpLand?.getEffectiveWeight() ?? 0,
       climb: this.climbUp?.getEffectiveWeight() ?? 0,
       helm: this.helm?.getEffectiveWeight() ?? 0,
+      float: this.float?.getEffectiveWeight() ?? 0,
+      swim: this.swim?.getEffectiveWeight() ?? 0,
       twist: this.body.offset,
       reversed: this.body.reversed,
       headClip: this.headClips[0]?.threshold ?? HEAD_CLIP_OFF,

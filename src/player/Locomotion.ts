@@ -284,45 +284,89 @@ export class CarryClock {
 }
 
 /**
- * Distância que um ciclo de braçada cobre na água, em metros.
+ * O que o clipe de braçada faz. Os números saem de `anim_swim.py`, como os da
+ * passada saem de `anim_walk.py`, e não são afináveis aqui.
  *
- * ⚠️ **É o único número emprestado deste arquivo.** Todos os outros saem do
- * Blender e são propriedade do clipe; este sai do clipe de *caminhada*, porque
- * `Float` e `Swim` ainda não existem no GLB e é a locomoção que desenha a água
- * hoje (ver `SwimClock`). Enquanto for assim, a braçada tem de medir exatamente o
- * que a passada mede — senão a chegada dos clipes de verdade mudaria a cadência
- * das pernas, e a água deixaria de se parecer com o que já se viu dela.
+ * `speed` é a velocidade **nativa** do gesto: `CYCLE_DISTANCE` de 1,32 m em
+ * `CYCLE_FRAMES / FPS` = 1,0 s. Ela não é escolha de animador — sai da varredura
+ * da mão (2,18 m com os dois braços) vezes a eficiência propulsiva de um crawl de
+ * cabeça erguida (0,605), que é ruim de propósito porque o tronco inclinado
+ * arrasta. Ver o cabeçalho de `anim_swim.py`.
  *
- * Quando `anim_swim.py` existir, isto passa a ser `speed × cycle` dele, como em
- * `WALK_CLIP`, e o número deixa de ser emprestado.
+ * O jogo nada a `SWIM_SPEED` = 1,4 m/s, então a fase corre 1,06 ciclo por segundo
+ * e o clipe sai 6% mais rápido do que foi animado. **Não há `timeScale` escrito
+ * em lugar nenhum**: a fase é dirigida pela distância, e o fator cai dela sozinho
+ * — exatamente a mesma conta que a caminhada já faz, onde 1,65 nativo vira 2,8 de
+ * jogo (fator 1,70).
  */
-export const SWIM_CLIP = { distance: WALK_DISTANCE } as const;
+export const SWIM_CLIP = { speed: 1.32, cycle: 1.0 } as const;
 
 /**
- * O relógio da água: a mesma ideia da passada, com o corpo na superfície.
+ * Distância que um ciclo de braçada cobre na água, em metros.
  *
- * A fase avança pela **distância nadada**, não pelo tempo, pelo mesmo motivo de
- * sempre — é o que faz a braçada ser um gesto de avanço em qualquer velocidade,
- * em vez de um filme rodando por cima de um corpo que desliza. `stroke` é o
- * equivalente do `moving` da passada: acima do limiar de movimento o corpo
- * nada, abaixo dele boia.
+ * ⚠️ **Vale o mesmo que `WALK_DISTANCE`, e isso é medida, não empréstimo.**
+ * Enquanto `Swim` não existia no GLB, quem desenhava a água era a caminhada e
+ * este número *era* o dela, tomado de propósito para que a chegada do clipe de
+ * verdade não mudasse a cadência das pernas. O clipe chegou com 1,32 m de ciclo
+ * por conta própria, e a coincidência virou a prova: o caso de
+ * `tests/locomotion.ts` que media o empréstimo agora mede a **troca**, e ela é
+ * fase por fase a mesma.
+ */
+export const SWIM_DISTANCE = SWIM_CLIP.speed * SWIM_CLIP.cycle;
+
+/**
+ * O que o clipe de boiar tem, e o número dele que o runtime resolve não usar.
  *
- * ## Por que ele existe antes dos clipes
+ * `duration` são 210 quadros a 30 fps: o menor laço que fecha 3 pernadas, 5
+ * varreduras de braço e 2 respirações ao mesmo tempo (210 = 2·3·5·7). Como não há
+ * grandeza do mundo para ler — boiar não tem período natural —, é o único clipe
+ * de água que roda no **tempo**. Ver `CarryClock`, que é a mesma exceção.
  *
- * Porque a água já é um estado do jogo — dá para cair nela, nadar até a escada e
- * voltar a bordo —, e o corpo tem de mostrar *algo* enquanto `Float` e `Swim`
- * não chegam. A pose provisória é a locomoção existente, que é o que menos mente
- * com um corpo de pé submerso até o peito: as pernas batem no ritmo do avanço e
- * o parado assume ao boiar. O que este relógio guarda é o que os clipes de
- * verdade vão consumir — e o teste de `SWIM_CLIP` prova que a troca não muda a
- * cadência.
+ * `sink` é o afundamento com que o clipe foi construído: a origem do rig (o plano
+ * dos pés do personagem) desce 1,32 m abaixo da linha d'água, que é onde o clipe
+ * põe o seu `z = 0`. **O runtime não usa este número**, e a diferença de 12 cm
+ * para o afundamento que a física simula (`SWIM_SUBMERSION`, 1,44 m) é
+ * deliberada: ver a nota lá e o caso de teste que a amarra. Ele mora aqui para
+ * que essa divergência tenha um dono e um alarme — mexer no enquadramento do
+ * olho sem reler aquele parágrafo reprova o teste.
+ */
+export const FLOAT_CLIP = { duration: 7, sink: 1.32 } as const;
+
+/**
+ * O relógio da água: **duas** fases, porque a água tem dois clipes.
  *
- * Ver `PlayerAvatar.updateSwim`, que lista em três linhas exatamente o que muda
- * no dia em que os dois clipes entrarem no GLB.
+ * `phase` é a braçada e avança pela **distância nadada**, não pelo tempo, pelo
+ * mesmo motivo de sempre — é o que faz a braçada ser um gesto de avanço em
+ * qualquer velocidade, em vez de um filme rodando por cima de um corpo que
+ * desliza. `stroke` é o equivalente do `moving` da passada: acima do limiar de
+ * movimento o corpo nada, abaixo dele boia, e os dois clipes se repartem por ele.
+ *
+ * `floatPhase` é a boia, e ela roda no **tempo**. É a mesma exceção do
+ * `CarryClock` e pelo mesmo motivo escrito lá: boiar não tem período natural
+ * nenhum de onde ler uma fase. Amarrá-la à onda daria um homem que respira mais
+ * rápido em mar grosso; amarrá-la à velocidade daria um sujeito que prende a
+ * respiração para ficar parado.
+ *
+ * ## Por que as duas moram no mesmo relógio
+ *
+ * Porque são **um estado só** do corpo, e o que as separa é um número que já
+ * está aqui (`stroke`). Um relógio à parte para a boia teria de receber o mesmo
+ * `inWater`, ser zerado no mesmo `reset` e ser passado no mesmo lugar do
+ * instantâneo — três chances de as duas metades da água discordarem sobre se o
+ * marujo está nela.
+ *
+ * ## Nenhuma das duas volta a zero ao sair do mar
+ *
+ * Como a fase da escada e a da tábua. Quem cai, agarra a escada e escorrega de
+ * volta não recomeça a braçada nem a respiração do começo — e o tranco dessa
+ * recomeçada apareceria justamente no quadro em que o jogador está olhando para a
+ * própria mão saindo da água.
  */
 export class SwimClock {
-  /** Onde a braçada está, em [0, 1). */
+  /** Onde a braçada está, em [0, 1). Esta corre pela distância. */
   phase = 0;
+  /** Onde a boia está, em [0, 1). Esta corre pelo tempo. */
+  floatPhase = 0;
   /** Quanto do corpo a água ocupa — sobe ao cair no mar, cai ao sair dele. */
   weight = 0;
   /** Quanto da pose é braçada em vez de boia, em [0, 1]. */
@@ -341,11 +385,15 @@ export class SwimClock {
     this.stroke = damp(this.stroke, swimming ? 1 : 0, BLEND_LAMBDA, dt);
     // Boiando a fase congela, como na escada: o corpo fica onde a última braçada
     // o deixou em vez de continuar remando parado.
-    if (swimming) this.phase = (this.phase + (speed * dt) / SWIM_CLIP.distance) % 1;
+    if (swimming) this.phase = (this.phase + (speed * dt) / SWIM_DISTANCE) % 1;
+    // A boia corre com o corpo na água, nadando ou não: ela é a respiração de
+    // baixo, e o `Swim` por cima dela só a cobre enquanto houver braçada.
+    if (inWater) this.floatPhase = (this.floatPhase + dt / FLOAT_CLIP.duration) % 1;
   }
 
   reset(): void {
     this.phase = 0;
+    this.floatPhase = 0;
     this.weight = 0;
     this.stroke = 0;
     this.speed = 0;

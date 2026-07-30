@@ -235,12 +235,6 @@ alcançar. O prefixo `_` faz o `export.py` descartá-la sozinho.
 
 ## 🌊 Os dois clipes de água
 
-> [!warning] Estes dois ainda **não estão no GLB**
-> `Float` e `Swim` estão gerados, medidos e conferidos em vídeo, mas o `.blend` não
-> foi salvo e o `export.py` não rodou: eles entram no jogo depois da aprovação de
-> quem vai olhar o clipe rodando. Até lá, quem nada no Sea of Opus usa a locomoção
-> emprestada. Reconstruir os dois é `anim_float.build()` e `anim_swim.build()`.
-
 Nos clipes de terra `z = 0` é o chão, sob os pés. Nestes dois é a **linha d'água** —
 o corpo fica repartido nela, e é o `root` que o posiciona. Nenhum dos dois anima a
 subida e a descida pela onda: quem ergue o avatar é o runtime, e repetir isso aqui
@@ -403,6 +397,7 @@ sys.path.insert(0, r"...\PirateCharacter\scripts")
 
 import build_all, materials, finalize, build_rig, export
 import anim_walk, anim_run, anim_idle, anim_jump, anim_climb, anim_helm
+import anim_carry, anim_float, anim_swim
 
 build_all.run()              # geometria (limpa a cena antes)
 materials.apply_materials()  # materiais procedurais por objeto/face
@@ -414,8 +409,27 @@ anim_idle.build()            # parado, respirando
 anim_jump.build()            # JumpAir + JumpLand
 anim_climb.build()           # ciclo de escalada
 anim_helm.run()              # as duas variantes do timão (Helm + _HelmIntact)
+anim_carry.build()           # a tábua atravessada no corpo
+anim_float.build()           # boiando
+anim_swim.build()            # nadando
 export.run()                 # valida e exporta .blend / .fbx / .glb
 ```
+
+> [!note] O Blender aberto é conveniência, não requisito
+> O pipeline inteiro roda **sem tela**, e é assim que ele foi rodado nas últimas
+> rodadas — inclusive dois clipes sendo trabalhados ao mesmo tempo, em processos
+> separados, o que a instância única do addon não permitiria:
+>
+> ```sh
+> blender --background pirate_character.blend --python-expr "
+> import sys, os; sys.path.insert(0, os.path.join(os.getcwd(), 'scripts'))
+> import anim_float; print(anim_float.build()); print(anim_float.verify())"
+> ```
+>
+> A única parte que **exige** GUI é o `anim_preview.py`, que grava a viewport por
+> `render.opengl`. Para vídeo sem tela existe o `playblast.py`, que renderiza por
+> câmera ortográfica — e, de quebra, deixa o enquadramento escrito em vez de
+> herdado do `view_selected`, então dois clipes comparados usam a mesma régua.
 
 Depois de mexer na escalada, vale rodar as duas conferências — elas medem coisas
 diferentes e a primeira já mentiu uma vez:
@@ -458,11 +472,14 @@ O pipeline inteiro roda em **~60 segundos**.
 | `anim_gait.py` | Motor de marcha: IK, envoltória da sola, curva do corpo |
 | `anim_walk.py` | Os números que fazem a caminhada |
 | `anim_run.py` | Os números que fazem a corrida |
-| `anim_idle.py` | Parado no convés, respirando |
+| `anim_idle.py` | Parado no convés, respirando — três respirações contra dois balanços |
 | `anim_jump.py` | `JumpAir` (lido pela velocidade) + `JumpLand` |
 | `anim_climb.py` | Escalada: quatro contatos na grade de degraus do navio |
 | `anim_helm.py` | Timão: as mãos na grade de punhos da roda, lido pelo ângulo do leme |
-| `anim_preview.py` | Renderiza um ciclo em três vistas, para conferência |
+| `anim_float.py` | Boiando: eggbeater nas pernas, sculling nos braços, zero contato |
+| `anim_swim.py` | Nado: crawl de cabeça erguida, com a atitude do tronco **resolvida** |
+| `anim_preview.py` | Renderiza um ciclo em três vistas, para conferência — **precisa de GUI** |
+| `playblast.py` | MP4 e folha de contato por câmera, **sem GUI** — é o que roda em `--background` |
 | `export.py` | Checklist pré-export + FBX/GLB |
 | `preview.py` | Folhas de contato pra comparar com a referência |
 
@@ -496,8 +513,16 @@ olho" afundava a geometria dentro da cabeça e ela simplesmente sumia do render.
 
 ## ⚠️ Limitações conhecidas
 
-- **Faltam clipes.** Existem caminhada, corrida, parado, pulo, escalada e timão;
-  faltam o canhão e a bomba de porão.
+- **Faltam clipes.** Existem caminhada, corrida, parado, pulo, escalada, timão,
+  tábua, boia e nado; faltam o canhão e a bomba de porão.
+- **O `Idle` é o clipe mais pesado do GLB** — 487 KB dos 3,2 MB do arquivo. É o
+  preço direto de esconder o laço: alongar o ciclo para 9,6 s triplicou as chaves.
+  Encurtar devolve espaço e devolve o defeito junto.
+- **A gola do casaco raspa a barba no nado**, 0,74 cm. Não é do clipe: o `Walk`
+  publicado faz 0,81 e 1,01 nos mesmos pares. É a mesma herança de peso que a
+  escalada desenterrou, e o conserto é em `build_rig.py`, valendo para todos.
+- **O tricórnio nada junto.** Ninguém tira o chapéu para cair no mar, e no jogo
+  provavelmente vale escondê-lo na água.
 - **O timão não lê o ângulo absoluto do leme**, só a fase. Um timoneiro se
   escorando numa guinada a todo bordo exigiria um segundo clipe ou uma camada
   aditiva — e o motor não tem aditivo hoje.
