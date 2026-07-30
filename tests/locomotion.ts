@@ -895,124 +895,125 @@ export function runLocomotionTests(): TestReport {
     check('and whoever is outside the opening does not fall', controller.inWater ? 1 : 0, 0, 0, '');
   }
 
-  // 30. **E o portaló deixa passar — passando pela soleira.** Mesmo gesto, mesmo
-  //     tempo, um metro ao lado. O caminho tem três trechos e os três são medidos:
-  //     convés até a borda, **plataforma** por cima dos 28 cm que separam o costado
-  //     do pé da escada, e o vazio depois dela. Sem o trecho do meio o jogador cai
-  //     num buraco em cima da própria soleira desenhada, e a escada fica sem topo
-  //     alcançável a pé.
+  // 30. **And the gangway lets you through — by way of the sill.** The same gesture, the
+  //     same time, one meter to the side. The path has three stretches and all three are
+  //     measured: deck to the edge, **platform** over the 28 cm that separate the side from
+  //     the foot of the ladder, and the void after it. Without the middle stretch the
+  //     player falls into a hole on top of the drawn sill itself, and the ladder is left
+  //     with no top you can reach on foot.
   {
     const sillOuter = spec.topX - BOARDING_RUNG_RADIUS;
 
-    // A soleira é chão de verdade: parado em cima dela — do lado **de fora** da
-    // borda do convés, onde antes desta peça não havia nada — o corpo fica.
+    // The sill is real floor: standing on it — **outside** the deck's edge, where before
+    // this piece there was nothing — the body stays.
     const standing = atGangway(1);
     standing.local.x = (gangwayEdge + sillOuter) * 0.5;
     stepPlayer(standing, idleFrame(), 1);
-    check('a soleira do portaló é piso: o corpo para em cima dela',
+    check('the gangway sill is floor: the body stops on top of it',
       standing.local.y, spec.exitY, 1e-3, ' m');
-    check('e ela fica do lado de fora do costado',
+    check('and it sits outside the side',
       standing.local.x > gangwayEdge ? 1 : 0, 1, 0, '');
-    check('sem cair', standing.inWater ? 1 : 0, 0, 0, '');
+    check('without falling', standing.inWater ? 1 : 0, 0, 0, '');
 
-    // E ela acaba onde a malha acaba: meio metro além, não há mais nada.
+    // And it ends where the mesh ends: half a meter further, there is nothing.
     const controller = atGangway(1);
     stepPlayer(controller, walkForward(), 3);
-    check('pelo portaló o jogador atravessa e cai na água',
+    check('through the gangway the player crosses and falls into the water',
       controller.inWater ? 1 : 0, 1, 0, '');
-    check('e ele passou por fora da soleira, não só da borda do convés',
+    check('and he passed outside the sill, not just the edge of the deck',
       controller.local.x > sillOuter ? 1 : 0, 1, 0, '');
-    check('o portaló é o vão do plano da escada',
+    check('the gangway is the opening in the plane of the ladder',
       insideGangway(spec.z) && !insideGangway(spec.z + spec.gangwayHalfWidth + 0.5) ? 1 : 0,
       1, 0, '');
-    // ⚠️ A régua da soleira é espelhada de `HullGeometry.buildGangways`, e este é o
-    // caso que reprova se um dos dois lados mudar sem o outro.
-    check('e a soleira mede o que a malha desenha',
+    // ⚠️ The sill's ruler is mirrored from `HullGeometry.buildGangways`, and this is the
+    // case that fails if one of the two sides changes without the other.
+    check('and the sill measures what the mesh draws',
       sillOuter, 2.0412, 1e-3, ' m');
   }
 
-  // 31. **A queda até a água tem a duração da queda.** O tombadilho está 1,74 m
-  //     acima da linha d'água e o corpo entra na água quando os **pés** cruzam a
-  //     superfície, ou seja depois de cair essa altura. `√(2h/g)` são 0,596 s, e a
-  //     tolerância é um passo do jogo (a superfície é cruzada no meio de um passo,
-  //     não na borda dele) mais o tempo que o corpo leva para andar até a beirada.
+  // 31. **The fall to the water takes as long as the fall takes.** The quarterdeck is
+  //     1.74 m above the waterline and the body enters the water when its **feet** cross
+  //     the surface, that is after falling that height. `√(2h/g)` is 0.596 s, and the
+  //     tolerance is one game step (the surface is crossed in the middle of a step, not at
+  //     its edge) plus the time the body takes to walk to the edge.
   {
     const controller = atGangway(1);
     const { fall } = fallOverboard(controller, fakeShip(), flatSea());
 
-    // A tolerância é **derivada**, não escolhida, e ela tem duas parcelas de meio
-    // passo cada. A integração é discreta: o corpo cai `g·dt²·n(n+1)/2` em n
-    // passos, contra `g·t²/2` no contínuo, o que adianta o contato em meio passo.
-    // E a superfície é cruzada no **meio** de um passo, o que atrasa a detecção em
-    // até um passo. Somadas, uma vez e meia o passo do jogo.
+    // The tolerance is **derived**, not chosen, and it has two half-step parts. The
+    // integration is discrete: the body falls `g·dt²·n(n+1)/2` in n steps, against
+    // `g·t²/2` in the continuous case, which brings contact forward by half a step. And
+    // the surface is crossed in the **middle** of a step, which delays detection by up to
+    // one step. Added together, one and a half game steps.
     const expected = Math.sqrt((2 * QUARTERDECK_Y) / GRAVITY);
-    check('a queda do tombadilho até a água leva o que a gravidade cobra',
+    check('the fall from the quarterdeck to the water takes what gravity demands',
       fall, expected, 1.5 / 60, ' s');
   }
 
-  // 32. **Na água o corpo não afunda, e não é um grampo que o segura.** O vínculo é
-  //     um amortecedor contra a altura da onda, e amortecedor não ultrapassa o
-  //     alvo: o olho para em `SWIM_EYE_HEIGHT` acima da superfície e fica lá, com
-  //     ou sem tecla apertada. Dez segundos boiando e dez nadando, para cobrir os
-  //     dois — se houvesse deriva vertical, ela apareceria em vinte segundos.
+  // 32. **In the water the body does not sink, and it is not a clamp that holds it.** The
+  //     constraint is a damper against the wave's height, and a damper does not overshoot
+  //     its target: the eye stops at `SWIM_EYE_HEIGHT` above the surface and stays there,
+  //     with or without a key held. Ten seconds floating and ten swimming, to cover both —
+  //     if there were vertical drift, it would show up in twenty seconds.
   {
     const controller = atGangway(1);
     const ship = fakeShip();
     const waves = flatSea();
     fallOverboard(controller, ship, waves);
 
-    // Dois segundos para o vínculo assentar — ele é amortecido (λ = 8), e medir
-    // durante a convergência mediria o amortecedor. A altura de repouso **não** é
-    // um número escolhido: é o olho a `SWIM_EYE_HEIGHT` da superfície, com os pés
-    // um corpo abaixo dele.
+    // Two seconds for the constraint to settle — it is damped (λ = 8), and measuring
+    // during the convergence would measure the damper. The rest height is **not** a chosen
+    // number: it is the eye at `SWIM_EYE_HEIGHT` from the surface, with the feet one body
+    // below it.
     stepPlayer(controller, idleFrame(), 2, ship, waves);
     const floating = -(1.66 - 0.22);
-    check('boiando, os pés param um corpo abaixo da superfície',
+    check('floating, the feet stop one body below the surface',
       controller.local.y, floating, 1e-3, ' m');
 
-    // O olho é o que o jogador vê. Vem de `syncView` porque é ela que escreve a
-    // pose do **quadro**, que é a que a câmera lê; medir `local` provaria só a
-    // metade de dentro.
+    // The eye is what the player sees. It comes from `syncView` because that is what
+    // writes the **frame's** pose, which is the one the camera reads; measuring `local`
+    // would prove only the inner half.
     controller.syncView(1, 0, 0, ship);
-    check('e o olho fica pouco acima da linha d’água',
+    check('and the eye sits a little above the waterline',
       controller.eyeLocal.y, 0.22, 1e-3, ' m');
 
     stepPlayer(controller, idleFrame(), 10, ship, waves);
-    check('dez segundos boiando não afundam o corpo',
+    check('ten seconds floating do not sink the body',
       controller.local.y, floating, 1e-3, ' m');
     stepPlayer(controller, walkForward(), 10, ship, waves);
-    check('e dez nadando também não',
+    check('and ten swimming do not either',
       controller.local.y, floating, 1e-3, ' m');
   }
 
-  // 33. **A velocidade de nado é metade do passo.** Medida como distância por
-  //     tempo em regime, e não lendo a constante: entre a tecla e o avanço estão o
-  //     amortecimento de `AIR_CONTROL` e a reescrita de `local` a partir da
-  //     posição de mundo, e é a cadeia inteira que precisa entregar o número.
+  // 33. **The swimming speed is half the walking one.** Measured as distance over time in
+  //     steady state, and not by reading the constant: between the key and the movement sit
+  //     `AIR_CONTROL`'s damping and the rewrite of `local` from the world position, and it
+  //     is the whole chain that has to deliver the number.
   {
     const controller = atGangway(1);
     const ship = fakeShip();
     const waves = flatSea();
     fallOverboard(controller, ship, waves);
     const frame = walkForward();
-    // Cinco segundos para o amortecedor convergir (λ = 1,6 dá 0,03% de erro em 5 s),
-    // e só então começa a medir. Nadando para **fora** do navio, que é a direção em
-    // que o corpo caiu: nadar para dentro esbarraria no costado no meio da medida.
+    // Five seconds for the damper to converge (λ = 1.6 gives 0.03% of error in 5 s), and
+    // only then does it start measuring. Swimming **away** from the ship, which is the
+    // direction the body fell in: swimming toward it would run into the side in the middle
+    // of the measurement.
     stepPlayer(controller, frame, 5, ship, waves);
     const from = controller.local.clone();
     stepPlayer(controller, frame, 4, ship, waves);
     const swum = Math.hypot(controller.local.x - from.x, controller.local.z - from.z);
-    check('nadar cobre metade do que caminhar cobre', swum / 4, 2.8 / 2, 0.02, ' m/s');
+    check('swimming covers half of what walking covers', swum / 4, 2.8 / 2, 0.02, ' m/s');
   }
 
-  // 34. **A troca de dono da fase não muda a cadência.** Este caso nasceu provando
-  //     um empréstimo — enquanto `Float`/`Swim` não existiam no GLB, quem desenhava
-  //     o nado era o clipe de caminhada e `SWIM_DISTANCE` *era* a distância dele,
-  //     tomada de propósito para que a chegada dos clipes de verdade não mudasse
-  //     nada. Os clipes chegaram, e `anim_swim.py` mediu 1,32 m de ciclo por conta
-  //     própria: exatamente o mesmo número. O caso continua valendo palavra por
-  //     palavra, só que agora ele mede a **troca** em vez do empréstimo — a fase da
-  //     água e a da passada avançam juntas, quadro a quadro, na mesma velocidade.
+  // 34. **Handing the phase over does not change the cadence.** This case was born
+  //     proving a loan — while `Float`/`Swim` did not exist in the GLB, what drew the swim
+  //     was the walk clip and `SWIM_DISTANCE` *was* its distance, taken on purpose so that
+  //     the arrival of the real clips would change nothing. The clips arrived, and
+  //     `anim_swim.py` measured a 1.32 m cycle on its own: exactly the same number. The
+  //     case still holds word for word, only now it measures the **handover** instead of
+  //     the loan — the water's phase and the stride's advance together, frame by frame, at
+  //     the same speed.
   {
     const swim = new SwimClock();
     const gait = new GaitClock();
@@ -1022,28 +1023,27 @@ export function runLocomotionTests(): TestReport {
       gait.update(1 / 60, WALK_CLIP.speed, true);
     }
     const swum = (WALK_CLIP.speed * steps) / 60;
-    check('a braçada fecha uma volta a cada distância do ciclo',
+    check('the stroke closes one revolution every cycle distance',
       swim.phase, ((swum / SWIM_DISTANCE) % 1 + 1) % 1, 1e-9, '');
-    check('e a fase da água anda junto com a da passada que a desenhava',
+    check('and the water phase moves along with the stride that used to draw it',
       swim.phase, gait.phase, 1e-9, '');
-    check('porque as duas distâncias de ciclo são o mesmo número',
+    check('because the two cycle distances are the same number',
       SWIM_DISTANCE, WALK_DISTANCE, 1e-12, ' m');
-    check('nadando, a pose é braçada', swim.stroke, 1, 0.001, '');
-    check('e o peso da água chega a cheio', swim.weight, 1, 0.001, '');
+    check('swimming, the pose is a stroke', swim.stroke, 1, 0.001, '');
+    check('and the water weight reaches full', swim.weight, 1, 0.001, '');
 
     for (let i = 0; i < 120; i++) swim.update(1 / 60, true, 0);
-    check('parado na água, a pose vira boia', swim.stroke, 0, 0.001, '');
+    check('still in the water, the pose becomes a float', swim.stroke, 0, 0.001, '');
     for (let i = 0; i < 120; i++) swim.update(1 / 60, false, 0);
-    check('e sair do mar apaga o peso', swim.weight, 0, 0.001, '');
+    check('and leaving the sea puts out the weight', swim.weight, 0, 0.001, '');
   }
 
-  // 35. **A fase da escada de embarque casa com a grade de barras na subida
-  //     inteira.** É o mesmo teorema do caso 15, com a escada do costado: depois de
-  //     alinhar uma vez, a barra que o clipe manda a mão agarrar tem de coincidir
-  //     com um degrau desenhado do primeiro ao último. Só que aqui há duas coisas a
-  //     mais que podem sair errado, e as duas estão medidas: a escada é **inclinada**
-  //     (o corpo segue uma reta que se afasta do prumo) e o espaçamento **não foi
-  //     arredondado** (ver `BOARDING_RUNG_SPACING`).
+  // 35. **The boarding ladder's phase matches the grid of rungs over the whole climb.** It
+  //     is case 15's theorem again, with the side ladder: after aligning once, the rung the
+  //     clip tells the hand to grab has to coincide with a drawn rung from the first to the
+  //     last. Except that here there are two more things that can go wrong, and both are
+  //     measured: the ladder is **tilted** (the body follows a line that leans away from
+  //     plumb) and the spacing was **not rounded** (see `BOARDING_RUNG_SPACING`).
   {
     const aligned = new ClimbClock();
     let feet = spec.bottomY;
@@ -1060,58 +1060,58 @@ export function runLocomotionTests(): TestReport {
       const u = (held - spec.bottomY) / spec.rungSpacing;
       const fraction = ((u % 1) + 1) % 1;
       worstMiss = Math.max(worstMiss, Math.min(fraction, 1 - fraction) * spec.rungSpacing);
-      // E a reta que o corpo segue é a do plano dos degraus mais o afastamento,
-      // medido na perpendicular: 28,1 cm de recuo horizontal a 14,11° de prumo.
+      // And the line the body follows is the rungs' plane plus the standoff, measured
+      // perpendicular: 28.1 cm of horizontal setback at 14.11° from plumb.
       worstStand = Math.max(
         worstStand,
         Math.abs(boardingLadderStandX(spec, feet) - boardingLadderX(spec, feet) - 0.28125),
       );
     }
-    check('a mão cai na barra ao longo dos 2,43 m da escada de embarque',
+    check('the hand lands on a rung along the 2.43 m of boarding ladder',
       worstMiss, 0, 0.001, 'm');
-    check('e o corpo segue a reta inclinada, medida na perpendicular',
+    check('and the body follows the tilted line, measured perpendicular',
       worstStand, 0, 1e-4, 'm');
-    // A inclinação que o corpo assume é a da escada — sem ela o clipe vertical
-    // afasta a mão da barra proporcionalmente à altura do alcance.
-    check('a escada de embarque é inclinada 14,11°',
+    // The tilt the body takes is the ladder's — without it the vertical clip moves the
+    // hand off the rung in proportion to the height of the reach.
+    check('the boarding ladder is tilted 14.11°',
       (spec.tilt * 180) / Math.PI, 14.110, 0.01, '°');
   }
 
-  // 36. **Da água ao tombadilho, de pé.** O percurso inteiro num laço só: cair,
-  //     nadar até a escada, agarrar e subir. O que se cobra no fim é o que o
-  //     jogador vê — ele está **em cima do convés**, no plano do timão, e não
-  //     pendurado nem na água.
+  // 36. **From the water to the quarterdeck, on his feet.** The whole route in one loop:
+  //     fall, swim to the ladder, grab on and climb. What is demanded at the end is what
+  //     the player sees — he is **on top of the deck**, at the helm's level, and neither
+  //     hanging nor in the water.
   {
     const controller = atGangway(1);
     const ship = fakeShip();
     const waves = flatSea();
     fallOverboard(controller, ship, waves);
-    check('caiu na água antes de tentar subir', controller.inWater ? 1 : 0, 1, 0, '');
+    check('he fell into the water before trying to climb', controller.inWater ? 1 : 0, 1, 0, '');
 
-    // Nada de volta para o casco: a queda leva o corpo uns dois metros para fora, e
-    // é o jogador quem tem de voltar. Virar o rumo é virar a cabeça — na água o
-    // nado segue o olhar, como no convés.
+    // He swims back to the hull: the fall carries the body a couple of meters out, and it
+    // is the player who has to come back. Turning the heading is turning the head — in the
+    // water the swim follows the gaze, as on deck.
     controller.yaw = Math.PI / 2;
     stepPlayer(controller, walkForward(), 3, ship, waves);
-    check('nadando de volta, o costado o para em vez de o deixar entrar',
+    check('swimming back, the side stops him instead of letting him in',
       Math.abs(controller.local.x) >= halfWidthAtHeight(zToT(controller.local.z), 0) ? 1 : 0,
       1, 0, '');
 
     const reachable = controller.reachableBoardingLadder();
-    check('e a escada do bordo fica ao alcance da mão',
+    check('and the ladder on that side is within reach',
       reachable ? 1 : 0, 1, 0, '');
     if (reachable) controller.grabBoardingLadder(reachable);
-    check('agarrar tira o corpo da água', controller.inWater ? 1 : 0, 0, 0, '');
-    check('e o põe pendurado na escada', controller.onLadder ? 1 : 0, 1, 0, '');
-    check('com o corpo inclinado como ela',
+    check('grabbing on takes the body out of the water', controller.inWater ? 1 : 0, 0, 0, '');
+    check('and hangs him on the ladder', controller.onLadder ? 1 : 0, 1, 0, '');
+    check('with the body tilted like it',
       controller.ladderTilt, spec.tilt, 1e-9, ' rad');
-    check('e virado para o bordo dela',
+    check('and facing its side',
       controller.ladderFacing, -Math.PI / 2, 1e-9, ' rad');
 
-    // Sobe até deixar de estar pendurado, e não por um tempo fixo: são 2,43 m a
-    // `CLIMB_SPEED`, mas o que se cobra é o **fim** da subida. Solta a tecla logo
-    // em seguida porque, de pé no tombadilho, "para vante" com este rumo é
-    // caminhar de volta para fora pelo mesmo portaló.
+    // He climbs until he is no longer hanging, and not for a fixed time: it is 2.43 m at
+    // `CLIMB_SPEED`, but what is demanded is the **end** of the climb. The key is released
+    // right afterward because, standing on the quarterdeck, "forward" at this heading is
+    // walking back out through the same gangway.
     const climb = walkForward();
     for (let i = 0; i < 600 && controller.onLadder; i++) {
       controller.fixedUpdate(1 / 60, climb, ship, waves);
@@ -1119,130 +1119,131 @@ export function runLocomotionTests(): TestReport {
     stepPlayer(controller, idleFrame(), 0.5, ship, waves);
 
     const exitX = Math.abs(controller.local.x);
-    // No nível do tombadilho: a soleira é rasada com ele, e a folga de 2 mm é o
-    // abaulamento do convés, que vale quase zero na borda.
-    check('a subida termina de pé no nível do tombadilho',
+    // At the quarterdeck's level: the sill is flush with it, and the 2 mm of slack is the
+    // deck's camber, which is worth almost nothing at the edge.
+    check('the climb ends standing at the level of the quarterdeck',
       controller.local.y, spec.exitY, 5e-3, ' m');
-    check('de pé, e não pendurado', controller.onLadder ? 1 : 0, 0, 0, '');
-    check('nem de volta na água', controller.inWater ? 1 : 0, 0, 0, '');
-    check('e com os pés no chão', controller.grounded ? 1 : 0, 1, 0, '');
-    // Um raio para dentro do fio da tábua — o mais para fora que o corpo cabe sem
-    // o cilindro passar dela. Como a soleira só avança 28 cm além da borda do
-    // convés e o cilindro tem 30 cm de raio, "inteiro em cima da tábua" não existe:
-    // o corpo fica **a cavalo da junta**, metade em cada piso. É exatamente o que
-    // se faz ao transpor a soleira de um portaló de verdade.
-    check('com o corpo a cavalo da junta entre a soleira e o convés',
+    check('standing, and not hanging', controller.onLadder ? 1 : 0, 0, 0, '');
+    check('nor back in the water', controller.inWater ? 1 : 0, 0, 0, '');
+    check('and with his feet on the floor', controller.grounded ? 1 : 0, 1, 0, '');
+    // One radius inside the board's edge — the furthest out the body fits without the
+    // cylinder going past it. Since the sill only reaches 28 cm beyond the deck's edge and
+    // the cylinder has a 30 cm radius, "entirely on the board" does not exist: the body
+    // sits **astride the joint**, half on each floor. It is exactly what you do when
+    // stepping over a real gangway's sill.
+    check('with the body astride the joint between the sill and the deck',
       exitX, spec.topX - BOARDING_RUNG_RADIUS - 0.3, 1e-3, ' m');
-    // E de lá dá para entrar no navio a pé, que é o que a soleira existe para
-    // permitir: um passo para dentro e o piso vira convés.
+    // And from there you can walk into the ship, which is what the sill exists to allow:
+    // one step inboard and the floor becomes deck.
     stepPlayer(controller, walkForward(), 0.6, ship, waves);
-    check('e daí um passo o leva para dentro do costado',
+    check('and from there one step takes him inside the side',
       Math.abs(controller.local.x) < gangwayEdge ? 1 : 0, 1, 0, '');
   }
 
-  // 37. **O relógio do resgate.** Cinco segundos, contados do instante em que o
-  //     corpo entra na água — e zerados por sair dela, que é a parte que importa:
-  //     quem sobe a escada e cai de novo não chega ao socorro com crédito da queda
-  //     anterior. E o resgate acontecendo põe o marujo de volta no ponto de partida.
+  // 37. **The rescue clock.** Five seconds, counted from the instant the body enters the
+  //     water — and reset by leaving it, which is the part that matters: whoever climbs the
+  //     ladder and falls in again does not reach the rescue with credit from the previous
+  //     fall. And the rescue happening puts the sailor back at the starting point.
   {
     const controller = atGangway(1);
     const ship = fakeShip();
     const waves = flatSea();
     fallOverboard(controller, ship, waves);
     const entered = controller.waterTime;
-    // Nasce no passo do tombo, e não antes: o relógio conta água, não queda.
-    check('o relógio da água nasce no tombo', entered, 0, 1e-9, ' s');
+    // It is born on the step of the fall, and not before: the clock counts water, not
+    // falling.
+    check('the water clock is born at the fall', entered, 0, 1e-9, ' s');
 
-    // Até um passo antes dos cinco segundos, nada de socorro.
+    // Until one step short of five seconds, no rescue.
     stepPlayer(controller, idleFrame(), 5 - entered - 2 / 60, ship, waves);
-    check('antes de cinco segundos não há resgate',
+    check('before five seconds there is no rescue',
       controller.canRequestRescue() ? 1 : 0, 0, 0, '');
     stepPlayer(controller, idleFrame(), 4 / 60, ship, waves);
-    check('e a partir deles há', controller.canRequestRescue() ? 1 : 0, 1, 0, '');
-    check('com o relógio em cinco segundos', controller.waterTime, 5, 0.04, ' s');
+    check('and from then on there is', controller.canRequestRescue() ? 1 : 0, 1, 0, '');
+    check('with the clock at five seconds', controller.waterTime, 5, 0.04, ' s');
 
     const before = controller.rescueCount;
     controller.requestRescue();
-    check('o pedido conta uma borda para o apagão da tela',
+    check('the request counts one edge for the screen blackout',
       controller.rescueCount - before, 1, 0, '');
-    check('e devolve o marujo ao navio', controller.inWater ? 1 : 0, 0, 0, '');
-    check('no ponto de partida', controller.local.z, 1.2, 1e-9, ' m');
-    check('com o relógio da água zerado', controller.waterTime, 0, 1e-9, ' s');
+    check('and returns the sailor to the ship', controller.inWater ? 1 : 0, 0, 0, '');
+    check('at the starting point', controller.local.z, 1.2, 1e-9, ' m');
+    check('with the water clock reset', controller.waterTime, 0, 1e-9, ' s');
   }
 
-  // 38. **O náufrago do outro lado boia, e não nada.** O corpo remoto recebe só
-  //     posições, e na água aquelas posições são do **navio**, que está indo
-  //     embora: um adversário parado boiando tem o `local` correndo para a popa a
-  //     2,6 m/s. Alimentar o relógio da água com esse número o põe em braçada de
-  //     crawl pelo mar sem sair do lugar — e é exatamente o que acontece sem a soma
-  //     com a velocidade do casco. O caso monta os dois lados: casco a 2,6 m/s para
-  //     vante, corpo parado no mundo.
+  // 38. **The castaway on the other side floats, he does not swim.** The remote body
+  //     receives only positions, and in the water those positions are the **ship's**, which
+  //     is leaving: an opponent floating still has his `local` running aft at 2.6 m/s.
+  //     Feeding the water clock that number puts him doing a crawl across the sea without
+  //     going anywhere — and that is exactly what happens without adding the hull's
+  //     velocity. The case sets up both sides: hull at 2.6 m/s forward, body still in the
+  //     world.
   //
-  //     ⚠️ **A grandeza medida é a do relógio da água, e não a da passada.**
-  //     Enquanto os clipes de água não existiam, era o `GaitClock` que recebia a
-  //     velocidade de nado e desenhava o mar; hoje ele recebe zero na água por
-  //     construção (ver `updateBob`), e quem carrega a velocidade derivada é o
-  //     `SwimClock`. Medir `gait.speed` aqui passaria de graça e não provaria nada.
+  //     ⚠️ **The quantity measured is the water clock's, and not the stride's.** While the
+  //     water clips did not exist, it was `GaitClock` that received the swimming speed and
+  //     drew the sea; today it receives zero in the water by construction (see
+  //     `updateBob`), and what carries the derived speed is `SwimClock`. Measuring
+  //     `gait.speed` here would pass for free and prove nothing.
   {
     const controller = new PlayerController();
     controller.spawn();
     const pose = remotePose(controller);
     pose.inWater = true;
     const ship = fakeShip();
-    // O casco avança para −Z, que é para vante no referencial dele.
+    // The hull moves toward −Z, which is forward in its own frame.
     (ship.body as unknown as { velocity: THREE.Vector3 }).velocity = {
       x: 0,
       y: 0,
       z: -2.6,
     } as THREE.Vector3;
 
-    // Parado no mundo: o corpo anda para +Z **no navio** exatamente o que o navio
-    // anda para −Z no mundo. Com o casco sem guinar, as duas contas se cancelam.
+    // Still in the world: the body moves toward +Z **on the ship** exactly as much as the
+    // ship moves toward −Z in the world. With the hull not yawing, the two cancel out.
     for (let i = 0; i < 120; i++) {
       pose.local.z += 2.6 / 60;
       controller.applyRemoteStep(1 / 60, pose, ship);
     }
-    check('o náufrago do outro lado não nada parado',
+    check('the castaway on the other side does not swim in place',
       controller.swim.speed, 0, 1e-9, ' m/s');
-    check('e a passada dele fica fora da água', controller.gait.moving, 0, 0.001, '');
-    check('com a água ocupando o corpo', controller.swim.weight, 1, 0.001, '');
-    check('em pose de boia', controller.swim.stroke, 0, 0.001, '');
+    check('and his stride stays out of the water', controller.gait.moving, 0, 0.001, '');
+    check('with the water taking the body', controller.swim.weight, 1, 0.001, '');
+    check('in a floating pose', controller.swim.stroke, 0, 0.001, '');
 
-    // E nadando de verdade — 1,4 m/s no mundo, ou seja 4,0 m/s no navio — a pose
-    // volta a ser braçada, na velocidade certa.
+    // And swimming for real — 1.4 m/s in the world, that is 4.0 m/s on the ship — the pose
+    // goes back to being a stroke, at the right speed.
     for (let i = 0; i < 120; i++) {
       pose.local.z += (2.6 + 1.4) / 60;
       controller.applyRemoteStep(1 / 60, pose, ship);
     }
-    check('e nadando ele nada na velocidade de nado',
+    check('and swimming he swims at swimming speed',
       controller.swim.speed, 1.4, 1e-9, ' m/s');
-    check('com a pose voltando a ser braçada', controller.swim.stroke, 1, 0.001, '');
-    check('e a passada continuando fora dela', controller.gait.speed, 0, 1e-12, ' m/s');
+    check('with the pose going back to a stroke', controller.swim.stroke, 1, 0.001, '');
+    check('and the stride staying out of it', controller.gait.speed, 0, 1e-12, ' m/s');
   }
 
-  // 39. **O referencial em que a reconciliação compara o nadador.**
+  // 39. **The frame the reconciliation compares the swimmer in.**
   //
-  //     Este é o único caso deste arquivo que fala de rede, e ele está aqui porque
-  //     a grandeza que ele mede é do corpo, não do fio: é a **diferença entre duas
-  //     contas de posição feitas com poses de casco diferentes**.
+  //     This is the only case in this file that talks about the network, and it is here
+  //     because the quantity it measures belongs to the body, not to the wire: it is the
+  //     **difference between two position computations made with different hull poses**.
   //
-  //     No convés isso nunca existiu. O `local` de quem anda não lê a pose do casco
-  //     para nada — o convés é um chão parado —, então host e guest chegam ao mesmo
-  //     número por caminhos independentes e comparar local contra local é honesto.
-  //     A água é a **primeira** coisa desta base cujo cálculo de posição depende
-  //     numericamente do `ship.body`: o `local` do nadador *é* a posição de mundo
-  //     convertida pela pose do casco. E as duas poses não são a mesma — o host usa
-  //     a real, o guest usa a interpolada da rede, atrasada de `lead +
-  //     INTERP_DELAY` passos. Duas posições de mundo idênticas viram `local`
-  //     diferentes, e a reconciliação enxergava um erro que **não existe no mundo**.
+  //     On deck that never existed. The `local` of whoever walks does not read the hull's
+  //     pose at all — the deck is still ground —, so host and guest arrive at the same
+  //     number by independent paths and comparing local against local is honest. The water
+  //     is the **first** thing in this codebase whose position computation depends
+  //     numerically on `ship.body`: the swimmer's `local` *is* the world position converted
+  //     by the hull's pose. And the two poses are not the same — the host uses the real one,
+  //     the guest uses the one interpolated from the network, delayed by
+  //     `lead + INTERP_DELAY` steps. Two identical world positions become different
+  //     `local`s, and the reconciliation saw an error that **does not exist in the world**.
   //
-  //     O caso mede o viés com o navio **guinando**, que é onde ele cresce com a
-  //     distância — e o cenário do recurso é exatamente ficar para trás enquanto o
-  //     navio segue navegando.
+  //     The case measures the bias with the ship **yawing**, which is where it grows with
+  //     the distance — and the feature's scenario is precisely being left behind while the
+  //     ship sails on.
   {
-    // Espelham `GuestSession`, como `PROTOCOL_VERSION` espelha o protocolo em
-    // `roomServer.mjs`: repetidos à mão para que uma mudança lá tenha de passar
-    // por aqui em vez de concordar por construção.
+    // These mirror `GuestSession`, as `PROTOCOL_VERSION` mirrors the protocol in
+    // `roomServer.mjs`: repeated by hand so that a change over there has to come through
+    // here instead of agreeing by construction.
     const ERROR_IGNORE = 0.08;
     const ERROR_SNAP = 1.5;
     const SHIP_SPEED = 2.6;
@@ -1254,15 +1255,15 @@ export function runLocomotionTests(): TestReport {
       addedMass: new THREE.Vector3(1.9, 1.9, 1.05),
     });
 
-    /** Põe o casco na pose que ele tinha `lag` segundos antes de agora. */
+    /** Puts the hull in the pose it had `lag` seconds before now. */
     const poseAt = (lag: number, omega: number): void => {
       body.comPosition.set(0, 0, SHIP_SPEED * lag);
       body.orientation.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -omega * lag);
     };
 
     /**
-     * O viés entre a conta do host (pose de agora) e a do guest (pose atrasada),
-     * para um náufrago parado no mundo a `distance` metros a ré.
+     * The bias between the host's computation (the pose of now) and the guest's (the
+     * delayed pose), for a castaway sitting still in the world `distance` meters astern.
      */
     const bias = (distance: number, omega: number, lagSteps: number): number => {
       const swimmer = new THREE.Vector3(0, 0, distance);
@@ -1275,17 +1276,18 @@ export function runLocomotionTests(): TestReport {
       return host.distanceTo(guest);
     };
 
-    // Sem guinar, o viés é só a translação do casco no atraso — e **não depende da
-    // distância**. Treze passos são 217 ms, o atraso de uma conexão boa (lead 9
-    // mais os 4 de interpolação).
-    // Sem guinar o viés é exatamente a translação do casco no atraso: é a conta
-    // fechada, e casá-la é o que prova que o modelo do teste é o do jogo.
+    // With no yaw, the bias is only the hull's translation over the delay — and it **does
+    // not depend on the distance**. Thirteen steps is 217 ms, the delay of a good
+    // connection (lead 9 plus the 4 of interpolation).
+    //
+    // With no yaw the bias is exactly the hull's translation over the delay: it is the
+    // closed-form answer, and matching it is what proves the test's model is the game's.
     const straight = bias(0, 0, 13);
-    check('o viés de referencial é a translação do casco no atraso',
+    check('the frame bias is the translation of the hull over the delay',
       straight, SHIP_SPEED * (13 / 60), 1e-9, ' m');
-    check('e ele nasce muito acima da faixa que a reconciliação ignora',
+    check('and it is born far above the band the reconciliation ignores',
       straight > ERROR_IGNORE ? 1 : 0, 1, 0, '');
-    check('quantas vezes acima', straight / ERROR_IGNORE, 7.042, 0.01, '×');
+    check('how many times above', straight / ERROR_IGNORE, 7.042, 0.01, '×');
 
     // Guinando, ele cresce com o raio — que é o que o cenário produz sozinho: a
     // 2,6 m/s o náufrago está 26 m atrás em dez segundos, e o resgate só abre aos
